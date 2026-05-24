@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Alber — Prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; height:100%; background:#0a0a0a; font-family:'Inter', system-ui, sans-serif; -webkit-font-smoothing:antialiased; }
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh;
+    background: radial-gradient(ellipse at 50% 30%, #1a1a1a 0%, #050505 70%);
+  }
+  #root { display:flex; align-items:center; justify-content:center; }
+  @keyframes pop { 0% { transform: scale(0.7); opacity:0; } 60% { transform:scale(1.05); } 100% { transform:scale(1); opacity:1; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes shake { 0%,100% { transform:translateX(0);} 20%,60% { transform:translateX(-6px);} 40%,80% { transform:translateX(6px);} }
+  input::placeholder { color: rgba(255,255,255,0.3); }
+  /* hide chrome scrollbars in scroll regions */
+  *::-webkit-scrollbar { width:0; height:0; }
+</style>
+</head>
+<body>
+<template id="__bundler_thumbnail" data-bg-color="#000000">
+  <svg viewBox="0 0 1200 800" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1200" height="800" fill="#000"/>
+    <g transform="translate(600 400) scale(0.55) translate(-370 -350)">
+      <path d="M 90 80 L 280 80 L 380 320 L 480 80 L 670 80 L 670 620 L 540 620 L 540 270 L 440 510 L 330 510 L 230 270 L 230 620 L 90 620 Z" fill="#fff"/>
+      <circle cx="380" cy="700" r="22" fill="#5BCEC9"/>
+    </g>
+  </svg>
+</template>
+<div id="root" data-screen-label="01 Alber Prototype"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="logo.js"></script>
+<script type="text/babel" src="tokens.jsx"></script>
+<script type="text/babel" src="primitives.jsx"></script>
+<script type="text/babel" src="pin.jsx"></script>
+<script type="text/babel" src="flows1.jsx"></script>
+<script type="text/babel" src="flow-transferir.jsx"></script>
+<script type="text/babel" src="flows-split.jsx"></script>
+<script type="text/babel" src="flows-rest.jsx"></script>
+<script type="text/babel" src="auth.jsx"></script>
+<script type="text/babel" src="auth-login.jsx"></script>
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="app.jsx"></script>
+</body>
+</html>

@@ -2,18 +2,19 @@
   "expo": {
     "name": "alber",
     "slug": "alber",
+    "scheme": "alber",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.usealber.app"
     },
     "android": {
       "package": "com.usealber.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#000000",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -21,12 +22,18 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
     },
     "extra": {
       "eas": {
         "projectId": "09c61d46-dc49-404b-bd3d-4923f31789b5"
       }
-    }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-screen-capture"
+    ]
   }
 }

@@ -1,0 +1,174 @@
+{
+  "auth": {
+    "splash": {
+      "tagline": "USE ALBER"
+    },
+    "welcome": {
+      "login": "Fazer login",
+      "signup": "Cadastrar-se"
+    },
+    "onboarding": {
+      "header": "CRIAR CONTA",
+      "step": "{{current}}/{{total}}",
+      "continue": "Continuar",
+      "dados": {
+        "title": "Dados pessoais",
+        "subtitle": "Suas informações ficam protegidas e são usadas apenas para criar sua conta.",
+        "name": "Nome completo",
+        "namePlaceholder": "Seu nome e sobrenome",
+        "nameError": "Informe nome e sobrenome",
+        "cpf": "CPF",
+        "cpfPlaceholder": "000.000.000-00",
+        "cpfError": "CPF inválido",
+        "cpfDuplicate": "Este CPF já possui uma conta.",
+        "cpfDuplicateCta": "Recuperar acesso?",
+        "birth": "Data de nascimento",
+        "birthPlaceholder": "DD/MM/AAAA",
+        "birthHint": "Mínimo 18 anos",
+        "birthError": "Data incompleta",
+        "email": "E-mail",
+        "emailPlaceholder": "seu@email.com",
+        "emailError": "E-mail inválido",
+        "phone": "Celular",
+        "phonePlaceholder": "(00) 00000-0000",
+        "phoneError": "Telefone incompleto"
+      },
+      "endereco": {
+        "title": "Endereço",
+        "subtitle": "Informações exigidas pela Receita Federal para abertura da conta.",
+        "cep": "CEP",
+        "cepPlaceholder": "00000-000",
+        "cepFound": "Endereço encontrado",
+        "street": "Endereço",
+        "streetPlaceholder": "Rua, avenida…",
+        "number": "Número",
+        "numberPlaceholder": "123",
+        "complement": "Complemento",
+        "complementPlaceholder": "Opcional",
+        "neighborhood": "Bairro",
+        "city": "Cidade",
+        "state": "UF"
+      },
+      "handle": {
+        "title": "Escolha seu @handle",
+        "subtitle": "É como você será encontrado e identificado no Alber. Mín 3, máx 20 caracteres.",
+        "label": "SEU @HANDLE",
+        "placeholder": "seuhandle",
+        "hint": "Letras, números e underscore",
+        "checking": "Verificando disponibilidade…",
+        "available": "@handle disponível",
+        "taken": "Este @handle já está em uso",
+        "invalid": "Use letras, números e _",
+        "tooShort": "Mínimo 3 caracteres",
+        "suggestions": "SUGESTÕES"
+      },
+      "pin": {
+        "create": {
+          "title": "Crie seu PIN",
+          "subtitle": "Será solicitado em transações. 6 dígitos, sem sequências óbvias."
+        },
+        "confirm": {
+          "title": "Confirme seu PIN",
+          "subtitle": "Digite novamente para confirmar."
+        },
+        "screenshotBlocked": "SCREENSHOT BLOQUEADA",
+        "obvious": "Evite sequências óbvias. Escolha outra combinação.",
+        "mismatch": "Os PINs não coincidem. Comece novamente."
+      },
+      "seguranca": {
+        "title": "Perguntas de segurança",
+        "subtitle": "Usadas para confirmar sua identidade em operações sensíveis e recuperação de PIN. Escolha 4 perguntas distintas.",
+        "questionLabel": "PERGUNTA {{n}}",
+        "selectQuestion": "Selecione uma pergunta",
+        "answerPlaceholder": "Sua resposta"
+      },
+      "pix": {
+        "title": "Chave Pix",
+        "subtitle": "Esta é a conta que receberá seus saques do Alber. Deve estar no seu CPF.",
+        "cpf": "CPF",
+        "phone": "Telefone",
+        "email": "E-mail",
+        "random": "Aleatória",
+        "cpfHint": "Preenchida automaticamente. Não pode ser alterada.",
+        "randomHint": "Gerada automaticamente. Você pode usar essa chave em outros bancos.",
+        "cpfLabel": "Chave (CPF)",
+        "phoneLabel": "Chave (telefone)",
+        "emailLabel": "Chave (e-mail)",
+        "randomLabel": "Chave aleatória"
+      },
+      "terms": {
+        "header": "QUASE LÁ",
+        "title": "Termos e privacidade",
+        "subtitle": "Para criar sua conta, leia e aceite os documentos abaixo.",
+        "uso": "Li e aceito os {{link_uso}}",
+        "termsOfUse": "Termos de Uso",
+        "privacy": "Li e aceito a {{link_priv}}",
+        "privacyPolicy": "Política de Privacidade",
+        "majority": "Declaro ter mais de 18 anos e que as informações fornecidas são verdadeiras",
+        "create": "Criar minha conta",
+        "close": "Fechar"
+      },
+      "creating": {
+        "step1": "Criando sua conta…",
+        "step2": "Verificando seus dados…",
+        "step3": "Quase pronto…",
+        "step4": "Bem-vindo ao Alber!"
+      }
+    },
+    "login": {
+      "header": "ENTRAR",
+      "title": "Bem-vindo de volta",
+      "subtitle": "Entre com seu CPF ou @handle para continuar.",
+      "identifierLabel": "CPF ou @handle",
+      "identifierPlaceholder": "000.000.000-00 ou @handle",
+      "continue": "Continuar",
+      "noAccount": "Não tem conta?",
+      "signup": "Cadastrar-se",
+      "pinTitle": "Digite seu PIN",
+      "forgotPin": "Esqueci meu PIN",
+      "usealber": "USE ALBER"
+    },
+    "security": {
+      "header": "SEGURANÇA",
+      "title": "Confirme sua identidade",
+      "cancel": "Cancelar",
+      "attempt": "Tentativa {{n}} de {{max}}.",
+      "blocked": "Conta bloqueada por 15 minutos."
+    },
+    "recovery": {
+      "header": "RECUPERAR PIN",
+      "step0": {
+        "title": "Esqueci meu PIN",
+        "subtitle": "Vamos recuperar seu acesso. Informe seu CPF ou @handle para começar."
+      },
+      "step1": {
+        "title": "Confirme sua identidade"
+      },
+      "step2Channel": {
+        "title": "Como prefere receber o código?",
+        "subtitle": "Enviaremos um código de 6 dígitos para confirmar.",
+        "sms": "SMS",
+        "email": "E-mail"
+      },
+      "step2Code": {
+        "title": "Insira o código",
+        "subtitle": "Enviamos um código de 6 dígitos para {{dest}}. Válido por 10 minutos.",
+        "resendIn": "Reenviar código em {{s}}s",
+        "resend": "Reenviar código"
+      },
+      "step3Create": {
+        "title": "Crie um novo PIN",
+        "subtitle": "6 dígitos. Não pode ser igual ao anterior nem usar sequências óbvias."
+      },
+      "step3Confirm": {
+        "title": "Confirme o novo PIN",
+        "subtitle": "Digite novamente para confirmar."
+      },
+      "success": {
+        "title": "PIN atualizado",
+        "body": "Por segurança, todas as suas sessões ativas foram encerradas. Faça login novamente.",
+        "cta": "Fazer login"
+      }
+    }
+  }
+}

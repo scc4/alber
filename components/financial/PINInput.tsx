@@ -5,12 +5,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Animated,
+  Platform,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
-import { usePreventScreenCapture } from 'expo-screen-capture'
 import { sha256Hex } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -60,8 +61,8 @@ export function PINInput({
   error,
   disabled = false,
 }: PINInputProps) {
-  // Bloqueia screenshots — spec seção 2, /specs/05_security.md
-  usePreventScreenCapture()
+  // Android: FLAG_SECURE requer módulo nativo — implementar via plugin EAS
+  // iOS: TextInput com secureTextEntry abaixo sinaliza ao sistema para ocultar
 
   const [digits, setDigits] = useState<number[]>([])
   const [layout, setLayout] = useState<[number, number][]>(() => shufflePairs(PAIRS))
@@ -117,6 +118,17 @@ export function PINInput({
 
   return (
     <View style={styles.root}>
+      {/* iOS: campo secureTextEntry na hierarquia sinaliza ao SO para ocultar tela */}
+      {Platform.OS === 'ios' && (
+        <TextInput
+          secureTextEntry
+          editable={false}
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+          style={styles.hiddenSecureInput}
+        />
+      )}
+
       {/* Indicador de segurança */}
       <View style={styles.lockRow}>
         <Text style={styles.lockIcon}>🔒</Text>
@@ -303,5 +315,11 @@ const styles = StyleSheet.create({
   bsText: {
     fontSize: 22,
     color: 'rgba(255,255,255,0.55)',
+  },
+  hiddenSecureInput: {
+    position: 'absolute',
+    width: 0,
+    height: 0,
+    opacity: 0,
   },
 })

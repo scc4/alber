@@ -170,5 +170,82 @@
         "cta": "Fazer login"
       }
     }
+  },
+  "home": {
+    "greeting": {
+      "morning": "Bom dia,",
+      "afternoon": "Boa tarde,",
+      "evening": "Boa noite,"
+    },
+    "notifications": "Notificações",
+    "balance": {
+      "label": "Seu saldo",
+      "unit": "Albers",
+      "carregarMais": "+ Carregar mais",
+      "hide": "Ocultar saldo",
+      "show": "Exibir saldo",
+      "error": "Erro ao carregar saldo",
+      "retry": "Tentar novamente"
+    },
+    "lounge": {
+      "label": "Seu Lounge atual"
+    },
+    "actions": {
+      "receber": "Receber",
+      "carregar": "Carregar",
+      "carregarKyc": "Verificação necessária",
+      "transferir": "Transferir",
+      "split": "Split"
+    },
+    "banners": {
+      "kycPending": "Verificação pendente para carregar",
+      "kycSubmitted": "Verificação em análise — até 24h",
+      "kycRejected": "Verificação reprovada — reenvie documentos",
+      "evaluation": "Conta em avaliação — limite R$ 2.000 restantes",
+      "splitExpired": "Splits expirados aguardando prestação de contas",
+      "verifyCta": "Verificar →",
+      "statusCta": "Ver status →",
+      "resendCta": "Reenviar →",
+      "learnMoreCta": "Saiba mais",
+      "splitsCta": "Ver Splits"
+    }
+  },
+  "carregar": {
+    "tabCarregar": "Carregar",
+    "tabDescarregar": "Descarregar",
+    "subtitleValue": "Definir valor",
+    "subtitleQr": "Pague o Pix",
+    "subtitleConfirm": "Revisar saída",
+    "amountLabel": "Valor em reais",
+    "shortcutsLabel": "Atalhos",
+    "warningCarregar": "Pague apenas de conta no seu CPF. Pix de outros titulares são devolvidos automaticamente.",
+    "warningDescarregar": "O Pix será enviado para sua chave cadastrada. Mesma titularidade obrigatória.",
+    "generateQr": "Gerar QR Code",
+    "continue": "Continuar",
+    "cancel": "Cancelar",
+    "back": "Voltar",
+    "conclude": "Concluir",
+    "qr": {
+      "valueLabel": "VALOR",
+      "expiresIn": "Expira em {{time}}",
+      "cpfLabel": "CPF {{cpf}}",
+      "copyCode": "Copiar código",
+      "share": "Compartilhar",
+      "expiredLabel": "QR Code expirado",
+      "generateNew": "Gerar novo QR Code"
+    },
+    "confirm": {
+      "amountLabel": "Valor",
+      "feeLabel": "Taxa",
+      "netLabel": "Você recebe",
+      "keyLabel": "Para chave"
+    },
+    "successCarregar": "R$ {{amount}} carregados",
+    "successDescarregar": "R$ {{amount}} enviados",
+    "successDetailCarregar": "Saldo creditado em Albers",
+    "successDetailDescarregar": "Pix concluído para sua chave",
+    "kycBlockedTitle": "Verificação necessária",
+    "kycBlockedBody": "Complete a verificação de identidade para carregar e descarregar Albers.",
+    "kycBlockedCta": "Verificar agora"
   }
 }

@@ -1,11 +1,12 @@
 // Design: /design/auth.jsx — WelcomeScreen
 // Logo + tagline + dois CTAs: Cadastrar-se | Fazer login
 
-import { Image, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
+import { AlberLogo } from '../../components/core/AlberLogo'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
@@ -18,11 +19,7 @@ export default function WelcomeScreen() {
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       {/* Centro — logo + tagline */}
       <View style={styles.center}>
-        <Image
-          source={require('../../assets/icon.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        <AlberLogo size={72} />
         <Text style={styles.tagline}>{t('auth.splash.tagline')}</Text>
       </View>
 
@@ -56,10 +53,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.md,
   },
-  logo: {
-    width: 72,
-    height: 72,
-  },
+  logo: {},
   tagline: {
     fontSize: 11,
     letterSpacing: 0.32 * 11,

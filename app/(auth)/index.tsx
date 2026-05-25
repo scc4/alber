@@ -3,10 +3,11 @@
 // Mock: sempre redireciona para welcome após 1400ms
 
 import { useEffect, useRef } from 'react'
-import { Animated, Image, StyleSheet, Text, View } from 'react-native'
+import { Animated, StyleSheet, Text, View } from 'react-native'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import { AlberLogo } from '../../components/core/AlberLogo'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 
@@ -42,11 +43,7 @@ export default function SplashScreen() {
   return (
     <View style={[styles.root, { paddingBottom: insets.bottom }]}>
       <Animated.View style={{ transform: [{ scale }], opacity }}>
-        <Image
-          source={require('../../assets/icon.png')}
-          style={styles.logo}
-          resizeMode="contain"
-        />
+        <AlberLogo size={64} />
       </Animated.View>
 
       <Text style={[styles.tagline, { bottom: Math.max(insets.bottom + 24, 60) }]}>
@@ -63,10 +60,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  logo: {
-    width: 64,
-    height: 64,
-  },
+  logo: {},
   tagline: {
     position: 'absolute',
     fontSize: 10,

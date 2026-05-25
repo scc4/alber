@@ -3,9 +3,10 @@
 // Variantes: home (logo + saudação + sino), title (voltar + título), search (título + lupa)
 
 import React from 'react'
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import { AlberLogo } from './AlberLogo'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -56,12 +57,7 @@ export function Header(props: HeaderProps) {
 
     return (
       <View style={[styles.homeRoot, { paddingTop: insets.top + 10 }]}>
-        <Image
-          source={require('../../assets/icon.png')}
-          style={styles.logo}
-          resizeMode="contain"
-          accessibilityLabel="Alber"
-        />
+        <AlberLogo size={32} />
         <View style={styles.greetingBlock}>
           <Text style={styles.greetingLine}>{greeting}</Text>
           <Text style={styles.userName}>{props.userName}</Text>
@@ -245,8 +241,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   logo: {
-    width: 32,
-    height: 32,
     flexShrink: 0,
   },
   greetingBlock: {

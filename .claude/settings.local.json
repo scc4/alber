@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const f = require\\('./locales/pt-BR.json'\\); console.log\\(JSON.stringify\\(f.split.lancar, null, 2\\)\\)\")",
+      "Bash(node -e \"const f = require\\('./locales/pt-BR.json'\\); console.log\\(Object.keys\\(f.split\\).join\\('\\\\n'\\)\\)\")",
+      "Bash(node *)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}

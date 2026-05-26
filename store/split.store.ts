@@ -81,7 +81,8 @@ function isoNow(): string {
 
 function expiryFromValidity(validity: LinkValidity, custom: string | null): string {
   if (validity === 'custom' && custom) return custom
-  const ms = { '1h': 3_600_000, '24h': 86_400_000, '7d': 604_800_000 }[validity] ?? 3_600_000
+  const lookup: Record<string, number> = { '1h': 3_600_000, '24h': 86_400_000, '7d': 604_800_000 }
+  const ms = lookup[validity] ?? 3_600_000
   return new Date(Date.now() + ms).toISOString()
 }
 

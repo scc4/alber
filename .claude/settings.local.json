@@ -4,7 +4,11 @@
       "Bash(node -e \"const f = require\\('./locales/pt-BR.json'\\); console.log\\(JSON.stringify\\(f.split.lancar, null, 2\\)\\)\")",
       "Bash(node -e \"const f = require\\('./locales/pt-BR.json'\\); console.log\\(Object.keys\\(f.split\\).join\\('\\\\n'\\)\\)\")",
       "Bash(node *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "PowerShell(cd C:\\\\Users\\\\fernando\\\\alber; npx tsc --noEmit 2>&1 | Out-String | Select-String -Pattern \"lounge\" -AllMatches | ForEach-Object { $_.Matches } | Select-Object -First 20)",
+      "PowerShell(cd C:\\\\Users\\\\fernando\\\\alber; npx tsc --noEmit 2>&1 | Where-Object { $_ -match \"lounge\" } | Select-Object -First 30)",
+      "PowerShell(cd C:\\\\Users\\\\fernando\\\\alber; $output = npx tsc --noEmit 2>&1; $output | Where-Object { $_ -match \"lounge\" })",
+      "PowerShell(cd C:\\\\Users\\\\fernando\\\\alber; npx tsc --noEmit 2>&1 | Where-Object { $_ -match \"lounge\" })"
     ]
   }
 }

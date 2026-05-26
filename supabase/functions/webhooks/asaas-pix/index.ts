@@ -1,0 +1,169 @@
+// Spec: /specs/03_backend.md §6 (webhook HMAC validation)
+// Spec: /specs/04_api_asaas.md §4.3 (PAYMENT_CONFIRMED), §5.4 (CPF validation)
+// Spec: /specs/04_api_asaas.md §4.6 (refund on CPF mismatch)
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { sha256hex } from '../../_shared/crypto.ts'
+import { normalizeCpf } from '../../_shared/cpf.ts'
+import { aesDecrypt } from '../../_shared/crypto.ts'
+import { refundPayment } from '../../_shared/asaas.ts'
+
+const HANDLED_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
+
+const supabaseAdmin = createClient(
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+)
+
+Deno.serve(async (req: Request) => {
+  if (req.method !== 'POST') {
+    return new Response('Method Not Allowed', { status: 405 })
+  }
+
+  // ── Validar token do webhook (spec 03_backend §6) ────────────────────────────
+  // Asaas envia o authToken configurado no header 'asaas-access-token'.
+  // Comparação direta (token é suficientemente longo e canal é TLS).
+
+  const receivedToken = req.headers.get('asaas-access-token')
+  const expectedToken = Deno.env.get('ASAAS_WEBHOOK_SECRET')!
+
+  if (!receivedToken || receivedToken !== expectedToken) {
+    console.warn('Webhook: token inválido')
+    return new Response('Unauthorized', { status: 401 })
+  }
+
+  // ── Parse do payload ─────────────────────────────────────────────────────────
+
+  let payload: {
+    event: string
+    payment: {
+      id: string
+      status: string
+      value: number
+      externalReference?: string
+      pixTransaction?: {
+        payer?: {
+          cpfCnpj?: string
+        }
+      }
+    }
+  }
+
+  try {
+    payload = await req.json()
+  } catch {
+    return new Response('Bad Request', { status: 400 })
+  }
+
+  const { event, payment } = payload
+
+  // ── PAYMENT_REFUNDED — atualizar status ──────────────────────────────────────
+
+  if (event === 'PAYMENT_REFUNDED') {
+    await supabaseAdmin
+      .from('transactions')
+      .update({ status: 'refunded' })
+      .eq('asaas_payment_id', payment.id)
+      .neq('status', 'refunded') // idempotência
+
+    return new Response('OK', { status: 200 })
+  }
+
+  // ── Ignorar eventos não tratados ─────────────────────────────────────────────
+
+  if (!HANDLED_EVENTS.has(event)) {
+    return new Response('OK', { status: 200 })
+  }
+
+  // ── Localizar transação pelo asaas_payment_id ────────────────────────────────
+
+  const { data: tx, error: txErr } = await supabaseAdmin
+    .from('transactions')
+    .select('id, user_id, status, amount_brl')
+    .eq('asaas_payment_id', payment.id)
+    .maybeSingle()
+
+  if (txErr || !tx) {
+    // Pode ocorrer em webhooks de teste ou pagamentos externos — não é erro crítico
+    console.warn('Webhook: transação não encontrada para payment.id', payment.id)
+    return new Response('OK', { status: 200 })
+  }
+
+  // ── Idempotência — já processado ─────────────────────────────────────────────
+
+  if (tx.status === 'completed') {
+    return new Response('OK', { status: 200 })
+  }
+
+  // ── Buscar dados do usuário (CPF hash + API key) ──────────────────────────────
+
+  const { data: userData, error: userErr } = await supabaseAdmin
+    .from('users')
+    .select('id, cpf, asaas_api_key_enc')
+    .eq('id', tx.user_id)
+    .maybeSingle()
+
+  if (userErr || !userData) {
+    console.error('Webhook: usuário não encontrado para tx', tx.id)
+    return new Response('OK', { status: 200 })
+  }
+
+  // ── Validar CPF do pagador (spec 04_api §4.3, §5.4) ─────────────────────────
+  // cpfCnpj vem do campo pixTransaction.payer do webhook.
+  // ⚠️ Disponibilidade confirmada pendente com Asaas (spec §9).
+  // Se o campo não estiver presente, assume-se CPF válido (não bloqueia o fluxo).
+
+  const payerCpfRaw = payment.pixTransaction?.payer?.cpfCnpj
+
+  if (payerCpfRaw) {
+    const payerCpfHash = await sha256hex(normalizeCpf(payerCpfRaw))
+
+    if (payerCpfHash !== userData.cpf) {
+      // CPF do pagador difere do titular da conta — devolver automaticamente
+      console.warn('Webhook: CPF divergente para tx', tx.id)
+
+      try {
+        const encSecret = Deno.env.get('ASAAS_API_KEY')!
+        const subApiKey = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
+        await refundPayment(payment.id, payment.value, 'CPF do pagador divergente', subApiKey)
+      } catch (e) {
+        console.error('Webhook: falha ao solicitar devolução:', e)
+        // Registra para tratamento manual — não retorna erro ao Asaas
+      }
+
+      await supabaseAdmin
+        .from('transactions')
+        .update({ status: 'failed', metadata: { reason: 'cpf_mismatch' } })
+        .eq('id', tx.id)
+
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id:    userData.id,
+        event_type: 'carregar_cpf_mismatch',
+        metadata:   { transaction_id: tx.id, asaas_payment_id: payment.id },
+      })
+
+      return new Response('OK', { status: 200 })
+    }
+  }
+
+  // ── Confirmar carregamento — marcar completed ─────────────────────────────────
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('transactions')
+    .update({ status: 'completed' })
+    .eq('id', tx.id)
+
+  if (updateErr) {
+    console.error('Webhook: falha ao atualizar transação:', updateErr)
+    // Retorna 500 para o Asaas tentar reenviar o webhook
+    return new Response('Internal Server Error', { status: 500 })
+  }
+
+  await supabaseAdmin.from('audit_logs').insert({
+    user_id:    userData.id,
+    event_type: 'carregar_completed',
+    metadata:   { transaction_id: tx.id, asaas_payment_id: payment.id, value: payment.value },
+  })
+
+  return new Response('OK', { status: 200 })
+})

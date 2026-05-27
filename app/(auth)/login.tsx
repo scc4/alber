@@ -5,7 +5,6 @@
 
 import { useRef, useState } from 'react'
 import {
-  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -18,6 +17,7 @@ import {
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import { AlberLogo } from '../../components/core/AlberLogo'
 import { PINInput } from '../../components/financial/PINInput'
 import { SecurityConfirmation, MOCK_SECURITY_QUESTIONS } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
@@ -95,7 +95,7 @@ export default function LoginScreen() {
 
           {/* Logo */}
           <View style={styles.logoBlock}>
-            <Image source={require('../../assets/icon.png')} style={styles.logo} resizeMode="contain" />
+            <AlberLogo size={64} color="#FFFFFF" />
             <Text style={styles.usealber}>{t('auth.login.usealber')}</Text>
           </View>
 
@@ -210,7 +210,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xxl + 2,
     gap: spacing.sm,
   },
-  logo: { width: 48, height: 48 },
   usealber: {
     fontSize: 10,
     letterSpacing: 0.28 * 10,

@@ -3,10 +3,10 @@
 // Spec: /specs/05_security.md §7
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { handleCors, json, err } from '../../_shared/cors.ts'
-import { validateCpf, normalizeCpf } from '../../_shared/cpf.ts'
-import { sha256hex, bcryptHash, aesEncrypt } from '../../_shared/crypto.ts'
-import { createAsaasAccount } from '../../_shared/asaas.ts'
+import { handleCors, json, err } from '../_shared/cors.ts'
+import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
+import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
+import { createAsaasAccount } from '../_shared/asaas.ts'
 
 interface AddressDTO {
   street: string

@@ -3,13 +3,13 @@
 // Fluxo: pending TX → ensureCustomer → createPixPayment → getPixQrCode → update TX
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { handleCors, json, err } from '../../_shared/cors.ts'
-import { aesDecrypt } from '../../_shared/crypto.ts'
+import { handleCors, json, err } from '../_shared/cors.ts'
+import { aesDecrypt } from '../_shared/crypto.ts'
 import {
   ensureAsaasCustomer,
   createPixPayment,
   getPixQrCode,
-} from '../../_shared/asaas.ts'
+} from '../_shared/asaas.ts'
 
 interface CarregarRequest {
   amount_albers: number

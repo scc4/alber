@@ -2,9 +2,9 @@
 // Spec: /specs/05_security.md §2, §3, §4, §6
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { handleCors, json, err } from '../../_shared/cors.ts'
-import { validateCpf, normalizeCpf } from '../../_shared/cpf.ts'
-import { sha256hex, bcryptVerify } from '../../_shared/crypto.ts'
+import { handleCors, json, err } from '../_shared/cors.ts'
+import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
+import { sha256hex, bcryptVerify } from '../_shared/crypto.ts'
 
 interface LoginRequest {
   cpf: string

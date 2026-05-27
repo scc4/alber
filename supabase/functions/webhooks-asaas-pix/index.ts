@@ -3,10 +3,10 @@
 // Spec: /specs/04_api_asaas.md §4.6 (refund on CPF mismatch)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sha256hex } from '../../_shared/crypto.ts'
-import { normalizeCpf } from '../../_shared/cpf.ts'
-import { aesDecrypt } from '../../_shared/crypto.ts'
-import { refundPayment } from '../../_shared/asaas.ts'
+import { sha256hex } from '../_shared/crypto.ts'
+import { normalizeCpf } from '../_shared/cpf.ts'
+import { aesDecrypt } from '../_shared/crypto.ts'
+import { refundPayment } from '../_shared/asaas.ts'
 
 const HANDLED_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
 

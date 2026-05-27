@@ -5,9 +5,9 @@
 //          total     = available + blocked
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { handleCors, json, err } from '../../_shared/cors.ts'
-import { aesDecrypt } from '../../_shared/crypto.ts'
-import { getSubcontaBalance } from '../../_shared/asaas.ts'
+import { handleCors, json, err } from '../_shared/cors.ts'
+import { aesDecrypt } from '../_shared/crypto.ts'
+import { getSubcontaBalance } from '../_shared/asaas.ts'
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req)

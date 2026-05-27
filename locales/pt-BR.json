@@ -39,6 +39,8 @@
         "cep": "CEP",
         "cepPlaceholder": "00000-000",
         "cepFound": "Endereço encontrado",
+        "cepNotFound": "CEP não encontrado",
+        "cepNetworkError": "Erro de conexão — preencha manualmente",
         "street": "Endereço",
         "streetPlaceholder": "Rua, avenida…",
         "number": "Número",

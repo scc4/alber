@@ -15,24 +15,6 @@ function maskCEP(v: string) {
   return v.length > 5 ? `${v.slice(0,5)}-${v.slice(5)}` : v
 }
 
-interface AddressData {
-  street: string
-  neighborhood: string
-  city: string
-  state: string
-  loaded: boolean
-}
-
-// Mock ViaCEP — em produção chamar https://viacep.com.br/ws/{cep}/json/
-async function fetchViaCEP(cep: string): Promise<AddressData | null> {
-  await new Promise(r => setTimeout(r, 700)) // simula latência
-  if (cep === '01310100') {
-    return { street: 'Avenida Paulista', neighborhood: 'Bela Vista', city: 'São Paulo', state: 'SP', loaded: true }
-  }
-  // Resposta genérica para qualquer CEP válido no mock
-  return { street: 'Rua das Flores', neighborhood: 'Jardim Paulista', city: 'São Paulo', state: 'SP', loaded: true }
-}
-
 export default function EnderecoScreen() {
   const { t } = useTranslation()
 
@@ -45,26 +27,50 @@ export default function EnderecoScreen() {
   const [uf, setUf]                     = useState('')
   const [cepLoading, setCepLoading]     = useState(false)
   const [cepLoaded, setCepLoaded]       = useState(false)
+  const [cepError, setCepError]         = useState<string | null>(null)
+  const [manualCity, setManualCity]     = useState(false)
 
   useEffect(() => {
     const digits = cep.replace(/\D/g, '')
-    if (digits.length === 8 && !cepLoaded) {
-      setCepLoading(true)
-      fetchViaCEP(digits).then(data => {
-        if (data) {
-          setStreet(data.street)
-          setNeighborhood(data.neighborhood)
-          setCity(data.city)
-          setUf(data.state)
+
+    if (digits.length < 8) {
+      if (cepLoaded) {
+        setStreet(''); setNeighborhood(''); setCity(''); setUf('')
+        setCepLoaded(false); setCepError(null); setManualCity(false)
+      }
+      return
+    }
+
+    if (cepLoaded) return
+
+    const controller = new AbortController()
+    setCepLoading(true)
+    setCepError(null)
+    setManualCity(false)
+
+    fetch(`https://viacep.com.br/ws/${digits}/json/`, { signal: controller.signal })
+      .then(res => res.json())
+      .then((data: Record<string, unknown>) => {
+        if (data.erro) {
+          setStreet(''); setNeighborhood(''); setCity(''); setUf('')
+          setCepError(t('auth.onboarding.endereco.cepNotFound'))
+        } else {
+          setStreet(String(data.logradouro ?? ''))
+          setNeighborhood(String(data.bairro ?? ''))
+          setCity(String(data.localidade ?? ''))
+          setUf(String(data.uf ?? ''))
           setCepLoaded(true)
         }
-        setCepLoading(false)
       })
-    }
-    if (digits.length < 8 && cepLoaded) {
-      setStreet(''); setNeighborhood(''); setCity(''); setUf(''); setCepLoaded(false)
-    }
-  }, [cep, cepLoaded])
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') return
+        setCepError(t('auth.onboarding.endereco.cepNetworkError'))
+        setManualCity(true)
+      })
+      .finally(() => setCepLoading(false))
+
+    return () => controller.abort()
+  }, [cep, cepLoaded, t])
 
   const isReady =
     cep.replace(/\D/g,'').length === 8 &&
@@ -96,11 +102,17 @@ export default function EnderecoScreen() {
       <Field
         label={t('auth.onboarding.endereco.cep')}
         value={cep}
-        onChangeText={v => { setCep(maskCEP(v)); setCepLoaded(false) }}
+        onChangeText={v => {
+          setCep(maskCEP(v))
+          setCepLoaded(false)
+          setCepError(null)
+          setManualCity(false)
+        }}
         placeholder={t('auth.onboarding.endereco.cepPlaceholder')}
         keyboardType="numeric"
         loading={cepLoading}
         success={cepLoaded}
+        error={cepError}
         hint={cepLoaded ? t('auth.onboarding.endereco.cepFound') : null}
       />
 
@@ -109,6 +121,7 @@ export default function EnderecoScreen() {
         value={street}
         onChangeText={setStreet}
         placeholder={t('auth.onboarding.endereco.streetPlaceholder')}
+        editable={!cepLoading}
       />
 
       <View style={styles.row}>
@@ -136,6 +149,7 @@ export default function EnderecoScreen() {
         value={neighborhood}
         onChangeText={setNeighborhood}
         placeholder="—"
+        editable={!cepLoading}
       />
 
       <View style={styles.row}>
@@ -143,7 +157,9 @@ export default function EnderecoScreen() {
           <Field
             label={t('auth.onboarding.endereco.city')}
             value={city}
-            editable={false}
+            onChangeText={setCity}
+            editable={manualCity && !cepLoading}
+            readOnly={!manualCity}
             placeholder="—"
           />
         </View>
@@ -151,7 +167,9 @@ export default function EnderecoScreen() {
           <Field
             label={t('auth.onboarding.endereco.state')}
             value={uf}
-            editable={false}
+            onChangeText={setUf}
+            editable={manualCity && !cepLoading}
+            readOnly={!manualCity}
             placeholder="—"
           />
         </View>

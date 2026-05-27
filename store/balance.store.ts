@@ -1,60 +1,73 @@
-// Spec: /specs/06_modules/home.md seção 3.2, /specs/04_api_asaas.md seção 4.8
-// Saldo em Albers — preferência de ocultar persistida em SecureStore
-// Mock ativo para Sprint 2 — substituir fetchBalance por Edge Function no Sprint 2/3
+// Spec: /specs/01_frontend.md §3.2
+// Spec: /specs/04_api_asaas.md §4.8
+// Saldo em Albers — paridade 1:1 com BRL (spec §5)
 
 import { create } from 'zustand'
 import * as SecureStore from 'expo-secure-store'
+import * as financialService from '../services/financial.service'
+import { useAuthStore } from './auth.store'
 
 const HIDDEN_PREF_KEY = 'balance_hidden_pref'
 
 export type BalanceFetchStatus = 'idle' | 'loading' | 'success' | 'error'
 
 interface BalanceState {
-  balance:   number
+  available: number
+  blocked:   number
+  total:     number
+  balance:   number            // alias de available — compat com componentes existentes
+  stale:     boolean           // true quando Asaas retornou erro mas valor é 0
   status:    BalanceFetchStatus
   hidden:    boolean
 
-  // Actions
-  fetchBalance:          () => Promise<void>
-  toggleHidden:          () => Promise<void>
-  loadHiddenPreference:  () => Promise<void>
+  fetchBalance:         () => Promise<void>
+  toggleHidden:         () => Promise<void>
+  loadHiddenPreference: () => Promise<void>
 }
 
-export const useBalanceStore = create<BalanceState>((set, get) => ({
-  balance: 0,
-  status:  'idle',
-  hidden:  false,
+export const useBalanceStore = create<BalanceState>((set) => ({
+  available: 0,
+  blocked:   0,
+  total:     0,
+  balance:   0,
+  stale:     false,
+  status:    'idle',
+  hidden:    false,
 
   loadHiddenPreference: async () => {
     try {
       const stored = await SecureStore.getItemAsync(HIDDEN_PREF_KEY)
-      if (stored !== null) {
-        set({ hidden: stored === 'true' })
-      }
+      if (stored !== null) set({ hidden: stored === 'true' })
     } catch {
       // SecureStore indisponível — ignorar silenciosamente
     }
   },
 
   fetchBalance: async () => {
+    const token = useAuthStore.getState().token
+    if (!token) return
+
     set({ status: 'loading' })
     try {
-      // Mock: simula latência de rede ~600ms
-      // Produção: chamar Edge Function GET /balance com JWT do usuário
-      await new Promise<void>(r => setTimeout(r, 600))
-      set({ balance: 120, status: 'success' })
+      const res = await financialService.getBalance(token)
+      set({
+        available: res.available,
+        blocked:   res.blocked,
+        total:     res.total,
+        balance:   res.available,   // mantém alias
+        stale:     res.stale,
+        status:    'success',
+      })
     } catch {
       set({ status: 'error' })
     }
   },
 
   toggleHidden: async () => {
-    const next = !get().hidden
-    set({ hidden: next })
-    try {
-      await SecureStore.setItemAsync(HIDDEN_PREF_KEY, String(next))
-    } catch {
-      // Falha silenciosa — preferência não persiste mas toggle funciona na sessão
-    }
+    set(prev => {
+      const next = !prev.hidden
+      SecureStore.setItemAsync(HIDDEN_PREF_KEY, String(next)).catch(() => {})
+      return { hidden: next }
+    })
   },
 }))

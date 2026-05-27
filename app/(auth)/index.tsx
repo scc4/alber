@@ -1,6 +1,5 @@
 // Design: /design/auth.jsx — SplashScreen
 // Verifica sessão e redireciona: válida → (app) | sem sessão → welcome
-// Mock: sempre redireciona para welcome após 1400ms
 
 import { useEffect, useRef } from 'react'
 import { Animated, StyleSheet, Text, View } from 'react-native'
@@ -8,13 +7,15 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { AlberLogo } from '../../components/core/AlberLogo'
+import { useAuthStore } from '../../store/auth.store'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 
 export default function SplashScreen() {
-  const { t } = useTranslation()
-  const insets = useSafeAreaInsets()
-  const scale = useRef(new Animated.Value(0.65)).current
+  const { t }          = useTranslation()
+  const insets         = useSafeAreaInsets()
+  const loadSession    = useAuthStore(s => s.loadSession)
+  const scale   = useRef(new Animated.Value(0.65)).current
   const opacity = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
@@ -32,13 +33,12 @@ export default function SplashScreen() {
       }),
     ]).start()
 
-    // Production: await checkSession() → router.replace('/(app)') ou welcome
-    const timer = setTimeout(() => {
-      router.replace('/(auth)/welcome')
-    }, 1400)
-
-    return () => clearTimeout(timer)
-  }, [])
+    // Restaura sessão do SecureStore; redireciona conforme resultado
+    loadSession().then(() => {
+      const isAuthenticated = useAuthStore.getState().isAuthenticated
+      router.replace(isAuthenticated ? '/(app)/' : '/(auth)/welcome')
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <View style={[styles.root, { paddingBottom: insets.bottom }]}>

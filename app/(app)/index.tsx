@@ -91,6 +91,7 @@ export default function HomeScreen() {
   const { user, kycStatus, accountStatus } = useAuthStore()
   const {
     balance,
+    stale,
     status: balanceStatus,
     hidden,
     fetchBalance,
@@ -200,6 +201,13 @@ export default function HomeScreen() {
           onCarregarMais={() => handleAction('carregar')}
           onRetry={fetchBalance}
         />
+
+        {/* Aviso de saldo desatualizado — Asaas indisponível momentaneamente */}
+        {stale && balanceStatus === 'success' && (
+          <View style={styles.staleWrap}>
+            <Text style={styles.staleText}>{t('home.balance.stale')}</Text>
+          </View>
+        )}
 
         {/* Seção Lounge atual */}
         <Pressable
@@ -468,6 +476,19 @@ const styles = StyleSheet.create({
     fontSize: 22,
     color: 'rgba(255,255,255,0.3)',
     fontFamily: typography.fontFamily.primary,
+  },
+
+  // Stale balance
+  staleWrap: {
+    marginHorizontal: spacing.lg,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  staleText: {
+    fontSize: 11,
+    color: colors.warning[500],
+    fontFamily: typography.fontFamily.primary,
+    textAlign: 'center',
   },
 
   // Actions

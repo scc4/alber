@@ -1,7 +1,8 @@
-import React from 'react'
+import React, { useEffect } from 'react'
 import { View, StyleSheet } from 'react-native'
 import { Stack, usePathname, router } from 'expo-router'
 import { BottomNav, BottomNavItem } from '../../components/core/BottomNav'
+import { useAuthStore } from '../../store/auth.store'
 
 // Rotas onde o BottomNav deve aparecer
 const NAV_PATHS = new Set(['/', '/atividade', '/achar', '/lounge', '/perfil'])
@@ -24,9 +25,18 @@ function handleNavigate(item: BottomNavItem) {
 }
 
 export default function AppLayout() {
-  const pathname = usePathname()
-  const showNav  = NAV_PATHS.has(pathname)
-  const active   = getActiveTab(pathname)
+  const pathname        = usePathname()
+  const showNav         = NAV_PATHS.has(pathname)
+  const active          = getActiveTab(pathname)
+  const isAuthenticated = useAuthStore(s => s.isAuthenticated)
+  const isLoadingSession = useAuthStore(s => s.isLoadingSession)
+
+  // Auth guard (spec 01_frontend §4)
+  useEffect(() => {
+    if (!isLoadingSession && !isAuthenticated) {
+      router.replace('/(auth)/login')
+    }
+  }, [isAuthenticated, isLoadingSession])
 
   return (
     <View style={styles.root}>

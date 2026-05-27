@@ -1,10 +1,11 @@
 // Design: /design/auth-login.jsx — LoginFlow
 // Spec: /specs/06_modules/onboarding.md seção 5 — login de retorno
-// 3 fases: id → pin → security
-// Sessão válida < 5min background → Home direto (verificado na Splash)
+// Spec: /specs/03_backend.md §4.2
+// 3 fases: id → pin → security (resposta digitada + hash → backend)
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -19,9 +20,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { AlberLogo } from '../../components/core/AlberLogo'
 import { PINInput } from '../../components/financial/PINInput'
-import { SecurityConfirmation, MOCK_SECURITY_QUESTIONS } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Field } from '../../components/core/Field'
+import { useAuthStore } from '../../store/auth.store'
+import * as authService from '../../services/auth.service'
+import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
@@ -37,18 +40,32 @@ function maskCPF(v: string) {
 }
 
 export default function LoginScreen() {
-  const { t } = useTranslation()
-  const insets = useSafeAreaInsets()
+  const { t }    = useTranslation()
+  const insets   = useSafeAreaInsets()
+  const login    = useAuthStore(s => s.login)
 
-  const [phase, setPhase] = useState<Phase>('id')
+  const [phase, setPhase]           = useState<Phase>('id')
   const [identifier, setIdentifier] = useState('')
-  const [pinError, setPinError] = useState<string | null>(null)
+  const [pinHash, setPinHash]       = useState('')
+  const [answer, setAnswer]         = useState('')
+  const [question, setQuestion]     = useState('')
+  const [isLoggingIn, setIsLoggingIn] = useState(false)
+  const [pinError, setPinError]     = useState<string | null>(null)
   const pinErrKey = useRef(0)
 
   const isHandle = identifier.startsWith('@') || /^[a-z_]/i.test(identifier)
-  const isValid = isHandle
+  const isValid  = isHandle
     ? identifier.replace(/^@/, '').length >= 3
     : identifier.replace(/\D/g, '').length === 11
+
+  // Carrega pergunta de segurança do SecureStore (salva no registro)
+  useEffect(() => {
+    if (phase === 'security') {
+      authService.getSecurityQuestions().then(qs => {
+        setQuestion(qs[0] ?? '')
+      })
+    }
+  }, [phase])
 
   const handleIdentifierChange = (v: string) => {
     if (v.startsWith('@') || /^[a-z_]/i.test(v)) {
@@ -60,20 +77,38 @@ export default function LoginScreen() {
     }
   }
 
-  const handlePINComplete = (_hash: string) => {
-    // Mock: aceita qualquer PIN correto (hash seria validado no backend)
+  const handlePINComplete = (hash: string) => {
+    setPinHash(hash)
     setPinError(null)
     setTimeout(() => setPhase('security'), 200)
   }
 
-  const handleSecurityPass = () => {
-    // Production: armazenar JWT em SecureStore aqui
-    router.replace('/(app)/')
-  }
-
-  const handleSecurityBlocked = () => {
-    setPinError(t('auth.security.blocked'))
-    setPhase('id')
+  const handleSecurityConfirm = async () => {
+    if (answer.trim().length < 2 || isLoggingIn) return
+    setIsLoggingIn(true)
+    try {
+      const answerHash = await sha256Hex(normalizeSecurityAnswer(answer))
+      // Envia CPF sem formatação; handle é enviado como-está
+      // (backend retorna INVALID_CREDENTIALS para handle — suporte futuro)
+      const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
+      await login(cpfOrHandle, pinHash, answerHash)
+      router.replace('/(app)/')
+    } catch (e: unknown) {
+      setIsLoggingIn(false)
+      const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
+      if (code === 'TOO_MANY_ATTEMPTS') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
+        setPhase('id')
+      } else if (code === 'INVALID_CREDENTIALS') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorInvalid'))
+        pinErrKey.current++
+        setPinError(t('auth.login.errorInvalid'))
+        setAnswer('')
+        setPhase('pin')
+      } else {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))
+      }
+    }
   }
 
   // ─── Fase: identifier ────────────────────────────────────────────────────
@@ -87,13 +122,11 @@ export default function LoginScreen() {
           contentContainerStyle={[styles.idContent, { paddingBottom: insets.bottom + spacing.xl }]}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Back */}
           <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
             <Text style={styles.backArrow}>‹</Text>
           </TouchableOpacity>
           <Text style={styles.topHeader}>{t('auth.login.header')}</Text>
 
-          {/* Logo */}
           <View style={styles.logoBlock}>
             <AlberLogo size={64} color="#FFFFFF" />
             <Text style={styles.usealber}>{t('auth.login.usealber')}</Text>
@@ -161,21 +194,50 @@ export default function LoginScreen() {
     )
   }
 
-  // ─── Fase: Security confirmation ────────────────────────────────────────
+  // ─── Fase: Pergunta de segurança ─────────────────────────────────────────
   return (
-    <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-      <TouchableOpacity style={styles.cancelBtn} onPress={() => setPhase('pin')}>
-        <Text style={styles.cancelText}>{t('auth.security.cancel')}</Text>
-      </TouchableOpacity>
+    <KeyboardAvoidingView
+      style={[styles.root, { paddingTop: insets.top }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        contentContainerStyle={[styles.secContent, { paddingBottom: insets.bottom + spacing.xl }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        <TouchableOpacity style={styles.backBtnAbs} onPress={() => { setAnswer(''); setPhase('pin') }}>
+          <Text style={styles.backArrow}>‹</Text>
+        </TouchableOpacity>
 
-      <View style={styles.secContent}>
-        <SecurityConfirmation
-          questions={MOCK_SECURITY_QUESTIONS}
-          onPass={handleSecurityPass}
-          onBlocked={handleSecurityBlocked}
+        <Text style={styles.secEyebrow}>{t('auth.login.securityQuestionLabel')}</Text>
+        <Text style={styles.secQuestion}>
+          {question || t('auth.login.securityQuestionGeneric')}
+        </Text>
+
+        <TextInput
+          style={styles.secInput}
+          value={answer}
+          onChangeText={setAnswer}
+          placeholder={t('auth.login.securityAnswerPlaceholder')}
+          placeholderTextColor="rgba(255,255,255,0.3)"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoFocus
         />
-      </View>
-    </View>
+
+        <Text style={styles.secHint}>{t('auth.login.securityHint')}</Text>
+
+        <View style={styles.spacer} />
+
+        <PrimaryButton
+          label={t('auth.login.securityConfirm')}
+          onPress={handleSecurityConfirm}
+          state={
+            isLoggingIn              ? 'loading'   :
+            answer.trim().length < 2 ? 'disabled'  : 'default'
+          }
+        />
+      </ScrollView>
+    </KeyboardAvoidingView>
   )
 }
 
@@ -298,22 +360,45 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily.primary,
   },
   // security phase
-  cancelBtn: {
-    position: 'absolute',
-    top: 54,
-    right: 24,
-    zIndex: 10,
-    padding: 8,
-  },
-  cancelText: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.45)',
-    fontFamily: typography.fontFamily.primary,
-  },
   secContent: {
-    flex: 1,
-    paddingHorizontal: spacing.lg,
+    flexGrow: 1,
+    paddingHorizontal: spacing.lg + 4,
     paddingTop: 54 + spacing.xl,
+  },
+  secEyebrow: {
+    fontSize: 10.5,
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: typography.eyebrow.letterSpacing,
+    textTransform: 'uppercase',
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: spacing.sm,
+  },
+  secQuestion: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: colors.white[100],
+    letterSpacing: -0.02 * 20,
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: spacing.xl,
+    lineHeight: 26,
+  },
+  secInput: {
+    height: 54,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: spacing.radius.md,
+    paddingHorizontal: spacing.md,
+    color: colors.white[100],
+    fontSize: 16,
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: spacing.sm,
+  },
+  secHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: spacing.lg,
   },
   backArrow: {
     fontSize: 28,

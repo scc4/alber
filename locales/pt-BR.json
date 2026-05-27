@@ -94,7 +94,12 @@
         "cpfLabel": "Chave (CPF)",
         "phoneLabel": "Chave (telefone)",
         "emailLabel": "Chave (e-mail)",
-        "randomLabel": "Chave aleatória"
+        "randomLabel": "Chave aleatória",
+        "errorTitle": "Erro no cadastro",
+        "errorCpfDuplicate": "Este CPF já possui uma conta Alber.",
+        "errorHandleTaken": "Este @handle já está em uso. Volte e escolha outro.",
+        "errorAsaas": "Erro ao criar conta financeira. Tente novamente mais tarde.",
+        "errorGeneric": "Não foi possível criar sua conta. Tente novamente."
       },
       "terms": {
         "header": "QUASE LÁ",
@@ -126,7 +131,16 @@
       "signup": "Cadastrar-se",
       "pinTitle": "Digite seu PIN",
       "forgotPin": "Esqueci meu PIN",
-      "usealber": "USE ALBER"
+      "usealber": "USE ALBER",
+      "securityQuestionLabel": "PERGUNTA DE SEGURANÇA",
+      "securityQuestionGeneric": "Responda uma de suas perguntas de segurança",
+      "securityAnswerPlaceholder": "Sua resposta",
+      "securityConfirm": "Confirmar",
+      "securityHint": "Use exatamente a resposta que você cadastrou.",
+      "errorTitle": "Erro ao entrar",
+      "errorInvalid": "Credenciais inválidas. Verifique e tente novamente.",
+      "errorRateLimit": "Muitas tentativas. Tente novamente em 15 minutos.",
+      "errorGeneric": "Erro ao fazer login. Verifique sua conexão."
     },
     "security": {
       "header": "SEGURANÇA",
@@ -185,7 +199,8 @@
       "hide": "Ocultar saldo",
       "show": "Exibir saldo",
       "error": "Erro ao carregar saldo",
-      "retry": "Tentar novamente"
+      "retry": "Tentar novamente",
+      "stale": "Saldo pode estar desatualizado"
     },
     "lounge": {
       "label": "Seu Lounge atual"

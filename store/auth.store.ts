@@ -1,59 +1,107 @@
-// Spec: /specs/06_modules/home.md, /specs/05_security.md
-// Estado de autenticação global — usuário, KYC, status da conta
-// Mock ativo para Sprint 2 — conectar ao Supabase no Sprint 6 (perfil/KYC)
+// Spec: /specs/01_frontend.md §3.1, §4
+// Spec: /specs/05_security.md §7
+// Token persistido em SecureStore — nunca AsyncStorage
 
 import { create } from 'zustand'
+import * as authService from '../services/auth.service'
 
 export type KycStatus     = 'pending' | 'submitted' | 'approved' | 'rejected'
 export type AccountStatus = 'active' | 'evaluation' | 'blocked'
 
 export interface AuthUser {
-  id:          string
-  name:        string
-  handle:      string
-  cpfMasked:   string  // ex: '***.456-78' — nunca CPF completo no app
-  pixKey:      string  // ex: '(11) ****-1234' — mascarado
-  pixKeyType:  'cpf' | 'phone' | 'email' | 'random'
+  id:           string
+  name:         string
+  handle:       string
+  email:        string
+  cpfMasked:    string  // '***.xxx-xx' — preenchido via endpoint de perfil (futuro)
+  pixKey:       string  // mascarado — preenchido via endpoint de perfil (futuro)
+  pixKeyType:   'cpf' | 'phone' | 'email' | 'random'
 }
 
 interface AuthState {
-  user:            AuthUser | null
-  kycStatus:       KycStatus
-  accountStatus:   AccountStatus
-  isAuthenticated: boolean
+  user:             AuthUser | null
+  token:            string | null
+  kycStatus:        KycStatus
+  accountStatus:    AccountStatus
+  isAuthenticated:  boolean
+  isLoadingSession: boolean
 
   // Actions
-  setUser:       (user: AuthUser) => void
-  setKycStatus:  (status: KycStatus) => void
+  login:            (cpf: string, pinHash: string, securityAnswerHash: string) => Promise<void>
+  setSession:       (token: string, refreshToken: string, user: AuthUser, kycStatus: KycStatus, accountStatus: AccountStatus) => Promise<void>
+  loadSession:      () => Promise<void>
+  logout:           () => Promise<void>
+  setUser:          (user: AuthUser) => void
+  setKycStatus:     (status: KycStatus) => void
   setAccountStatus: (status: AccountStatus) => void
-  logout:        () => void
-}
-
-// Mock: usuário aprovado, conta ativa — troca kycStatus/accountStatus para testar banners
-const MOCK_USER: AuthUser = {
-  id:         'usr_mock_001',
-  name:       'Mayte Alber',
-  handle:     '@mayte',
-  cpfMasked:  '***.456-78',
-  pixKey:     '(11) ****-1234',
-  pixKeyType: 'phone',
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
-  user:            MOCK_USER,
-  kycStatus:       'approved',
-  accountStatus:   'active',
-  isAuthenticated: true,
+  user:             null,
+  token:            null,
+  kycStatus:        'pending',
+  accountStatus:    'evaluation',
+  isAuthenticated:  false,
+  isLoadingSession: true,
 
-  setUser: (user) =>
-    set({ user, isAuthenticated: true }),
+  // ── Restaura sessão do SecureStore ao iniciar o app ────────────────────────
+  loadSession: async () => {
+    try {
+      const token = await authService.getStoredToken()
+      if (token) {
+        set({ token, isAuthenticated: true })
+      }
+    } catch {
+      // SecureStore indisponível — inicia sem sessão
+    } finally {
+      set({ isLoadingSession: false })
+    }
+  },
 
-  setKycStatus: (kycStatus) =>
-    set({ kycStatus }),
+  // ── Login real com PIN + resposta de segurança ─────────────────────────────
+  login: async (cpf, pinHash, securityAnswerHash) => {
+    const res = await authService.login(cpf, pinHash, securityAnswerHash)
 
-  setAccountStatus: (accountStatus) =>
-    set({ accountStatus }),
+    const user: AuthUser = {
+      id:           res.user.id,
+      name:         res.user.name,
+      handle:       res.user.handle,
+      email:        res.user.email,
+      cpfMasked:    '',   // TODO: carregar via endpoint de perfil
+      pixKey:       '',
+      pixKeyType:   'cpf',
+    }
 
-  logout: () =>
-    set({ user: null, isAuthenticated: false }),
+    await authService.saveTokens(res.token, res.refresh_token)
+
+    set({
+      user,
+      token:           res.token,
+      kycStatus:       res.user.kyc_status  as KycStatus,
+      accountStatus:   res.user.account_status as AccountStatus,
+      isAuthenticated: true,
+    })
+  },
+
+  // ── Sessão criada após registro ────────────────────────────────────────────
+  setSession: async (token, refreshToken, user, kycStatus, accountStatus) => {
+    await authService.saveTokens(token, refreshToken)
+    set({ user, token, kycStatus, accountStatus, isAuthenticated: true })
+  },
+
+  // ── Logout — limpa SecureStore + estado ───────────────────────────────────
+  logout: async () => {
+    await authService.logout()
+    set({
+      user:            null,
+      token:           null,
+      kycStatus:       'pending',
+      accountStatus:   'evaluation',
+      isAuthenticated: false,
+    })
+  },
+
+  setUser:          (user)          => set({ user }),
+  setKycStatus:     (kycStatus)     => set({ kycStatus }),
+  setAccountStatus: (accountStatus) => set({ accountStatus }),
 }))

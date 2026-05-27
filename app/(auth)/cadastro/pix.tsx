@@ -192,14 +192,40 @@ export default function PixScreen() {
       clearDraft()
       router.replace('/(app)/')
     } catch (e: unknown) {
+      console.log('[pix.register] caught error:', e)
       setIsCreating(false)
-      const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
-      const msgKey =
-        code === 'CPF_DUPLICATE'  ? 'auth.onboarding.pix.errorCpfDuplicate' :
-        code === 'HANDLE_TAKEN'   ? 'auth.onboarding.pix.errorHandleTaken'  :
-        code === 'ASAAS_ERROR'    ? 'auth.onboarding.pix.errorAsaas'        :
-                                    'auth.onboarding.pix.errorGeneric'
-      Alert.alert(t('auth.onboarding.pix.errorTitle'), t(msgKey))
+
+      const isBff = e instanceof authService.BffError
+      const code  = isBff ? e.code    : 'UNKNOWN'
+      const srvMsg = isBff ? e.message : ''
+      const title = t('auth.onboarding.pix.errorTitle')
+
+      if (code === 'CPF_DUPLICATE' || code === 'CPF_IN_USE') {
+        Alert.alert(
+          title,
+          'Este CPF já possui uma conta. Recuperar acesso?',
+          [
+            { text: 'Fechar', style: 'cancel' },
+            { text: 'Fazer login', onPress: () => router.replace('/(auth)/login') },
+          ],
+        )
+      } else if (code === 'EMAIL_IN_USE') {
+        Alert.alert(
+          title,
+          'Este e-mail já está em uso. Tente outro e-mail.',
+          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/dados') }],
+        )
+      } else if (code === 'HANDLE_TAKEN') {
+        Alert.alert(
+          title,
+          'Este @handle já está em uso. Escolha outro.',
+          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/handle') }],
+        )
+      } else if (code === 'ASAAS_ERROR') {
+        Alert.alert(title, srvMsg || t('auth.onboarding.pix.errorAsaas'))
+      } else {
+        Alert.alert(title, t('auth.onboarding.pix.errorGeneric'))
+      }
     }
   }
 

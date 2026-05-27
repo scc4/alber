@@ -16,7 +16,9 @@ async function asaasRequest(
   apiKey: string,
   body?: unknown,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const res = await fetch(`${baseUrl()}${path}`, {
+  const url = `${baseUrl()}${path}`
+  console.log(`[asaas] ${method} ${url}`)
+  const res = await fetch(url, {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -25,6 +27,10 @@ async function asaasRequest(
     body: body ? JSON.stringify(body) : undefined,
   })
   const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    console.error('[asaas] status:', res.status)
+    console.error('[asaas] body:', JSON.stringify(data))
+  }
   return { ok: res.ok, status: res.status, data }
 }
 
@@ -44,6 +50,7 @@ export interface CreateAccountInput {
   postalCode: string
   webhookUrl: string
   webhookSecret: string
+  incomeValue?: number
 }
 
 export async function createAsaasAccount(
@@ -63,18 +70,20 @@ export async function createAsaasAccount(
     complement:    input.complement ?? '',
     province:      input.province,
     postalCode:    input.postalCode,
+    incomeValue:   input.incomeValue,
     webhooks: [{
-      url:        input.webhookUrl,
-      email:      input.email,
-      apiVersion: 'v3',
-      enabled:    true,
-      authToken:  input.webhookSecret,
+      name:        'Alber Webhook',
+      url:         input.webhookUrl,
+      email:       'webhook@usealber.com',
+      sendType:    'SEQUENTIALLY',
+      apiVersion:  '3',
+      enabled:     true,
+      interrupted: false,
+      authToken:   input.webhookSecret,
       events: [
         'PAYMENT_CONFIRMED',
         'PAYMENT_RECEIVED',
         'PAYMENT_REFUNDED',
-        'TRANSFER_CONFIRMED',
-        'TRANSFER_FAILED',
       ],
     }],
   })
@@ -85,6 +94,21 @@ export async function createAsaasAccount(
 
   const d = res.data as { id: string; apiKey: string; walletId: string }
   return { id: d.id, apiKey: d.apiKey, walletId: d.walletId }
+}
+
+// ── Recuperar subconta existente por CPF (idempotência) ──────────────────────
+
+export async function getAsaasAccountByCpf(
+  cpfCnpj: string,
+  parentApiKey: string,
+): Promise<{ id: string; apiKey: string; walletId: string } | null> {
+  const res = await asaasRequest('GET', `/accounts?cpfCnpj=${cpfCnpj}&limit=1`, parentApiKey)
+  if (!res.ok) {
+    console.error('[asaas] getAsaasAccountByCpf failed:', res.status, JSON.stringify(res.data))
+    return null
+  }
+  const list = (res.data as { data?: { id: string; apiKey: string; walletId: string }[] }).data
+  return list?.[0] ?? null
 }
 
 // ── PIX QR Code (spec 04_api §4.2) ───────────────────────────────────────────

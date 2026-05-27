@@ -4,7 +4,7 @@
 
 import * as SecureStore from 'expo-secure-store'
 
-const BFF      = (process.env.EXPO_PUBLIC_BFF_URL ?? '').replace(/\/$/, '')
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 // ── Chaves de SecureStore ─────────────────────────────────────────────────────
@@ -29,6 +29,9 @@ export class BffError extends Error {
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
 async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
+  console.log('[env] SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL)
+  console.log('[env] BFF_URL:', process.env.EXPO_PUBLIC_BFF_URL)
+  console.log('[bff] url:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/auth-register`)
   const res = await fetch(`${BFF}/${path}`, {
     method: 'POST',
     headers: {
@@ -39,7 +42,9 @@ async function post<T>(path: string, body: unknown, token?: string): Promise<T> 
     body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({})) as Record<string, unknown>
+  console.log(`[bff] ${path} → HTTP ${res.status}`)
   if (!res.ok) {
+    console.log(`[bff] ${path} error body:`, JSON.stringify(data))
     throw new BffError(
       String(data.code    ?? 'UNKNOWN'),
       String(data.message ?? 'Erro desconhecido'),
@@ -83,6 +88,15 @@ export interface RegisterResponse {
 }
 
 export async function register(input: RegisterInput): Promise<RegisterResponse> {
+  console.log('[auth.register] payload:', JSON.stringify({
+    ...input,
+    cpf:      `${input.cpf.slice(0, 3)}***`,
+    pin_hash: '[MASKED]',
+    security_questions: input.security_questions.map(q => ({
+      question:    q.question,
+      answer_hash: '[MASKED]',
+    })),
+  }))
   return post<RegisterResponse>('auth-register', input)
 }
 

@@ -114,6 +114,12 @@ subconta→subconta por dia/mês.
 **Pendência:** confirmar prazo de habilitação com gerente de contas Asaas.
 **Impacto:** cronograma de go-live.
 
+### 4.7 Renda do usuário no onboarding
+**Status atual:** `incomeValue` fixo em R$ 1.000 no backend (campo obrigatório pelo Asaas).
+**Melhoria futura:** coletar renda/faturamento do usuário durante o onboarding
+(etapa entre endereço e handle) e enviar valor real ao Asaas.
+**Impacto:** melhor qualificação de crédito e compliance KYC no Asaas.
+
 ---
 
 ## 5. Funcionalidades futuras identificadas

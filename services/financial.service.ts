@@ -4,7 +4,7 @@
 
 import { BffError } from './auth.service'
 
-const BFF      = (process.env.EXPO_PUBLIC_BFF_URL ?? '').replace(/\/$/, '')
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 // ── HTTP helpers ──────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
-import { createAsaasAccount } from '../_shared/asaas.ts'
+import { createAsaasAccount, getAsaasAccountByCpf } from '../_shared/asaas.ts'
 
 interface AddressDTO {
   street: string
@@ -91,6 +91,14 @@ Deno.serve(async (req: Request) => {
 
   if (existingCpf) return err('CPF_DUPLICATE', 'CPF já cadastrado', 409)
 
+  const { data: existingEmail } = await supabaseAdmin
+    .from('users')
+    .select('id')
+    .eq('email', email)
+    .maybeSingle()
+
+  if (existingEmail) return err('EMAIL_IN_USE', 'Este e-mail já está em uso', 409)
+
   const handleNorm = handle.toLowerCase().replace(/^@/, '')
 
   const { data: existingHandle } = await supabaseAdmin
@@ -107,6 +115,19 @@ Deno.serve(async (req: Request) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL')!
   const webhookUrl  = `${supabaseUrl}/functions/v1/webhooks/asaas-pix`
 
+  console.log('[auth-register] asaas payload:', JSON.stringify({
+    name,
+    email,
+    cpfCnpj:       `${cpfClean.slice(0, 3)}***`,
+    birthDate:     birth_date,
+    phone:         phone.replace(/\D/g, '').slice(0, 2) + '***',
+    address:       address?.street ?? '',
+    addressNumber: address?.number ?? 'S/N',
+    province:      address?.neighborhood ?? '',
+    postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
+    webhookUrl,
+  }))
+
   let asaasAccount: { id: string; apiKey: string; walletId: string }
   try {
     asaasAccount = await createAsaasAccount(
@@ -122,14 +143,45 @@ Deno.serve(async (req: Request) => {
         complement:    address?.complement,
         province:      address?.neighborhood ?? '',
         postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
+        incomeValue:   1000,
         webhookUrl,
         webhookSecret: Deno.env.get('ASAAS_WEBHOOK_SECRET')!,
       },
       Deno.env.get('ASAAS_API_KEY')!,
     )
   } catch (e) {
-    console.error('Asaas account creation failed:', e)
-    return err('ASAAS_ERROR', 'Erro ao criar subconta financeira', 503)
+    const msg = e instanceof Error ? e.message : String(e)
+    console.error('[auth-register] asaas account creation failed:', msg)
+
+    let description = ''
+    try {
+      const jsonStr = msg.replace(/^ASAAS_ACCOUNT_CREATE_FAILED:\s*/, '')
+      const parsed  = JSON.parse(jsonStr) as { errors?: { description?: string }[] }
+      description   = parsed.errors?.[0]?.description ?? ''
+    } catch { /* mensagem não estruturada */ }
+
+    const lower      = description.toLowerCase()
+    const isEmailDup = lower.includes('já está em uso') && (lower.includes('e-mail') || lower.includes('email'))
+    const isCpfDup   = lower.includes('já está em uso') && (lower.includes('cpf') || lower.includes('cnpj'))
+
+    if (isEmailDup || isCpfDup) {
+      // Subconta criada no Asaas mas não persistida no banco (falha anterior) — recuperar
+      console.log('[auth-register] subconta já existe no Asaas, recuperando via CPF...')
+      try {
+        const existing = await getAsaasAccountByCpf(cpfClean, Deno.env.get('ASAAS_API_KEY')!)
+        if (existing) {
+          console.log('[auth-register] subconta recuperada:', existing.id)
+          asaasAccount = existing
+          // Continua o fluxo normal após o try/catch
+        } else {
+          return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
+        }
+      } catch {
+        return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
+      }
+    } else {
+      return err('ASAAS_ERROR', description || 'Erro ao criar subconta financeira', 503)
+    }
   }
 
   // ── Criptografar API key da subconta (spec 05_security §7) ──────────────────
@@ -150,8 +202,8 @@ Deno.serve(async (req: Request) => {
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
     email_confirm: true,
-    // Senha aleatória — nunca usada (autenticação por PIN customizado)
-    password: crypto.randomUUID() + crypto.randomUUID(),
+    // pin_hash como senha — permite autenticar via /auth/v1/token para emitir JWT
+    password: pin_hash,
     user_metadata: { name, handle: `@${handleNorm}` },
   })
 
@@ -200,7 +252,7 @@ Deno.serve(async (req: Request) => {
   // TODO Sprint 7.1: adicionar coluna pin_hash à tabela users via migration.
   // Por ora, PIN validado comparando com hash armazenado em user_metadata Supabase Auth.
 
-  await supabaseAdmin.auth.admin.updateUser(authUserId, {
+  await supabaseAdmin.auth.admin.updateUserById(authUserId, {
     app_metadata: { pin_bcrypt: pinBcrypt },
   })
 
@@ -210,7 +262,7 @@ Deno.serve(async (req: Request) => {
     security_questions.map(async (q, i) => ({
       user_id:     userId,
       question:    q.question,
-      answer_hash: await bcryptHash(q.answer_hash), // bcrypt da hash SHA-256 recebida
+      answer_hash: await bcryptHash(q.answer_hash, 6), // cost 6 — 2º fator, não senha principal
       position:    i + 1,
     }))
   )
@@ -232,22 +284,37 @@ Deno.serve(async (req: Request) => {
     metadata:   { handle: `@${handleNorm}`, asaas_account_id: asaasAccount.id },
   })
 
-  // ── Gerar sessão JWT ─────────────────────────────────────────────────────────
+  // ── Gerar sessão JWT via password flow ──────────────────────────────────────
+  // createSession não existe no SDK — autenticar com email+pin_hash (senha definida no createUser)
 
-  const { data: session, error: sessionError } = await supabaseAdmin.auth.admin.createSession({
-    user_id: authUserId,
-  })
+  const signInRes = await fetch(
+    `${Deno.env.get('SUPABASE_URL')}/auth/v1/token?grant_type=password`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
+      },
+      body: JSON.stringify({ email, password: pin_hash }),
+    },
+  )
 
-  if (sessionError || !session) {
-    console.error('Session creation failed:', sessionError)
+  if (!signInRes.ok) {
+    const signInErr = await signInRes.json().catch(() => ({}))
+    console.error('Session creation failed:', signInErr)
     return err('SESSION_ERROR', 'Erro ao gerar sessão', 500)
+  }
+
+  const { access_token, refresh_token } = await signInRes.json() as {
+    access_token: string
+    refresh_token: string
   }
 
   return json(
     {
       user_id:        userId,
-      token:          session.access_token,
-      refresh_token:  session.refresh_token,
+      token:          access_token,
+      refresh_token:  refresh_token,
       kyc_status:     'pending',
       account_status: 'evaluation',
     },

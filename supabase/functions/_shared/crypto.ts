@@ -21,8 +21,8 @@ export async function sha256hex(text: string): Promise<string> {
 
 const BCRYPT_ROUNDS = 12
 
-export async function bcryptHash(value: string): Promise<string> {
-  const salt = await bcrypt.genSalt(BCRYPT_ROUNDS)
+export async function bcryptHash(value: string, rounds = BCRYPT_ROUNDS): Promise<string> {
+  const salt = await bcrypt.genSalt(rounds)
   return bcrypt.hash(value, salt)
 }
 

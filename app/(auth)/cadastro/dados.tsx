@@ -10,6 +10,7 @@ import { Field } from '../../../components/core/Field'
 import { AlertCard } from '../../../components/core/AlertCard'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { updateDraft } from '../../../store/signup-draft'
+import { validateCPF } from '../../../utils/cpf'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -36,9 +37,6 @@ function maskDate(v: string) {
   return v
 }
 
-// CPF válido — apenas verificação de 11 dígitos (validação real no backend)
-const validCPF = (v: string) => v.replace(/\D/g, '').length === 11
-// CPF simulado como "já cadastrado" para mock
 const MOCK_DUPLICATE_CPF = '11111111111'
 
 export default function DadosScreen() {
@@ -53,19 +51,22 @@ export default function DadosScreen() {
 
   const touch = (field: string) => setTouch(t => ({ ...t, [field]: true }))
 
+  const cpfDigits  = cpf.replace(/\D/g, '')
+  const cpfValid   = validateCPF(cpf)
+
   const errors = {
     name:  name && name.trim().split(/\s+/).length < 2 ? t('auth.onboarding.dados.nameError') : null,
-    cpf:   cpf && !validCPF(cpf) ? t('auth.onboarding.dados.cpfError') : null,
+    cpf:   cpfDigits.length === 11 && !cpfValid ? t('auth.onboarding.dados.cpfError') : null,
     birth: birth && birth.length < 10 ? t('auth.onboarding.dados.birthError') : null,
     email: email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? t('auth.onboarding.dados.emailError') : null,
     phone: phone && phone.replace(/\D/g,'').length < 11 ? t('auth.onboarding.dados.phoneError') : null,
   }
 
-  const isDuplicate = validCPF(cpf) && cpf.replace(/\D/g,'') === MOCK_DUPLICATE_CPF
+  const isDuplicate = cpfValid && cpfDigits === MOCK_DUPLICATE_CPF
 
   const isReady =
     name.trim().split(/\s+/).length >= 2 &&
-    validCPF(cpf) &&
+    cpfValid &&
     birth.length === 10 &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
     phone.replace(/\D/g,'').length === 11 &&
@@ -103,7 +104,11 @@ export default function DadosScreen() {
       <Field
         label={t('auth.onboarding.dados.cpf')}
         value={cpf}
-        onChangeText={v => setCpf(maskCPF(v))}
+        onChangeText={v => {
+          const masked = maskCPF(v)
+          setCpf(masked)
+          if (masked.replace(/\D/g, '').length === 11) touch('cpf')
+        }}
         placeholder={t('auth.onboarding.dados.cpfPlaceholder')}
         keyboardType="numeric"
         onBlur={() => touch('cpf')}

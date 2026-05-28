@@ -4,7 +4,7 @@
 // Último passo do cadastro — chama auth-register e inicia sessão
 
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { Alert, Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { OnboardShell } from '../../../components/core/OnboardShell'
@@ -93,10 +93,12 @@ export default function PixScreen() {
   const setSession   = useAuthStore(s => s.setSession)
   const draft        = getDraft()
 
-  const [pixType, setPixType]       = useState<PixType>('cpf')
-  const [pixKey, setPixKey]         = useState<string>(draft.cpf ?? '')
-  const [isCreating, setIsCreating] = useState(false)
-  const [creatingStep, setCreatingStep] = useState(0)
+  const [pixType, setPixType]             = useState<PixType>('cpf')
+  const [pixKey, setPixKey]               = useState<string>(draft.cpf ?? '')
+  const [isCreating, setIsCreating]       = useState(false)
+  const [creatingStep, setCreatingStep]   = useState(0)
+  const [asaasDisclosed, setAsaasDisclosed] = useState(false)
+  const [showAsaasModal, setShowAsaasModal] = useState(false)
 
   const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -126,7 +128,7 @@ export default function PixScreen() {
     return () => { if (stepTimer.current) clearInterval(stepTimer.current) }
   }, [isCreating])
 
-  const isReady = pixKey.trim().length > 0
+  const isReady = pixKey.trim().length > 0 && asaasDisclosed
 
   const handleNext = async () => {
     if (!isReady || isCreating) return
@@ -295,6 +297,65 @@ export default function PixScreen() {
           hint={t('auth.onboarding.pix.randomHint')}
         />
       )}
+
+      {/* Declaração obrigatória Asaas — Playbook BaaS */}
+      <TouchableOpacity
+        style={styles.disclosureRow}
+        onPress={() => setAsaasDisclosed(v => !v)}
+        activeOpacity={0.75}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: asaasDisclosed }}
+      >
+        <View style={[styles.checkbox, asaasDisclosed && styles.checkboxChecked]}>
+          {asaasDisclosed && <Text style={styles.checkmark}>✓</Text>}
+        </View>
+        <Text style={styles.disclosureText}>
+          {t('auth.onboarding.pix.asaasDisclosure')}{' '}
+          <Text
+            style={styles.disclosureLink}
+            onPress={e => { e.stopPropagation(); setShowAsaasModal(true) }}
+          >
+            {t('auth.onboarding.pix.asaasSaibaMais')}
+          </Text>
+        </Text>
+      </TouchableOpacity>
+
+      {/* Modal com texto completo */}
+      <Modal
+        visible={showAsaasModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowAsaasModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={styles.modalDismiss}
+            onPress={() => setShowAsaasModal(false)}
+            activeOpacity={1}
+          />
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <ScrollView
+              style={styles.modalScroll}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={{ paddingBottom: 8 }}
+            >
+              <Text style={styles.modalBody}>
+                {t('auth.onboarding.pix.asaasModalBody')}
+              </Text>
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={() => setShowAsaasModal(false)}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.modalCloseText}>
+                {t('auth.onboarding.pix.asaasModalClose')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </OnboardShell>
   )
 }
@@ -302,6 +363,98 @@ export default function PixScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  // Disclosure checkbox
+  disclosureRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+    flexShrink: 0,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.white[100],
+    borderColor: colors.white[100],
+  },
+  checkmark: {
+    fontSize: 12,
+    color: colors.black[100],
+    fontWeight: '700',
+    lineHeight: 14,
+  },
+  disclosureText: {
+    flex: 1,
+    fontSize: 11.5,
+    color: 'rgba(255,255,255,0.55)',
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: 17,
+  },
+  disclosureLink: {
+    color: 'rgba(255,255,255,0.85)',
+    textDecorationLine: 'underline',
+  },
+  // Modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  modalDismiss: {
+    flex: 1,
+  },
+  modalSheet: {
+    backgroundColor: colors.black[90],
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl + 8,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    maxHeight: '65%',
+  },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  modalScroll: {
+    flex: 1,
+  },
+  modalBody: {
+    fontSize: 13.5,
+    color: 'rgba(255,255,255,0.75)',
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: 21,
+  },
+  modalCloseBtn: {
+    marginTop: spacing.lg,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: spacing.radius.md,
+  },
+  modalCloseText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+  },
+
   typeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',

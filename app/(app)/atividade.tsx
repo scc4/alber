@@ -19,6 +19,7 @@ import { useTranslation } from 'react-i18next'
 import { useBalanceStore } from '../../store/balance.store'
 import { Header } from '../../components/core/Header'
 import { Eyebrow } from '../../components/shared/Eyebrow'
+import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -273,11 +274,17 @@ export default function AtividadeScreen() {
           </View>
         }
         ListFooterComponent={
-          hasMore ? (
-            <TouchableOpacity onPress={() => setPage(p => p + 1)} style={styles.loadMoreBtn}>
-              <Text style={styles.loadMoreText}>{t('atividade.loadMore')}</Text>
-            </TouchableOpacity>
-          ) : null
+          <View>
+            {hasMore && (
+              <TouchableOpacity onPress={() => setPage(p => p + 1)} style={styles.loadMoreBtn}>
+                <Text style={styles.loadMoreText}>{t('atividade.loadMore')}</Text>
+              </TouchableOpacity>
+            )}
+            <View style={styles.asaasFooter}>
+              <Text style={styles.asaasNote}>{t('atividade.asaasNote')}</Text>
+              <AsaasBadge size="small" />
+            </View>
+          </View>
         }
       />
 
@@ -555,4 +562,6 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 13, fontFamily: typography.fontFamily.primary, color: 'rgba(255,255,255,0.35)' },
   loadMoreBtn: { paddingVertical: 16, alignItems: 'center' },
   loadMoreText: { fontSize: 12.5, fontFamily: typography.fontFamily.primary, color: 'rgba(255,255,255,0.4)' },
+  asaasFooter: { alignItems: 'center', paddingVertical: 16, gap: 6 },
+  asaasNote: { fontSize: 11, fontFamily: typography.fontFamily.primary, color: 'rgba(255,255,255,0.3)' },
 })

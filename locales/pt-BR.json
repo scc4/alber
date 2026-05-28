@@ -101,7 +101,11 @@
         "errorCpfDuplicate": "Este CPF já possui uma conta Alber.",
         "errorHandleTaken": "Este @handle já está em uso. Volte e escolha outro.",
         "errorAsaas": "Erro ao criar conta financeira. Tente novamente mais tarde.",
-        "errorGeneric": "Não foi possível criar sua conta. Tente novamente."
+        "errorGeneric": "Não foi possível criar sua conta. Tente novamente.",
+        "asaasDisclosure": "Declaro ciência de que os serviços financeiros são prestados pelo ASAAS GESTÃO FINANCEIRA INSTITUIÇÃO DE PAGAMENTOS S.A., instituição de pagamento autorizada pelo Banco Central do Brasil.",
+        "asaasSaibaMais": "Saiba mais",
+        "asaasModalBody": "Os serviços financeiros disponibilizados por meio do Alber, incluindo abertura e manutenção de conta de pagamento, processamento de transações, transferências e pagamentos, são prestados pelo ASAAS GESTÃO FINANCEIRA INSTITUIÇÃO DE PAGAMENTOS S.A., instituição de pagamento autorizada a funcionar pelo Banco Central do Brasil. A ALBER SERVIÇOS DIGITAIS LTDA atua exclusivamente como integradora tecnológica, não sendo instituição financeira ou de pagamento.",
+        "asaasModalClose": "Fechar"
       },
       "terms": {
         "header": "QUASE LÁ",
@@ -263,7 +267,8 @@
     "successDetailDescarregar": "Pix concluído para sua chave",
     "kycBlockedTitle": "Verificação necessária",
     "kycBlockedBody": "Complete a verificação de identidade para carregar e descarregar Albers.",
-    "kycBlockedCta": "Verificar agora"
+    "kycBlockedCta": "Verificar agora",
+    "pixNote": "Pix processado por Asaas"
   },
   "receber": {
     "title": "Receber",
@@ -702,7 +707,8 @@
     "detailEvent": "Evento",
     "detailEventDate": "Data do evento",
     "detailViewEvent": "Ver evento",
-    "close": "Fechar"
+    "close": "Fechar",
+    "asaasNote": "Operações financeiras processadas por Asaas"
   },
   "achar": {
     "title": "Achar",
@@ -741,6 +747,12 @@
     "kycSubmitted": "Em análise ⏳",
     "kycPending": "Pendente",
     "kycRejected": "Reprovado ✗",
+    "sectionSuporteFinanceiro": "Suporte financeiro",
+    "suporteIntro": "Para dúvidas sobre operações financeiras",
+    "suporteTelefoneLabel": "Telefone",
+    "suporteTelefone": "0800 009 0037",
+    "suporteEmailLabel": "E-mail",
+    "suporteEmail": "contato@asaas.com.br",
     "securityQtd": "4 cadastradas",
     "dados": {
       "title": "Dados cadastrais",
@@ -847,5 +859,8 @@
       "secPinChange": "Troca de PIN",
       "secBlocked": "Tentativas bloqueadas"
     }
+  },
+  "shared": {
+    "asaasBadge": "Serviços financeiros Asaas"
   }
 }

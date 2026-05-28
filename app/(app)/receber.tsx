@@ -22,6 +22,7 @@ import {
   MOCK_SECURITY_QUESTIONS,
 } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
+import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -468,6 +469,9 @@ function SuccessScreen({
         </View>
       </View>
       <View style={s.successBottom}>
+        <View style={s.successAsaas}>
+          <AsaasBadge />
+        </View>
         <PrimaryButton label={ctaLabel} onPress={onCta} />
       </View>
     </View>
@@ -802,6 +806,7 @@ const s = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   successBottom: { paddingBottom: spacing.sm },
+  successAsaas: { alignItems: 'center', marginBottom: spacing.md },
 
   // Receipt row (shared entre success e insufficient)
   receiptRow: {

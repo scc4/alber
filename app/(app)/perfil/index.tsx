@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Linking,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -197,6 +198,21 @@ export default function PerfilScreen() {
           />
         </Section>
 
+        {/* SUPORTE FINANCEIRO */}
+        <Section title={t('perfil.sectionSuporteFinanceiro')}>
+          <Text style={styles.suporteIntro}>{t('perfil.suporteIntro')}</Text>
+          <ActionRow
+            label={t('perfil.suporteTelefoneLabel')}
+            sublabel={t('perfil.suporteTelefone')}
+            onPress={() => Linking.openURL('tel:08000090037')}
+          />
+          <ActionRow
+            label={t('perfil.suporteEmailLabel')}
+            sublabel={t('perfil.suporteEmail')}
+            onPress={() => Linking.openURL('mailto:contato@asaas.com.br')}
+          />
+        </Section>
+
         {/* SESSÃO */}
         <View style={styles.sessionSection}>
           <Text style={styles.eyebrow}>{t('perfil.sectionSessao')}</Text>
@@ -336,6 +352,13 @@ const styles = StyleSheet.create({
   rowChevron: {
     fontSize: 18,
     color: 'rgba(255,255,255,0.2)',
+  },
+  suporteIntro: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.45)',
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: 17,
+    marginBottom: spacing.xs,
   },
   // Session / logout
   sessionSection: {

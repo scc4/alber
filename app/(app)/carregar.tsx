@@ -25,6 +25,7 @@ import {
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Eyebrow } from '../../components/shared/Eyebrow'
 import { QRCodeDisplay } from '../../components/financial/QRCodeDisplay'
+import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { colors } from '../../tokens/colors'
@@ -269,6 +270,11 @@ export default function CarregarScreen() {
           </Pressable>
         </View>
 
+        <View style={s.pixNoteWrap}>
+          <Text style={s.pixNoteText}>{t('carregar.pixNote')}</Text>
+          <AsaasBadge />
+        </View>
+
         <View style={s.spacer} />
         <PrimaryButton
           label={t('carregar.cancel')}
@@ -301,6 +307,9 @@ export default function CarregarScreen() {
         </View>
 
         <View style={s.spacer} />
+        <View style={s.asaasWrap}>
+          <AsaasBadge />
+        </View>
         <PrimaryButton
           label={t('carregar.continue')}
           onPress={() => {
@@ -662,6 +671,21 @@ const s = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
     fontFamily: typography.fontFamily.primary,
     letterSpacing: 0.2,
+  },
+  pixNoteWrap: {
+    alignItems: 'center',
+    gap: 6,
+    marginTop: spacing.md,
+  },
+  pixNoteText: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.35)',
+    fontFamily: typography.fontFamily.primary,
+    letterSpacing: 0.2,
+  },
+  asaasWrap: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
   },
 
   // Confirm screen

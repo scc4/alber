@@ -21,6 +21,7 @@ import {
   MOCK_SECURITY_QUESTIONS,
 } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
+import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -440,6 +441,9 @@ function SuccessScreen({
         </View>
       </View>
       <View style={s.successBottom}>
+        <View style={s.successAsaas}>
+          <AsaasBadge />
+        </View>
         <PrimaryButton label={t('transferir.homeCta')} onPress={onClose} />
       </View>
     </View>
@@ -846,4 +850,5 @@ const s = StyleSheet.create({
   },
   receiptValueGreen: { color: colors.state.success },
   successBottom: { paddingBottom: spacing.sm },
+  successAsaas: { alignItems: 'center', marginBottom: spacing.md },
 })

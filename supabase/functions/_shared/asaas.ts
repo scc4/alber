@@ -178,6 +178,50 @@ export async function ensureAsaasCustomer(
   return (res.data as { id: string }).id
 }
 
+// ── Transferência inter-subconta (spec 04_api §4.4) ──────────────────────────
+// Usado em: receber (pagador→recebedor), receber (pagador→pai/taxa),
+//           transferir (remetente→destinatário)
+
+export async function transferToWallet(
+  value: number,
+  walletId: string,
+  description: string,
+  externalReference: string,
+  fromApiKey: string,
+): Promise<{ id: string; status: string }> {
+  const res = await asaasRequest('POST', '/transfers', fromApiKey, {
+    value,
+    walletId,
+    description,
+    externalReference,
+  })
+  if (!res.ok) throw new Error(`ASAAS_TRANSFER_FAILED: ${JSON.stringify(res.data)}`)
+  const d = res.data as { id: string; status: string }
+  return { id: d.id, status: d.status }
+}
+
+// ── Cash out via Pix externo (spec 04_api §4.5) ───────────────────────────────
+// Usado em: descarregar
+
+export async function cashoutPix(
+  value: number,
+  pixAddressKey: string,
+  pixAddressKeyType: string,
+  externalReference: string,
+  fromApiKey: string,
+): Promise<{ id: string; status: string }> {
+  const res = await asaasRequest('POST', '/transfers', fromApiKey, {
+    value,
+    pixAddressKey,
+    pixAddressKeyType,
+    description: 'Descarregamento Alber',
+    externalReference,
+  })
+  if (!res.ok) throw new Error(`ASAAS_CASHOUT_FAILED: ${JSON.stringify(res.data)}`)
+  const d = res.data as { id: string; status: string }
+  return { id: d.id, status: d.status }
+}
+
 // ── Refund (spec 04_api §4.6) ────────────────────────────────────────────────
 
 export async function refundPayment(

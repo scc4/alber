@@ -18,6 +18,7 @@ interface HomeHeaderProps {
   userName: string
   accentColor?: string
   hasNotification?: boolean
+  onLogoPress?: () => void
   onBell?: () => void
 }
 
@@ -57,7 +58,13 @@ export function Header(props: HeaderProps) {
 
     return (
       <View style={[styles.homeRoot, { paddingTop: insets.top + 10 }]}>
-        <AlberLogo size={32} />
+        {props.onLogoPress != null ? (
+          <Pressable onPress={props.onLogoPress} hitSlop={8} accessibilityRole="button" accessibilityLabel="Home">
+            <AlberLogo size={32} />
+          </Pressable>
+        ) : (
+          <AlberLogo size={32} />
+        )}
         <View style={styles.greetingBlock}>
           <Text style={styles.greetingLine}>{greeting}</Text>
           <Text style={styles.userName}>{props.userName}</Text>

@@ -33,10 +33,58 @@ interface RegisterRequest {
   terms_accepted: boolean
 }
 
+interface PendingRow {
+  id: string
+  asaas_account_id: string
+  asaas_api_key_enc: string
+  asaas_wallet_id: string
+  attempts: number
+}
+
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
+
+// ── Helper: salvar/atualizar pending_registration ─────────────────────────────
+
+async function savePending(opts: {
+  asaasAccountId: string
+  asaasApiKeyEnc: string
+  asaasWalletId: string
+  email: string
+  cpfHash: string
+  handle: string
+  safePayload: Record<string, unknown>
+  error: string
+  pendingId: string | null
+  currentAttempts: number
+}): Promise<void> {
+  try {
+    if (opts.pendingId) {
+      await supabaseAdmin
+        .from('pending_registrations')
+        .update({ error: opts.error, attempts: opts.currentAttempts + 1 })
+        .eq('id', opts.pendingId)
+    } else {
+      await supabaseAdmin.from('pending_registrations').insert({
+        asaas_account_id:  opts.asaasAccountId,
+        asaas_api_key_enc: opts.asaasApiKeyEnc,
+        asaas_wallet_id:   opts.asaasWalletId,
+        email:             opts.email,
+        cpf_hash:          opts.cpfHash,
+        handle:            opts.handle,
+        payload:           opts.safePayload,
+        error:             opts.error,
+        status:            'pending',
+      })
+    }
+  } catch (e) {
+    console.error('[auth-register] savePending failed:', e)
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req)
@@ -51,8 +99,6 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  // ── Validações básicas ───────────────────────────────────────────────────────
-
   const {
     name, email, cpf, birth_date, phone, address,
     handle, pin_hash, security_questions, pix_key, pix_key_type, terms_accepted,
@@ -61,202 +107,215 @@ Deno.serve(async (req: Request) => {
   if (!name || !email || !cpf || !birth_date || !phone || !handle || !pin_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
   }
-
   if (!terms_accepted) {
     return err('TERMS_NOT_ACCEPTED', 'Termos de uso não aceitos', 400)
   }
-
   if (!security_questions || security_questions.length !== 4) {
     return err('INVALID_SECURITY_QUESTIONS', '4 perguntas de segurança são obrigatórias', 400)
   }
-
-  // ── Validar CPF (algoritmo dígitos verificadores) ────────────────────────────
 
   const cpfClean = normalizeCpf(cpf)
   if (!validateCpf(cpfClean)) {
     return err('CPF_INVALID', 'CPF inválido', 422)
   }
 
-  // ── Hash do CPF para armazenamento (spec 05_security §7) ────────────────────
+  const handleNorm  = handle.toLowerCase().replace(/^@/, '')
+  const cpfHash     = await sha256hex(cpfClean)
+  const encSecret   = Deno.env.get('ASAAS_API_KEY')!
 
-  const cpfHash = await sha256hex(cpfClean)
+  // Payload sem campos sensíveis — armazenado apenas para diagnóstico/retomada
+  const { pin_hash: _ph, security_questions: _sq, ...safePayload } = body as Record<string, unknown>
 
-  // ── Verificar duplicatas ─────────────────────────────────────────────────────
+  // ── ETAPA 0: Idempotência — verificar pending_registrations ─────────────────
 
-  const { data: existingCpf } = await supabaseAdmin
-    .from('users')
-    .select('id')
-    .eq('cpf', cpfHash)
+  let pendingReg: PendingRow | null = null
+
+  // Busca por cpf_hash primeiro (identificador primário)
+  const { data: byCpf } = await supabaseAdmin
+    .from('pending_registrations')
+    .select('id, asaas_account_id, asaas_api_key_enc, asaas_wallet_id, attempts')
+    .eq('cpf_hash', cpfHash)
+    .eq('status', 'pending')
     .maybeSingle()
 
-  if (existingCpf) return err('CPF_DUPLICATE', 'CPF já cadastrado', 409)
-
-  const { data: existingEmail } = await supabaseAdmin
-    .from('users')
-    .select('id')
-    .eq('email', email)
-    .maybeSingle()
-
-  if (existingEmail) return err('EMAIL_IN_USE', 'Este e-mail já está em uso', 409)
-
-  const handleNorm = handle.toLowerCase().replace(/^@/, '')
-
-  const { data: existingHandle } = await supabaseAdmin
-    .from('users')
-    .select('id')
-    .eq('handle', `@${handleNorm}`)
-    .maybeSingle()
-
-  if (existingHandle) return err('HANDLE_TAKEN', 'Handle já em uso', 409)
-
-  // ── Criar subconta no Asaas (spec 04_api §4.1) ──────────────────────────────
-  // Feito primeiro: se falhar, nenhum registro Supabase é criado.
-
-  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-  const webhookUrl  = `${supabaseUrl}/functions/v1/webhooks/asaas-pix`
-
-  console.log('[auth-register] asaas payload:', JSON.stringify({
-    name,
-    email,
-    cpfCnpj:       `${cpfClean.slice(0, 3)}***`,
-    birthDate:     birth_date,
-    phone:         phone.replace(/\D/g, '').slice(0, 2) + '***',
-    address:       address?.street ?? '',
-    addressNumber: address?.number ?? 'S/N',
-    province:      address?.neighborhood ?? '',
-    postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
-    webhookUrl,
-  }))
-
-  let asaasAccount: { id: string; apiKey: string; walletId: string }
-  try {
-    asaasAccount = await createAsaasAccount(
-      {
-        name,
-        email,
-        cpfCnpj:       cpfClean,          // Asaas recebe CPF em texto puro
-        birthDate:     birth_date,
-        phone:         phone.replace(/\D/g, ''),
-        mobilePhone:   phone.replace(/\D/g, ''),
-        address:       address?.street ?? '',
-        addressNumber: address?.number ?? 'S/N',
-        complement:    address?.complement,
-        province:      address?.neighborhood ?? '',
-        postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
-        incomeValue:   1000,
-        webhookUrl,
-        webhookSecret: Deno.env.get('ASAAS_WEBHOOK_SECRET')!,
-      },
-      Deno.env.get('ASAAS_API_KEY')!,
-    )
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    console.error('[auth-register] asaas account creation failed:', msg)
-
-    let description = ''
-    try {
-      const jsonStr = msg.replace(/^ASAAS_ACCOUNT_CREATE_FAILED:\s*/, '')
-      const parsed  = JSON.parse(jsonStr) as { errors?: { description?: string }[] }
-      description   = parsed.errors?.[0]?.description ?? ''
-    } catch { /* mensagem não estruturada */ }
-
-    const lower      = description.toLowerCase()
-    const isEmailDup = lower.includes('já está em uso') && (lower.includes('e-mail') || lower.includes('email'))
-    const isCpfDup   = lower.includes('já está em uso') && (lower.includes('cpf') || lower.includes('cnpj'))
-
-    if (isEmailDup || isCpfDup) {
-      // Subconta criada no Asaas mas não persistida no banco (falha anterior) — recuperar
-      console.log('[auth-register] subconta já existe no Asaas, recuperando via CPF...')
-      try {
-        const existing = await getAsaasAccountByCpf(cpfClean, Deno.env.get('ASAAS_API_KEY')!)
-        if (existing) {
-          console.log('[auth-register] subconta recuperada:', existing.id)
-          asaasAccount = existing
-          // Continua o fluxo normal após o try/catch
-        } else {
-          return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
-        }
-      } catch {
-        return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
-      }
-    } else {
-      return err('ASAAS_ERROR', description || 'Erro ao criar subconta financeira', 503)
-    }
+  if (byCpf) {
+    pendingReg = byCpf as PendingRow
+  } else {
+    const { data: byEmail } = await supabaseAdmin
+      .from('pending_registrations')
+      .select('id, asaas_account_id, asaas_api_key_enc, asaas_wallet_id, attempts')
+      .eq('email', email)
+      .eq('status', 'pending')
+      .maybeSingle()
+    if (byEmail) pendingReg = byEmail as PendingRow
   }
 
-  // ── Criptografar API key da subconta (spec 05_security §7) ──────────────────
+  let asaasAccountId: string
+  let asaasApiKeyEnc: string
+  let asaasWalletId: string
 
-  const encSecret = Deno.env.get('ASAAS_API_KEY')! // Usa a master key como segredo AES
-  const asaasApiKeyEnc = await aesEncrypt(asaasAccount.apiKey, encSecret)
+  if (pendingReg) {
+    // Retomar com dados do Asaas já salvos — pular ETAPA 1 e ETAPA 2
+    console.log('[auth-register] retomando pending_registration:', pendingReg.id)
+    asaasAccountId = pendingReg.asaas_account_id
+    asaasApiKeyEnc = pendingReg.asaas_api_key_enc
+    asaasWalletId  = pendingReg.asaas_wallet_id
+  } else {
+    // ── ETAPA 1: Verificações de duplicata (sem efeito colateral) ─────────────
 
-  // Criptografar chave Pix do usuário
+    const { data: existingCpf } = await supabaseAdmin
+      .from('users').select('id').eq('cpf', cpfHash).maybeSingle()
+    if (existingCpf) return err('CPF_DUPLICATE', 'CPF já cadastrado', 409)
+
+    const { data: existingEmail } = await supabaseAdmin
+      .from('users').select('id').eq('email', email).maybeSingle()
+    if (existingEmail) return err('EMAIL_IN_USE', 'Este e-mail já está em uso', 409)
+
+    const { data: existingHandle } = await supabaseAdmin
+      .from('users').select('id').eq('handle', `@${handleNorm}`).maybeSingle()
+    if (existingHandle) return err('HANDLE_TAKEN', 'Handle já em uso', 409)
+
+    // ── ETAPA 2: Criar subconta no Asaas ──────────────────────────────────────
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+    const webhookUrl  = `${supabaseUrl}/functions/v1/webhooks/asaas-pix`
+
+    console.log('[auth-register] asaas payload:', JSON.stringify({
+      name,
+      email,
+      cpfCnpj:       `${cpfClean.slice(0, 3)}***`,
+      birthDate:     birth_date,
+      phone:         phone.replace(/\D/g, '').slice(0, 2) + '***',
+      address:       address?.street ?? '',
+      addressNumber: address?.number ?? 'S/N',
+      province:      address?.neighborhood ?? '',
+      postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
+      webhookUrl,
+    }))
+
+    let asaasAccount: { id: string; apiKey: string; walletId: string }
+    try {
+      asaasAccount = await createAsaasAccount(
+        {
+          name,
+          email,
+          cpfCnpj:       cpfClean,
+          birthDate:     birth_date,
+          phone:         phone.replace(/\D/g, ''),
+          mobilePhone:   phone.replace(/\D/g, ''),
+          address:       address?.street ?? '',
+          addressNumber: address?.number ?? 'S/N',
+          complement:    address?.complement,
+          province:      address?.neighborhood ?? '',
+          postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
+          incomeValue:   1000,
+          webhookUrl,
+          webhookSecret: Deno.env.get('ASAAS_WEBHOOK_SECRET')!,
+        },
+        encSecret,
+      )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      console.error('[auth-register] asaas account creation failed:', msg)
+
+      let description = ''
+      try {
+        const jsonStr = msg.replace(/^ASAAS_ACCOUNT_CREATE_FAILED:\s*/, '')
+        const parsed  = JSON.parse(jsonStr) as { errors?: { description?: string }[] }
+        description   = parsed.errors?.[0]?.description ?? ''
+      } catch { /* mensagem não estruturada */ }
+
+      const lower      = description.toLowerCase()
+      const isEmailDup = lower.includes('já está em uso') && (lower.includes('e-mail') || lower.includes('email'))
+      const isCpfDup   = lower.includes('já está em uso') && (lower.includes('cpf') || lower.includes('cnpj'))
+
+      if (isEmailDup || isCpfDup) {
+        console.log('[auth-register] subconta já existe no Asaas, recuperando via CPF...')
+        try {
+          const existing = await getAsaasAccountByCpf(cpfClean, encSecret)
+          if (existing) {
+            console.log('[auth-register] subconta recuperada:', existing.id)
+            asaasAccount = existing
+          } else {
+            return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
+          }
+        } catch {
+          return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
+        }
+      } else {
+        return err('ASAAS_ERROR', description || 'Erro ao criar subconta financeira', 503)
+      }
+    }
+
+    asaasAccountId = asaasAccount.id
+    asaasWalletId  = asaasAccount.walletId
+    asaasApiKeyEnc = await aesEncrypt(asaasAccount.apiKey, encSecret)
+  }
+
+  // Campos computados a partir do request atual (mesmo em retomada)
   const pixKeyEnc = pix_key ? await aesEncrypt(pix_key, encSecret) : null
-
-  // ── bcrypt do PIN (spec 05_security §7: bcrypt cost 12) ─────────────────────
-  // pin_hash já é SHA-256 do app; BFF aplica bcrypt antes de salvar.
-
   const pinBcrypt = await bcryptHash(pin_hash)
 
-  // ── Criar usuário no Supabase Auth ───────────────────────────────────────────
+  // ── ETAPA 3: Criar usuário Supabase Auth ─────────────────────────────────────
 
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
     email_confirm: true,
-    // pin_hash como senha — permite autenticar via /auth/v1/token para emitir JWT
-    password: pin_hash,
+    password: pin_hash,   // SHA-256 do PIN — usado como senha para emitir JWT
     user_metadata: { name, handle: `@${handleNorm}` },
   })
 
   if (authError || !authData.user) {
-    console.error('Auth user creation failed:', authError)
-    return err('AUTH_ERROR', 'Erro ao criar usuário', 500)
+    console.error('[auth-register] auth user creation failed:', authError)
+    await savePending({
+      asaasAccountId, asaasApiKeyEnc, asaasWalletId,
+      email, cpfHash, handle: `@${handleNorm}`,
+      safePayload, error: String(authError?.message ?? 'auth_create_failed'),
+      pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
+    })
+    return err('AUTH_ERROR', 'Erro temporário ao criar conta. Tente novamente.', 503)
   }
 
   const authUserId = authData.user.id
 
-  // ── Inserir na tabela users ──────────────────────────────────────────────────
+  // ── ETAPA 4: Inserir na tabela users ─────────────────────────────────────────
 
   const { data: newUser, error: userError } = await supabaseAdmin
     .from('users')
     .insert({
-      auth_id:          authUserId,
-      asaas_account_id: asaasAccount.id,
-      asaas_wallet_id:  asaasAccount.walletId,
+      auth_id:           authUserId,
+      asaas_account_id:  asaasAccountId,
+      asaas_wallet_id:   asaasWalletId,
       asaas_api_key_enc: asaasApiKeyEnc,
       name,
       email,
-      cpf:              cpfHash,
-      phone:            phone.replace(/\D/g, ''),
+      cpf:               cpfHash,
+      phone:             phone.replace(/\D/g, ''),
       birth_date,
-      handle:           `@${handleNorm}`,
-      pix_key:          pixKeyEnc,
-      pix_key_type:     pix_key_type ?? null,
-      kyc_status:       'pending',
-      account_status:   'evaluation',
+      handle:            `@${handleNorm}`,
+      pix_key:           pixKeyEnc,
+      pix_key_type:      pix_key_type ?? null,
+      kyc_status:        'pending',
+      account_status:    'evaluation',
     })
     .select('id')
     .single()
 
   if (userError || !newUser) {
-    // Rollback: remover auth user
+    console.error('[auth-register] users insert failed:', userError)
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
-    console.error('User insert failed:', userError)
-    return err('DB_ERROR', 'Erro ao salvar usuário', 500)
+    await savePending({
+      asaasAccountId, asaasApiKeyEnc, asaasWalletId,
+      email, cpfHash, handle: `@${handleNorm}`,
+      safePayload, error: String(userError?.message ?? 'users_insert_failed'),
+      pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
+    })
+    return err('DB_ERROR', 'Erro temporário ao criar conta. Tente novamente.', 503)
   }
 
   const userId = newUser.id
 
-  // ── Inserir PIN (em tabela separada para isolamento de segurança) ────────────
-  // Nota: PIN armazenado na tabela users.pin_hash seria mais direto,
-  // mas como a migration não inclui essa coluna, armazenamos em metadata.
-  // TODO Sprint 7.1: adicionar coluna pin_hash à tabela users via migration.
-  // Por ora, PIN validado comparando com hash armazenado em user_metadata Supabase Auth.
-
-  await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-    app_metadata: { pin_bcrypt: pinBcrypt },
-  })
-
-  // ── Inserir perguntas de segurança ───────────────────────────────────────────
+  // ── ETAPA 5: Inserir perguntas de segurança ───────────────────────────────────
 
   const questionsToInsert = await Promise.all(
     security_questions.map(async (q, i) => ({
@@ -272,20 +331,34 @@ Deno.serve(async (req: Request) => {
     .insert(questionsToInsert)
 
   if (qError) {
-    console.error('Security questions insert failed:', qError)
-    // Não faz rollback — registro parcial pode ser reprocessado
+    console.error('[auth-register] security questions insert failed:', qError)
+    await supabaseAdmin.from('users').delete().eq('id', userId)
+    await supabaseAdmin.auth.admin.deleteUser(authUserId)
+    await savePending({
+      asaasAccountId, asaasApiKeyEnc, asaasWalletId,
+      email, cpfHash, handle: `@${handleNorm}`,
+      safePayload, error: String(qError?.message ?? 'security_questions_insert_failed'),
+      pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
+    })
+    return err('DB_ERROR', 'Erro temporário ao criar conta. Tente novamente.', 503)
   }
 
-  // ── Log de auditoria ─────────────────────────────────────────────────────────
+  // PIN bcrypt em app_metadata (não crítico — auth-login usa pin_hash como senha primária)
+  await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+    app_metadata: { pin_bcrypt: pinBcrypt },
+  }).catch(e => console.error('[auth-register] updateUserById failed (non-critical):', e))
 
+  // Log de auditoria (não crítico)
   await supabaseAdmin.from('audit_logs').insert({
     user_id:    userId,
     event_type: 'register',
-    metadata:   { handle: `@${handleNorm}`, asaas_account_id: asaasAccount.id },
-  })
+    metadata:   { handle: `@${handleNorm}`, asaas_account_id: asaasAccountId },
+  }).catch(e => console.error('[auth-register] audit_log failed (non-critical):', e))
 
-  // ── Gerar sessão JWT via password flow ──────────────────────────────────────
-  // createSession não existe no SDK — autenticar com email+pin_hash (senha definida no createUser)
+  // ── ETAPA 6: Login e retorno do JWT ─────────────────────────────────────────
+
+  let access_token:  string | null = null
+  let refresh_token: string | null = null
 
   const signInRes = await fetch(
     `${Deno.env.get('SUPABASE_URL')}/auth/v1/token?grant_type=password`,
@@ -301,13 +374,22 @@ Deno.serve(async (req: Request) => {
 
   if (!signInRes.ok) {
     const signInErr = await signInRes.json().catch(() => ({}))
-    console.error('Session creation failed:', signInErr)
-    return err('SESSION_ERROR', 'Erro ao gerar sessão', 500)
+    console.error('[auth-register] session creation failed:', signInErr)
+    // Não crítico — usuário pode fazer login manualmente
+  } else {
+    const tokens = await signInRes.json() as { access_token: string; refresh_token: string }
+    access_token  = tokens.access_token
+    refresh_token = tokens.refresh_token
   }
 
-  const { access_token, refresh_token } = await signInRes.json() as {
-    access_token: string
-    refresh_token: string
+  // ── ETAPA 7: Resolver pending se veio de retomada ────────────────────────────
+
+  if (pendingReg) {
+    await supabaseAdmin
+      .from('pending_registrations')
+      .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+      .eq('id', pendingReg.id)
+      .catch(e => console.error('[auth-register] resolve pending failed (non-critical):', e))
   }
 
   return json(
@@ -317,6 +399,7 @@ Deno.serve(async (req: Request) => {
       refresh_token:  refresh_token,
       kyc_status:     'pending',
       account_status: 'evaluation',
+      ...(access_token == null && { login_required: true }),
     },
     201,
   )

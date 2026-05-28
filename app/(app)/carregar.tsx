@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -28,6 +29,8 @@ import { QRCodeDisplay } from '../../components/financial/QRCodeDisplay'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
+import { descarregar, DescarregarResponse } from '../../services/financial.service'
+import { BffError } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -42,6 +45,7 @@ type Step =
   | 'confirm'
   | 'pin'
   | 'security'
+  | 'processing'
   | 'success'
 
 // ─── Helpers monetários ───────────────────────────────────────────────────────
@@ -57,21 +61,24 @@ function parseBRL(digits: string): number {
   return parseInt(digits || '0', 10) / 100
 }
 
-const FEE = 0.5 // taxa fixa mock Descarregar — substituir pelo cálculo real no Sprint 3
+const CASHOUT_RATE_ESTIMATE = 0.02 // Preview local — taxa real vem da API
 
 // ─── Tela principal ───────────────────────────────────────────────────────────
 
 export default function CarregarScreen() {
   const { t } = useTranslation()
-  const { kycStatus, user } = useAuthStore()
+  const { kycStatus, user, token } = useAuthStore()
   const { balance, fetchBalance } = useBalanceStore()
 
   const [tab, setTab]           = useState<Tab>('carregar')
   const [step, setStep]         = useState<Step>(
     kycStatus !== 'approved' ? 'kyc_blocked' : 'value',
   )
-  const [rawAmount, setRawAmount] = useState('10000') // centavos, default R$100,00
-  const [pinError, setPinError]   = useState<string | null>(null)
+  const [rawAmount, setRawAmount]           = useState('10000') // centavos, default R$100,00
+  const [pinHash, setPinHash]               = useState<string | null>(null)
+  const [pinError, setPinError]             = useState<string | null>(null)
+  const [apiError, setApiError]             = useState<string | null>(null)
+  const [descarregarResult, setDescarregarResult] = useState<DescarregarResponse | null>(null)
   const pinKey = useRef(0)
 
   const numericAmount = parseBRL(rawAmount)
@@ -92,6 +99,9 @@ export default function CarregarScreen() {
   const handleTabChange = (t: Tab) => {
     setTab(t)
     setRawAmount('10000')
+    setPinHash(null)
+    setApiError(null)
+    setDescarregarResult(null)
   }
 
   const handleCarregarSuccess = async () => {
@@ -99,20 +109,45 @@ export default function CarregarScreen() {
     setStep('success')
   }
 
-  const handleDescarregarSuccess = async () => {
-    await fetchBalance()
-    setStep('success')
-  }
-
-  const handlePINComplete = (_hash: string) => {
-    // Produção: enviar hash + contexto para BFF validar
+  const handlePINComplete = (hash: string) => {
+    setPinHash(hash)
     setPinError(null)
+    setApiError(null)
     setTimeout(() => setStep('security'), 200)
   }
 
-  const handleSecurityPass = () => {
-    // Mock: simula processamento bem-sucedido
-    setTimeout(() => handleDescarregarSuccess(), 400)
+  const handleSecurityPass = async (answerHash?: string) => {
+    if (!answerHash || !pinHash || !token) return
+    setStep('processing')
+    try {
+      const result = await descarregar(token, numericAmount, pinHash, answerHash)
+      setDescarregarResult(result)
+      await fetchBalance()
+      setStep('success')
+    } catch (e) {
+      if (e instanceof BffError) {
+        if (e.code === 'INSUFFICIENT_BALANCE') {
+          setApiError(t('carregar.errorInsufficient'))
+        } else if (e.code === 'KYC_REQUIRED') {
+          setStep('kyc_blocked')
+          return
+        } else if (e.code === 'PIX_KEY_MISSING' || e.code === 'PIX_CPF_MISMATCH') {
+          setApiError(t('carregar.errorPixKeyMissing'))
+        } else if (e.code === 'INVALID_CREDENTIALS') {
+          setPinError(t('carregar.errorInvalidCredentials'))
+          pinKey.current += 1
+          setStep('pin')
+          return
+        } else if (e.code === 'TOO_MANY_ATTEMPTS') {
+          setApiError(t('carregar.errorTooManyAttempts'))
+        } else {
+          setApiError(t('carregar.errorApi'))
+        }
+      } else {
+        setApiError(t('carregar.errorApi'))
+      }
+      setStep('value')
+    }
   }
 
   const handleSecurityBlocked = () => {
@@ -207,6 +242,13 @@ export default function CarregarScreen() {
               ))}
             </View>
 
+            {/* Erro de API */}
+            {apiError && (
+              <View style={s.errorBox}>
+                <Text style={s.errorText}>{apiError}</Text>
+              </View>
+            )}
+
             {/* Aviso contextual */}
             <View style={s.warningBox}>
               <Text style={s.warningText}>
@@ -287,7 +329,8 @@ export default function CarregarScreen() {
 
   // ── Confirmação (Descarregar) ──────────────────────────────────────────────
   if (step === 'confirm') {
-    const net = numericAmount - FEE
+    const estimatedFee = parseFloat((numericAmount * CASHOUT_RATE_ESTIMATE).toFixed(2))
+    const net          = parseFloat((numericAmount - estimatedFee).toFixed(2))
     return (
       <FlowShell
         title={t('carregar.tabDescarregar')}
@@ -299,9 +342,9 @@ export default function CarregarScreen() {
           <ConfirmRow label={t('carregar.confirm.amountLabel')}
             value={`R$ ${formatBRL(rawAmount)}`} />
           <ConfirmRow label={t('carregar.confirm.feeLabel')}
-            value={`−R$ ${FEE.toFixed(2).replace('.', ',')}`} muted />
+            value={`~R$ ${estimatedFee.toFixed(2).replace('.', ',')}`} muted />
           <ConfirmRow label={t('carregar.confirm.netLabel')}
-            value={`R$ ${net.toFixed(2).replace('.', ',')}`} bold />
+            value={`~R$ ${net.toFixed(2).replace('.', ',')}`} bold />
           <ConfirmRow label={t('carregar.confirm.keyLabel')}
             value={user?.pixKey ?? '—'} muted />
         </View>
@@ -362,15 +405,35 @@ export default function CarregarScreen() {
     )
   }
 
+  // ── Processando (Descarregar) ──────────────────────────────────────────────
+  if (step === 'processing') {
+    return (
+      <FlowShell
+        title={t('carregar.tabDescarregar')}
+        subtitle={t('carregar.processing')}
+        onClose={() => {}}
+      >
+        <View style={s.processingCenter}>
+          <ActivityIndicator color={colors.white[100]} size="large" />
+        </View>
+      </FlowShell>
+    )
+  }
+
   // ── Sucesso ────────────────────────────────────────────────────────────────
   if (step === 'success') {
     const isCarregar = tab === 'carregar'
+    const descarregarTitle = descarregarResult
+      ? t('carregar.successDescarregar', {
+          amount: descarregarResult.amount_sent.toFixed(2).replace('.', ','),
+        })
+      : t('carregar.successDescarregar', { amount: formatBRL(rawAmount) })
     return (
       <SuccessScreen
         title={
           isCarregar
             ? t('carregar.successCarregar', { amount: formatBRL(rawAmount) })
-            : t('carregar.successDescarregar', { amount: formatBRL(rawAmount) })
+            : descarregarTitle
         }
         detail={
           isCarregar
@@ -518,6 +581,28 @@ const s = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   spacer: { flex: 1, minHeight: spacing.xl },
+  processingCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Error box (value step)
+  errorBox: {
+    backgroundColor: 'rgba(239,68,68,0.07)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(239,68,68,0.25)',
+    borderRadius: spacing.radius.md,
+    padding: 12,
+    paddingHorizontal: 14,
+    marginBottom: spacing.sm,
+  },
+  errorText: {
+    fontSize: 12,
+    color: colors.state.error,
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: 17,
+  },
 
   // KYC
   kycBody: {

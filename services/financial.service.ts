@@ -59,3 +59,75 @@ export interface CarregarResponse {
 export async function carregar(token: string, amountAlbers: number): Promise<CarregarResponse> {
   return post<CarregarResponse>('financial-carregar', { amount_albers: amountAlbers }, token)
 }
+
+// ── Descarregar (spec §4.4) ───────────────────────────────────────────────────
+
+export interface DescarregarResponse {
+  transaction_id: string
+  amount_sent:    number
+  fee:            number
+  pix_key:        string
+  status:         string
+}
+
+export async function descarregar(
+  token: string,
+  amountAlbers: number,
+  pinHash: string,
+  securityAnswerHash: string,
+): Promise<DescarregarResponse> {
+  return post<DescarregarResponse>('financial-descarregar', {
+    amount_albers:        amountAlbers,
+    pin_hash:             pinHash,
+    security_answer_hash: securityAnswerHash,
+  }, token)
+}
+
+// ── Receber (spec §4.5) ───────────────────────────────────────────────────────
+
+export interface ReceberResponse {
+  transaction_id:  string
+  amount_received: number
+  fee:             number
+  payer_name:      string
+  status:          string
+}
+
+export async function receber(
+  token: string,
+  amountAlbers: number,
+  payerIdentifier: string,
+  payerPinHash: string,
+  payerSecurityAnswerHash: string,
+): Promise<ReceberResponse> {
+  return post<ReceberResponse>('financial-receber', {
+    amount_albers:               amountAlbers,
+    payer_identifier:            payerIdentifier,
+    payer_pin_hash:              payerPinHash,
+    payer_security_answer_hash:  payerSecurityAnswerHash,
+  }, token)
+}
+
+// ── Transferir (spec §4.6) ────────────────────────────────────────────────────
+
+export interface TransferirResponse {
+  transaction_id:      string
+  amount:              number
+  destinatario_handle: string
+  novo_saldo:          number
+}
+
+export async function transferir(
+  token: string,
+  destinatarioIdentifier: string,
+  amountAlbers: number,
+  pinHash: string,
+  securityAnswerHash: string,
+): Promise<TransferirResponse> {
+  return post<TransferirResponse>('financial-transferir', {
+    destinatario_identifier: destinatarioIdentifier,
+    amount_albers:           amountAlbers,
+    pin_hash:                pinHash,
+    security_answer_hash:    securityAnswerHash,
+  }, token)
+}

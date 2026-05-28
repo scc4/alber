@@ -4,6 +4,7 @@
 
 import React, { useState } from 'react'
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -23,13 +24,16 @@ import {
 } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
+import { useAuthStore } from '../../store/auth.store'
+import { receber, ReceberResponse } from '../../services/financial.service'
+import { BffError } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-type Step = 'value' | 'identify' | 'payer' | 'pin' | 'security' | 'insufficient' | 'success'
+type Step = 'value' | 'identify' | 'payer' | 'pin' | 'security' | 'processing' | 'insufficient' | 'success'
 
 interface Payer {
   name: string
@@ -38,9 +42,7 @@ interface Payer {
   initials: string
 }
 
-// ─── Mock ─────────────────────────────────────────────────────────────────────
-
-const MOCK_ME = { handle: '@mayte', name: 'Mayte' }
+// ─── UI shortcuts (recentes para seleção rápida — não usado na validação) ──────
 
 const MOCK_RECENTS: Payer[] = [
   { name: 'João Silva Pereira', handle: '@joaosilva', maskedCpf: '***.***.789-01', initials: 'JS' },
@@ -48,14 +50,13 @@ const MOCK_RECENTS: Payer[] = [
   { name: 'Pedro Henrique',    handle: '@phenrique',  maskedCpf: '***.***.012-34', initials: 'PH' },
 ]
 
-// Saldo mock do pagador — em produção vem do BFF após PIN válido
-const MOCK_PAYER_BALANCE = 200
 const MAX_ATTEMPTS = 3
 
 // ─── Tela principal ───────────────────────────────────────────────────────────
 
 export default function ReceberScreen() {
   const { t } = useTranslation()
+  const { user, token } = useAuthStore()
 
   const [step, setStep]               = useState<Step>('value')
   const [amount, setAmount]           = useState('')
@@ -63,62 +64,93 @@ export default function ReceberScreen() {
   const [searching, setSearching]     = useState(false)
   const [notFound, setNotFound]       = useState(false)
   const [payer, setPayer]             = useState<Payer | null>(null)
+  const [payerPinHash, setPayerPinHash] = useState<string | null>(null)
   const [pinError, setPinError]       = useState<string | null>(null)
+  const [apiError, setApiError]       = useState<string | null>(null)
   const [pinAttempts, setPinAttempts] = useState(0)
+  const [receberResult, setReceberResult] = useState<ReceberResponse | null>(null)
 
   const amountNum = parseInt(amount || '0', 10)
 
   const handleClose = () => router.back()
 
   const handleSearch = () => {
-    if (!identifier.trim()) return
+    const clean = identifier.trim()
+    if (!clean) return
     setSearching(true)
-    setTimeout(() => {
-      setSearching(false)
-      const q = identifier.replace('@', '').toLowerCase()
-      const found = MOCK_RECENTS.find(
-        p =>
-          p.handle.replace('@', '').toLowerCase().includes(q) ||
-          p.name.toLowerCase().includes(q),
-      )
-      if (found || /^\d{3}/.test(identifier) || identifier.includes('@') || q.length >= 3) {
-        setPayer(
-          found ?? { name: 'Lucas Andrade', handle: '@lucas_a', maskedCpf: '***.***.567-89', initials: 'LA' },
-        )
-        setNotFound(false)
-        setStep('payer')
-      } else {
-        setNotFound(true)
-      }
-    }, 400)
+    const q = clean.replace('@', '').toLowerCase()
+    const found = MOCK_RECENTS.find(
+      p =>
+        p.handle.replace('@', '').toLowerCase().includes(q) ||
+        p.name.toLowerCase().includes(q),
+    )
+    setPayer(
+      found ?? {
+        name:      clean,
+        handle:    clean.startsWith('@') ? clean : '',
+        maskedCpf: '',
+        initials:  clean.slice(0, 2).toUpperCase(),
+      },
+    )
+    setNotFound(false)
+    setApiError(null)
+    setSearching(false)
+    setStep('payer')
   }
 
   const handleSelectRecent = (p: Payer) => {
     setIdentifier(p.handle)
     setPayer(p)
+    setApiError(null)
     setStep('payer')
   }
 
-  // Mock: qualquer PIN aceito — em produção envia hash ao BFF para validação
-  const handlePinComplete = (_hash: string) => {
+  const handlePinComplete = (hash: string) => {
+    setPayerPinHash(hash)
     setPinError(null)
+    setApiError(null)
     setTimeout(() => setStep('security'), 300)
   }
 
-  const handleSecurityPass = () => {
-    if (MOCK_PAYER_BALANCE >= amountNum) {
+  const handleSecurityPass = async (answerHash?: string) => {
+    if (!answerHash || !payerPinHash || !token) return
+    setStep('processing')
+    try {
+      const result = await receber(token, amountNum, identifier, payerPinHash, answerHash)
+      setReceberResult(result)
       setStep('success')
-    } else {
-      setStep('insufficient')
+    } catch (e) {
+      if (e instanceof BffError) {
+        if (e.code === 'PAYER_NOT_FOUND') {
+          setNotFound(true)
+          setApiError(t('receber.errorPayerNotFound'))
+          setStep('identify')
+        } else if (e.code === 'INSUFFICIENT_BALANCE') {
+          setStep('insufficient')
+        } else if (e.code === 'INVALID_CREDENTIALS') {
+          setPinError(t('receber.errorInvalidCredentials'))
+          setPayerPinHash(null)
+          setStep('pin')
+        } else if (e.code === 'TOO_MANY_ATTEMPTS') {
+          setApiError(t('receber.errorTooManyAttempts'))
+          setStep('identify')
+        } else {
+          setApiError(t('receber.errorApi'))
+          setStep('identify')
+        }
+      } else {
+        setApiError(t('receber.errorApi'))
+        setStep('identify')
+      }
     }
   }
 
   const handleSecurityFail = (_attemptsLeft: number) => {
-    // Em produção: BFF incrementa contador e pode bloquear a conta
+    // BFF incrementa contador internamente — nenhuma ação local necessária
   }
 
   const handleSecurityBlocked = () => {
-    setStep('value') // reset para recomeçar
+    setStep('value')
   }
 
   // ─── Etapa 1: Valor ──────────────────────────────────────────────────────────
@@ -180,7 +212,7 @@ export default function ReceberScreen() {
           <Text style={s.eyebrow}>{t('receber.identifierLabel')}</Text>
           <TextInput
             value={identifier}
-            onChangeText={v => { setIdentifier(v); setNotFound(false) }}
+            onChangeText={v => { setIdentifier(v); setNotFound(false); setApiError(null) }}
             autoFocus
             placeholder={t('receber.identifierPlaceholder')}
             placeholderTextColor="rgba(255,255,255,0.25)"
@@ -191,8 +223,8 @@ export default function ReceberScreen() {
             onSubmitEditing={handleSearch}
             accessibilityLabel={t('receber.identifierLabel')}
           />
-          {notFound && (
-            <Text style={s.notFoundText}>{t('receber.notFound')}</Text>
+          {(notFound || apiError) && (
+            <Text style={s.notFoundText}>{apiError ?? t('receber.notFound')}</Text>
           )}
 
           <ScrollView
@@ -335,10 +367,26 @@ export default function ReceberScreen() {
     )
   }
 
+  // ─── Etapa 5.5: Processando ──────────────────────────────────────────────────
+
+  if (step === 'processing') {
+    return (
+      <FlowShell
+        subtitle={t('receber.processing')}
+        title={t('receber.title')}
+        onClose={() => {}}
+        closeLabel=""
+      >
+        <View style={s.processingCenter}>
+          <ActivityIndicator color={colors.white[100]} size="large" />
+        </View>
+      </FlowShell>
+    )
+  }
+
   // ─── Etapa 6: Saldo insuficiente ─────────────────────────────────────────────
 
   if (step === 'insufficient') {
-    const missing = amountNum - MOCK_PAYER_BALANCE
     return (
       <FlowShell
         subtitle={t('receber.subtitleInsufficient')}
@@ -348,16 +396,12 @@ export default function ReceberScreen() {
       >
         <View style={s.insufficientBlock}>
           <ReceiptRow
-            label={t('receber.insufficientCurrent')}
-            value={`${MOCK_PAYER_BALANCE} ${t('receber.amountUnit')}`}
-          />
-          <ReceiptRow
             label={t('receber.insufficientNeeded')}
             value={`${amountNum} ${t('receber.amountUnit')}`}
           />
           <ReceiptRow
             label={t('receber.insufficientMissing')}
-            value={`${missing} ${t('receber.amountUnit')}`}
+            value={t('receber.errorInsufficient')}
             accent
           />
         </View>
@@ -373,13 +417,15 @@ export default function ReceberScreen() {
 
   // ─── Etapa 7: Sucesso ────────────────────────────────────────────────────────
 
-  if (step === 'success' && payer) {
+  if (step === 'success') {
+    const displayFrom = receberResult?.payer_name ?? payer?.name ?? identifier
+    const displayTo   = user?.handle ?? ''
     return (
       <SuccessScreen
-        title={t('receber.successTitle', { amount: amountNum })}
+        title={t('receber.successTitle', { amount: receberResult?.amount_received ?? amountNum })}
         rows={[
-          { label: t('receber.successFrom'), value: payer.handle },
-          { label: t('receber.successTo'),   value: MOCK_ME.handle },
+          { label: t('receber.successFrom'), value: displayFrom },
+          { label: t('receber.successTo'),   value: displayTo },
         ]}
         ctaLabel={t('receber.conclude')}
         onCta={handleClose}
@@ -599,6 +645,11 @@ const s = StyleSheet.create({
   },
 
   spacer: { flex: 1 },
+  processingCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // Identifier input
   lineInput: {

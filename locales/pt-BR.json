@@ -268,7 +268,13 @@
     "kycBlockedTitle": "Verificação necessária",
     "kycBlockedBody": "Complete a verificação de identidade para carregar e descarregar Albers.",
     "kycBlockedCta": "Verificar agora",
-    "pixNote": "Pix processado por Asaas"
+    "pixNote": "Pix processado por Asaas",
+    "processing": "Processando…",
+    "errorInsufficient": "Saldo insuficiente.",
+    "errorPixKeyMissing": "Chave Pix não cadastrada. Configure em Perfil.",
+    "errorInvalidCredentials": "PIN ou resposta de segurança incorretos.",
+    "errorTooManyAttempts": "Operação bloqueada por 15 minutos. Tente mais tarde.",
+    "errorApi": "Erro ao processar. Tente novamente."
   },
   "receber": {
     "title": "Receber",
@@ -308,7 +314,13 @@
     "successTitle": "{{amount}} Albers recebidos!",
     "successFrom": "De",
     "successTo": "Para",
-    "conclude": "Concluir"
+    "conclude": "Concluir",
+    "processing": "Processando…",
+    "errorPayerNotFound": "Pagador não encontrado. Verifique o identificador.",
+    "errorInsufficient": "Saldo insuficiente do pagador.",
+    "errorInvalidCredentials": "PIN ou resposta de segurança do pagador incorretos.",
+    "errorTooManyAttempts": "Pagador bloqueado por 15 minutos. Tente mais tarde.",
+    "errorApi": "Erro ao processar. Tente novamente."
   },
   "transferir": {
     "title": "Transferir",
@@ -338,6 +350,12 @@
     "attempts": "Tentativa {{n}} de {{max}}",
     "blocked": "Conta bloqueada por 15 minutos.",
     "selfTransferError": "Você não pode transferir para sua própria conta.",
+    "processing": "Processando…",
+    "errorRecipientNotFound": "Destinatário não encontrado. Verifique o identificador.",
+    "errorInsufficient": "Saldo insuficiente.",
+    "errorInvalidCredentials": "PIN ou resposta de segurança incorretos.",
+    "errorTooManyAttempts": "Operação bloqueada por 15 minutos. Tente mais tarde.",
+    "errorApi": "Erro ao processar. Tente novamente.",
     "successTitle": "{{amount}} Albers enviados!",
     "successSubtitle": "Transferência para {{handle}} concluída com sucesso",
     "receiptTo": "Para",

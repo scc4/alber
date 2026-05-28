@@ -4,6 +4,7 @@
 
 import React, { useState } from 'react'
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,13 +23,17 @@ import {
 } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
+import { useAuthStore } from '../../store/auth.store'
+import { useBalanceStore } from '../../store/balance.store'
+import { transferir, TransferirResponse } from '../../services/financial.service'
+import { BffError } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
-type Step = 'search' | 'value' | 'pin' | 'security' | 'success'
+type Step = 'search' | 'value' | 'pin' | 'security' | 'processing' | 'success'
 
 interface Recipient {
   name: string
@@ -36,10 +41,7 @@ interface Recipient {
   initials: string
 }
 
-// ─── Mock ─────────────────────────────────────────────────────────────────────
-
-const MOCK_ME = { handle: '@mayte', name: 'Mayte' }
-const MOCK_BALANCE = 120 // Albers disponíveis — em produção vem do balance.store
+// ─── UI shortcuts (recentes para seleção rápida) ──────────────────────────────
 
 const MOCK_RECENTS: Recipient[] = [
   { name: 'João Pedro',    handle: '@joaopedro', initials: 'JP' },
@@ -53,6 +55,8 @@ const MAX_ATTEMPTS = 3
 
 export default function TransferirScreen() {
   const { t } = useTranslation()
+  const { user, token } = useAuthStore()
+  const { balance, fetchBalance } = useBalanceStore()
 
   const [step, setStep]             = useState<Step>('search')
   const [query, setQuery]           = useState('')
@@ -60,36 +64,42 @@ export default function TransferirScreen() {
   const [notFound, setNotFound]     = useState(false)
   const [selfError, setSelfError]   = useState(false)
   const [amount, setAmount]         = useState(0)
+  const [pinHash, setPinHash]       = useState<string | null>(null)
   const [pinError, setPinError]     = useState<string | null>(null)
+  const [apiError, setApiError]     = useState<string | null>(null)
   const [pinAttempts, setPinAttempts] = useState(0)
+  const [transferirResult, setTransferirResult] = useState<TransferirResponse | null>(null)
 
   const handleClose = () => router.back()
 
   // ─── Handlers busca ──────────────────────────────────────────────────────────
 
   const tryFind = (q: string) => {
-    const clean = q.replace('@', '').toLowerCase()
-    if (clean === MOCK_ME.handle.replace('@', '').toLowerCase()) {
+    const clean = q.trim()
+    if (clean.length < 2) return
+    const myHandle = user?.handle?.replace('@', '').toLowerCase()
+    const inputHandle = clean.replace('@', '').toLowerCase()
+    if (myHandle && inputHandle === myHandle) {
       setSelfError(true)
       setNotFound(false)
       return
     }
     const found = MOCK_RECENTS.find(
       r =>
-        r.handle.replace('@', '').toLowerCase().includes(clean) ||
-        r.name.toLowerCase().includes(clean),
+        r.handle.replace('@', '').toLowerCase().includes(inputHandle) ||
+        r.name.toLowerCase().includes(inputHandle),
     )
-    if (found || /^[\d.\-]{11,}$/.test(q) || q.includes('@') || q.includes('.com')) {
-      setRecipient(
-        found ?? { name: 'Lucas Andrade', handle: '@lucas_a', initials: 'LA' },
-      )
-      setNotFound(false)
-      setSelfError(false)
-      setStep('value')
-    } else if (clean.length >= 2) {
-      setNotFound(true)
-      setSelfError(false)
+    const resolved = found ?? {
+      name:     clean,
+      handle:   clean.startsWith('@') ? clean : '',
+      initials: clean.replace('@', '').slice(0, 2).toUpperCase(),
     }
+    setRecipient(resolved)
+    if (found) setQuery(found.handle) // normaliza query para o handle completo
+    setNotFound(false)
+    setSelfError(false)
+    setApiError(null)
+    setStep('value')
   }
 
   const handleSelectRecent = (r: Recipient) => {
@@ -97,19 +107,57 @@ export default function TransferirScreen() {
     setRecipient(r)
     setSelfError(false)
     setNotFound(false)
+    setApiError(null)
     setStep('value')
   }
 
-  // Mock: qualquer PIN aceito — em produção envia hash ao BFF
-  const handlePinComplete = (_hash: string) => {
+  const handlePinComplete = (hash: string) => {
+    setPinHash(hash)
     setPinError(null)
+    setApiError(null)
     setTimeout(() => setStep('security'), 300)
   }
 
-  const handleSecurityPass = () => setStep('success')
+  const handleSecurityPass = async (answerHash?: string) => {
+    if (!answerHash || !pinHash || !token || !recipient) return
+    setStep('processing')
+    try {
+      const result = await transferir(token, query, amount, pinHash, answerHash)
+      setTransferirResult(result)
+      await fetchBalance()
+      setStep('success')
+    } catch (e) {
+      if (e instanceof BffError) {
+        if (e.code === 'RECIPIENT_NOT_FOUND' || e.code === 'SELF_TRANSFER') {
+          setApiError(
+            e.code === 'SELF_TRANSFER'
+              ? t('transferir.selfTransferError')
+              : t('transferir.errorRecipientNotFound'),
+          )
+          setStep('search')
+        } else if (e.code === 'INSUFFICIENT_BALANCE') {
+          setApiError(t('transferir.errorInsufficient'))
+          setStep('value')
+        } else if (e.code === 'INVALID_CREDENTIALS') {
+          setPinError(t('transferir.errorInvalidCredentials'))
+          setPinHash(null)
+          setStep('pin')
+        } else if (e.code === 'TOO_MANY_ATTEMPTS') {
+          setApiError(t('transferir.errorTooManyAttempts'))
+          setStep('search')
+        } else {
+          setApiError(t('transferir.errorApi'))
+          setStep('search')
+        }
+      } else {
+        setApiError(t('transferir.errorApi'))
+        setStep('search')
+      }
+    }
+  }
 
   const handleSecurityFail = (_attemptsLeft: number) => {
-    // Em produção: BFF incrementa contador
+    // BFF incrementa contador internamente — nenhuma ação local necessária
   }
 
   const handleSecurityBlocked = () => {
@@ -147,6 +195,9 @@ export default function TransferirScreen() {
         )}
         {notFound && !selfError && (
           <Text style={s.errorText}>{t('transferir.notFound')}</Text>
+        )}
+        {apiError && !selfError && !notFound && (
+          <Text style={s.errorText}>{apiError}</Text>
         )}
 
         <ScrollView
@@ -190,11 +241,12 @@ export default function TransferirScreen() {
     return (
       <NumpadValueScreen
         recipient={recipient}
-        balance={MOCK_BALANCE}
+        balance={balance}
         onSwap={() => setStep('search')}
         onClose={handleClose}
         closeLabel={t('transferir.back')}
-        onContinue={amt => { setAmount(amt); setPinAttempts(0); setPinError(null); setStep('pin') }}
+        apiError={apiError}
+      onContinue={amt => { setAmount(amt); setPinAttempts(0); setPinError(null); setApiError(null); setStep('pin') }}
         t={t}
       />
     )
@@ -257,14 +309,31 @@ export default function TransferirScreen() {
     )
   }
 
+  // ─── Etapa 4.5: Processando ──────────────────────────────────────────────────
+
+  if (step === 'processing') {
+    return (
+      <FlowShell
+        subtitle={t('transferir.processing')}
+        title={t('transferir.title')}
+        onClose={() => {}}
+        closeLabel=""
+      >
+        <View style={s.processingCenter}>
+          <ActivityIndicator color={colors.white[100]} size="large" />
+        </View>
+      </FlowShell>
+    )
+  }
+
   // ─── Etapa 5: Sucesso com recibo ─────────────────────────────────────────────
 
   if (step === 'success' && recipient) {
-    const remaining = MOCK_BALANCE - amount
+    const remaining = transferirResult?.novo_saldo ?? balance
     return (
       <SuccessScreen
-        amount={amount}
-        recipient={recipient}
+        amount={transferirResult?.amount ?? amount}
+        recipient={{ ...recipient, handle: transferirResult?.destinatario_handle ?? recipient.handle }}
         remaining={remaining}
         onClose={handleClose}
         t={t}
@@ -281,6 +350,7 @@ export default function TransferirScreen() {
 interface NumpadProps {
   recipient: Recipient
   balance: number
+  apiError?: string | null
   onSwap: () => void
   onClose: () => void
   closeLabel: string
@@ -288,7 +358,7 @@ interface NumpadProps {
   t: (key: string, opts?: Record<string, unknown>) => string
 }
 
-function NumpadValueScreen({ recipient, balance, onSwap, onClose, closeLabel, onContinue, t }: NumpadProps) {
+function NumpadValueScreen({ recipient, balance, apiError, onSwap, onClose, closeLabel, onContinue, t }: NumpadProps) {
   const insets = useSafeAreaInsets()
   const [digits, setDigits] = useState('')
   const value = parseInt(digits || '0', 10)
@@ -353,10 +423,12 @@ function NumpadValueScreen({ recipient, balance, onSwap, onClose, closeLabel, on
           </Text>
           <Text style={s.amountUnit}>{t('transferir.amountUnit')}</Text>
         </View>
-        <Text style={[s.balanceHint, tooMuch && s.balanceHintError]}>
+        <Text style={[s.balanceHint, (tooMuch || apiError) && s.balanceHintError]}>
           {tooMuch
             ? t('transferir.balanceInsufficient')
-            : t('transferir.balanceAvailable', { balance })}
+            : apiError
+              ? apiError
+              : t('transferir.balanceAvailable', { balance })}
         </Text>
       </View>
 
@@ -627,6 +699,11 @@ const s = StyleSheet.create({
   },
 
   spacer: { flex: 1 },
+  processingCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   // Numpad root
   numpadRoot: {

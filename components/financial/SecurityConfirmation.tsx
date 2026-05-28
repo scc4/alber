@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native'
 import { useTranslation } from 'react-i18next'
-import { maskAnswer } from '../../utils/crypto'
+import { maskAnswer, sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -32,7 +32,8 @@ export interface SecurityQuestion {
 export interface SecurityConfirmationProps {
   /** 1-4 perguntas cadastradas. O componente sorteia 1. */
   questions: SecurityQuestion[]
-  onPass: () => void
+  /** Recebe o SHA-256(normalizeSecurityAnswer(answer)) para envio ao BFF. */
+  onPass: (answerHash?: string) => void
   onFail?: (attemptsLeft: number) => void
   onBlocked?: () => void
   maxAttempts?: number
@@ -66,14 +67,15 @@ export function SecurityConfirmation({
   const { t } = useTranslation()
 
   // Sorteia 1 pergunta e monta as 4 opções na inicialização
-  const [{ questionText, maskedCorrect, options }] = useState(() => {
+  const [{ questionText, maskedCorrect, correctAnswer, options }] = useState(() => {
     const q = questions[Math.floor(Math.random() * questions.length)]
     const masked = maskAnswer(q.answer)
     const fakes = buildFakes(q.answer, MOCK_FAKES)
     return {
-      questionText: q.question,
+      questionText:  q.question,
       maskedCorrect: masked,
-      options: shuffle([masked, ...fakes]),
+      correctAnswer: q.answer,
+      options:       shuffle([masked, ...fakes]),
     }
   })
 
@@ -98,7 +100,7 @@ export function SecurityConfirmation({
     const isCorrect = options[idx] === maskedCorrect
     setTimeout(() => {
       if (isCorrect) {
-        onPass()
+        sha256Hex(normalizeSecurityAnswer(correctAnswer)).then(hash => onPass(hash))
       } else {
         const next = attempts + 1
         setAttempts(next)

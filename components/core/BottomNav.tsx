@@ -10,7 +10,7 @@ import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
 
-export type BottomNavItem = 'perfil' | 'achar' | 'lounge' | 'atividade'
+export type BottomNavItem = 'home' | 'achar' | 'lounge' | 'atividade'
 
 interface BottomNavProps {
   active: BottomNavItem | string  // 'home' ou rota não listada = nenhum item ativo
@@ -18,7 +18,7 @@ interface BottomNavProps {
 }
 
 const ITEMS: Array<{ id: BottomNavItem; label: string }> = [
-  { id: 'perfil',    label: 'Perfil' },
+  { id: 'home',      label: 'Home' },
   { id: 'achar',     label: 'Achar' },
   { id: 'lounge',    label: 'Lounge' },
   { id: 'atividade', label: 'Atividade' },
@@ -87,7 +87,7 @@ function NavTab({ id, label, isActive, onPress }: NavTabProps) {
 
 function NavIcon({ id }: { id: BottomNavItem }) {
   switch (id) {
-    case 'perfil':    return <PerfilIcon />
+    case 'home':      return <HomeIcon />
     case 'achar':     return <AcharIcon />
     case 'lounge':    return <LoungeIcon />
     case 'atividade': return <AtividadeIcon />
@@ -97,13 +97,14 @@ function NavIcon({ id }: { id: BottomNavItem }) {
 const C  = colors.white[100]
 const IW = 1.4
 
-function PerfilIcon() {
+function HomeIcon() {
   return (
     <View style={ic.root}>
-      {/* Cabeça */}
-      <View style={ic.perfilHead} />
-      {/* Ombros (arco superior) */}
-      <View style={ic.perfilShoulders} />
+      {/* Telhado — duas diagonais formando ∧ */}
+      <View style={[ic.homeArm, { top: 3, left: 2, transform: [{ rotate: '-44deg' }] }]} />
+      <View style={[ic.homeArm, { top: 3, right: 2, transform: [{ rotate: '44deg' }] }]} />
+      {/* Corpo da casa */}
+      <View style={ic.homeBody} />
     </View>
   )
 }
@@ -143,27 +144,22 @@ function AtividadeIcon() {
 const ic = StyleSheet.create({
   root: { width: 20, height: 20 },
 
-  perfilHead: {
+  homeArm: {
     position: 'absolute',
-    top: 1,
-    left: 6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    borderWidth: IW,
-    borderColor: C,
+    width: 10,
+    height: IW,
+    backgroundColor: C,
+    borderRadius: 1,
   },
-  perfilShoulders: {
+  homeBody: {
     position: 'absolute',
     bottom: 1,
-    left: 2,
-    width: 16,
-    height: 9,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
+    left: 3,
+    right: 3,
+    height: 10,
     borderWidth: IW,
     borderColor: C,
-    borderBottomWidth: 0,
+    borderRadius: 1,
   },
 
   acharCircle: {

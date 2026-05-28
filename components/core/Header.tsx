@@ -20,6 +20,7 @@ interface HomeHeaderProps {
   hasNotification?: boolean
   onLogoPress?: () => void
   onBell?: () => void
+  onAvatarPress?: () => void
 }
 
 interface TitleHeaderProps {
@@ -65,10 +66,16 @@ export function Header(props: HeaderProps) {
         ) : (
           <AlberLogo size={32} />
         )}
-        <View style={styles.greetingBlock}>
+        <Pressable
+          style={styles.greetingBlock}
+          onPress={props.onAvatarPress}
+          accessibilityRole="button"
+          accessibilityLabel={props.userName}
+          hitSlop={8}
+        >
           <Text style={styles.greetingLine}>{greeting}</Text>
           <Text style={styles.userName}>{props.userName}</Text>
-        </View>
+        </Pressable>
         <Pressable
           onPress={props.onBell}
           style={styles.bellButton}

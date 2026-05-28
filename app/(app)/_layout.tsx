@@ -8,16 +8,16 @@ import { useAuthStore } from '../../store/auth.store'
 const NAV_PATHS = new Set(['/', '/atividade', '/achar', '/lounge', '/perfil'])
 
 function getActiveTab(pathname: string): BottomNavItem | string {
+  if (pathname === '/')          return 'home'
   if (pathname === '/atividade') return 'atividade'
   if (pathname === '/achar')     return 'achar'
   if (pathname === '/lounge')    return 'lounge'
-  if (pathname === '/perfil')    return 'perfil'
-  return ''  // home — nenhum tab ativo
+  return ''
 }
 
 function handleNavigate(item: BottomNavItem) {
   switch (item) {
-    case 'perfil':    router.push('/(app)/perfil');    break
+    case 'home':      router.replace('/(app)/');        break
     case 'achar':     router.push('/(app)/achar');     break
     case 'lounge':    router.push('/(app)/lounge');    break
     case 'atividade': router.push('/(app)/atividade'); break

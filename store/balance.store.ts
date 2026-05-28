@@ -59,7 +59,7 @@ export const useBalanceStore = create<BalanceState>((set) => ({
         status:    'success',
       })
     } catch {
-      set({ status: 'error' })
+      set({ status: 'success', stale: true })
     }
   },
 

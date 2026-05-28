@@ -185,6 +185,7 @@ export default function HomeScreen() {
           hasNotification={kycStatus !== 'approved'}
           onLogoPress={() => router.replace('/(app)/')}
           onBell={() => { /* Sprint 6: notificações */ }}
+          onAvatarPress={() => router.push('/(app)/perfil' as never)}
         />
 
         {/* Banner contextual por prioridade (máx 1 por vez) */}

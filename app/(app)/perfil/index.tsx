@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react'
+import React, { useCallback, useEffect } from 'react'
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
   Linking,
+  ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
@@ -100,7 +101,14 @@ export default function PerfilScreen() {
   const kycStatus      = useAuthStore(s => s.kycStatus)
   const logout         = useAuthStore(s => s.logout)
 
+  const isLoadingSession = useAuthStore(s => s.isLoadingSession)
   const { label: kycLabel, color: kycColor } = kycInfo(kycStatus, t)
+
+  useEffect(() => {
+    if (!isLoadingSession && !user) {
+      router.back()
+    }
+  }, [isLoadingSession, user, router])
 
   const handleLogout = useCallback(() => {
     Alert.alert(
@@ -120,7 +128,11 @@ export default function PerfilScreen() {
     )
   }, [logout, router, t])
 
-  if (!user) return null
+  if (!user) return (
+    <SafeAreaView style={styles.root} edges={['top']}>
+      <ActivityIndicator color="rgba(255,255,255,0.4)" style={{ flex: 1 }} />
+    </SafeAreaView>
+  )
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>

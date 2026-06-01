@@ -3,10 +3,10 @@
 // Spec: /specs/04_api_asaas.md §4.6 (refund on CPF mismatch)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sha256hex } from '../_shared/crypto.ts'
+import { sha256hex, aesDecrypt } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
-import { aesDecrypt } from '../_shared/crypto.ts'
 import { refundPayment } from '../_shared/asaas.ts'
+import { logError } from '../_shared/error-log.ts'
 
 const HANDLED_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
 
@@ -51,7 +51,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     payload = await req.json()
-  } catch {
+  } catch (e) {
+    await logError(supabaseAdmin, 'webhooks-asaas-pix', e, {})
     return new Response('Bad Request', { status: 400 })
   }
 
@@ -128,7 +129,7 @@ Deno.serve(async (req: Request) => {
         await refundPayment(payment.id, payment.value, 'CPF do pagador divergente', subApiKey)
       } catch (e) {
         console.error('Webhook: falha ao solicitar devolução:', e)
-        // Registra para tratamento manual — não retorna erro ao Asaas
+        await logError(supabaseAdmin, 'webhooks-asaas-pix', e, { event, payment_id: payment.id, transaction_id: tx.id })
       }
 
       await supabaseAdmin
@@ -155,7 +156,7 @@ Deno.serve(async (req: Request) => {
 
   if (updateErr) {
     console.error('Webhook: falha ao atualizar transação:', updateErr)
-    // Retorna 500 para o Asaas tentar reenviar o webhook
+    await logError(supabaseAdmin, 'webhooks-asaas-pix', updateErr, { event, payment_id: payment.id, transaction_id: tx.id })
     return new Response('Internal Server Error', { status: 500 })
   }
 

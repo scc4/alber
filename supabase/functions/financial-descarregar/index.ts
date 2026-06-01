@@ -8,6 +8,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { cashoutPix, transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
+import { logError } from '../_shared/error-log.ts'
 
 interface DescarregarRequest {
   amount_albers: number
@@ -56,9 +57,13 @@ Deno.serve(async (req: Request) => {
   // ── Parse body ───────────────────────────────────────────────────────────────
 
   let body: DescarregarRequest
-  try { body = await req.json() } catch { return err('INVALID_BODY', 'JSON inválido', 400) }
+  try { body = await req.json() } catch (e) {
+    await logError(supabaseAdmin, 'financial-descarregar', e, {})
+    return err('INVALID_BODY', 'JSON inválido', 400)
+  }
 
   const { amount_albers, pin_hash, security_answer_hash } = body
+  const safePayload = { amount_albers } as Record<string, unknown>
 
   if (!amount_albers || !pin_hash || !security_answer_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -176,6 +181,7 @@ Deno.serve(async (req: Request) => {
     subApiKey = await aesDecrypt(user.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
   } catch (e) {
     console.error('API key decryption failed:', e)
+    await logError(supabaseAdmin, 'financial-descarregar', e, safePayload)
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
   }
 
@@ -186,6 +192,7 @@ Deno.serve(async (req: Request) => {
     currentBalance = await getSubcontaBalance(subApiKey)
   } catch (e) {
     console.error('Asaas balance check failed:', e)
+    await logError(supabaseAdmin, 'financial-descarregar', e, safePayload)
     return err('ASAAS_ERROR', 'Não foi possível verificar o saldo. Tente novamente.', 503)
   }
 
@@ -211,6 +218,7 @@ Deno.serve(async (req: Request) => {
 
   if (txInsErr || !txData) {
     console.error('Transaction insert failed:', txInsErr)
+    await logError(supabaseAdmin, 'financial-descarregar', txInsErr ?? new Error('tx_insert_failed'), safePayload)
     return err('DB_ERROR', 'Erro ao registrar transação', 500)
   }
   const transactionId = txData.id
@@ -239,6 +247,7 @@ Deno.serve(async (req: Request) => {
     await cashoutPix(netBrl, user.pix_key, user.pix_key_type, transactionId, subApiKey)
   } catch (e) {
     console.error('Asaas cashout failed:', e)
+    await logError(supabaseAdmin, 'financial-descarregar', e, { ...safePayload, transaction_id: transactionId })
     await supabaseAdmin
       .from('transactions')
       .update({ status: 'failed' })
@@ -261,6 +270,7 @@ Deno.serve(async (req: Request) => {
       await transferToWallet(fee, parentWalletId, 'Taxa descarregamento Alber', crypto.randomUUID(), subApiKey)
     } catch (e) {
       console.error('Fee transfer to parent failed (non-critical):', e)
+      await logError(supabaseAdmin, 'financial-descarregar', e, { ...safePayload, fee, transaction_id: transactionId })
     }
   }
 

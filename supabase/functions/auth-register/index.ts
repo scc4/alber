@@ -7,6 +7,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
 import { createAsaasAccount, getAsaasAccountByCpf } from '../_shared/asaas.ts'
+import { logError } from '../_shared/error-log.ts'
 
 interface AddressDTO {
   street: string
@@ -152,7 +153,14 @@ Deno.serve(async (req: Request) => {
 
   let asaasAccountId: string
   let asaasApiKeyEnc: string
-  let asaasWalletId: string
+  let asaasWalletId:  string
+  // Captura o response bruto do Asaas (inclui apiKey em texto claro) para que,
+  // se qualquer ETAPA seguinte falhar, o error_logs contenha dados suficientes
+  // para recuperação manual sem depender de pending_registrations.
+  let asaasRawResponse: Record<string, unknown> | null = null
+  // URL do fluxo de KYC da subconta — obtida após 15s de espera obrigatória (docs Asaas).
+  // null em retomadas via pending_registrations (edge case sem impacto crítico).
+  let onboardingUrl: string | null = null
 
   if (pendingReg) {
     // Retomar com dados do Asaas já salvos — pular ETAPA 1 e ETAPA 2
@@ -239,17 +247,44 @@ Deno.serve(async (req: Request) => {
           } else {
             return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
           }
-        } catch {
+        } catch (e2) {
+          await logError(supabaseAdmin, 'auth-register', e2, safePayload)
           return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
         }
       } else {
+        await logError(supabaseAdmin, 'auth-register', e, safePayload)
         return err('ASAAS_ERROR', description || 'Erro ao criar subconta financeira', 503)
       }
     }
 
-    asaasAccountId = asaasAccount.id
-    asaasWalletId  = asaasAccount.walletId
-    asaasApiKeyEnc = await aesEncrypt(asaasAccount.apiKey, encSecret)
+    asaasAccountId   = asaasAccount.id
+    asaasWalletId    = asaasAccount.walletId
+    asaasApiKeyEnc   = await aesEncrypt(asaasAccount.apiKey, encSecret)
+    // Manter o response bruto disponível para error_logs nas etapas seguintes.
+    // A apiKey em texto claro só existe aqui — após aesEncrypt ela é descartada.
+    asaasRawResponse = { id: asaasAccount.id, apiKey: asaasAccount.apiKey, walletId: asaasAccount.walletId }
+
+    // ── Buscar onboardingUrl (aguarda 15s — obrigatório conforme docs Asaas) ──
+    // A subconta recém-criada precisa de ~15s para ser provisionada antes de
+    // aceitar chamadas em /myAccount. Usar apiKey da SUBCONTA, não da conta pai.
+    try {
+      await new Promise<void>(resolve => setTimeout(resolve, 15_000))
+      const asaasBase = Deno.env.get('ASAAS_ENVIRONMENT') === 'production'
+        ? 'https://api.asaas.com/api/v3'
+        : 'https://sandbox.asaas.com/api/v3'
+      const docsRes = await fetch(`${asaasBase}/myAccount/documents`, {
+        headers: { 'access_token': asaasAccount.apiKey },
+      })
+      if (docsRes.ok) {
+        const docsData = await docsRes.json() as { onboardingUrl?: string }
+        onboardingUrl = docsData.onboardingUrl ?? null
+        console.log('[auth-register] onboardingUrl:', onboardingUrl ? 'obtido' : 'ausente na resposta')
+      } else {
+        console.warn('[auth-register] GET /myAccount/documents status:', docsRes.status)
+      }
+    } catch (e) {
+      console.warn('[auth-register] erro ao buscar onboardingUrl (não-crítico):', e)
+    }
   }
 
   // Campos computados a partir do request atual (mesmo em retomada)
@@ -267,6 +302,10 @@ Deno.serve(async (req: Request) => {
 
   if (authError || !authData.user) {
     console.error('[auth-register] auth user creation failed:', authError)
+    await logError(supabaseAdmin, 'auth-register', authError ?? new Error('auth_create_failed'), safePayload, {
+      asaas_account_id: asaasAccountId,
+      asaas_response:   asaasRawResponse,
+    })
     await savePending({
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
       email, cpfHash, handle: `@${handleNorm}`,
@@ -297,12 +336,17 @@ Deno.serve(async (req: Request) => {
       pix_key_type:      pix_key_type ?? null,
       kyc_status:        'pending',
       account_status:    'evaluation',
+      onboarding_url:    onboardingUrl,
     })
     .select('id')
     .single()
 
   if (userError || !newUser) {
     console.error('[auth-register] users insert failed:', userError)
+    await logError(supabaseAdmin, 'auth-register', userError ?? new Error('users_insert_failed'), safePayload, {
+      asaas_account_id: asaasAccountId,
+      asaas_response:   asaasRawResponse,
+    })
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
     await savePending({
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
@@ -332,6 +376,10 @@ Deno.serve(async (req: Request) => {
 
   if (qError) {
     console.error('[auth-register] security questions insert failed:', qError)
+    await logError(supabaseAdmin, 'auth-register', qError, safePayload, {
+      asaas_account_id: asaasAccountId,
+      asaas_response:   asaasRawResponse,
+    })
     await supabaseAdmin.from('users').delete().eq('id', userId)
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
     await savePending({
@@ -399,6 +447,7 @@ Deno.serve(async (req: Request) => {
       refresh_token:  refresh_token,
       kyc_status:     'pending',
       account_status: 'evaluation',
+      onboarding_url: onboardingUrl,
       ...(access_token == null && { login_required: true }),
     },
     201,

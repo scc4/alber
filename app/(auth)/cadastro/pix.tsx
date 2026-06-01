@@ -170,7 +170,8 @@ export default function PixScreen() {
         terms_accepted: true,
       }
 
-      const res = await authService.register(input)
+      type RegisterWithKyc = authService.RegisterResponse & { onboarding_url?: string | null }
+      const res = await authService.register(input) as RegisterWithKyc
 
       // Persiste textos das perguntas para a tela de login
       await authService.saveSecurityQuestions(d.security.map(q => q.question))
@@ -192,7 +193,11 @@ export default function PixScreen() {
       )
 
       clearDraft()
-      router.replace('/(app)/')
+      if (res.onboarding_url) {
+        router.replace({ pathname: '/(auth)/kyc', params: { url: res.onboarding_url } })
+      } else {
+        router.replace('/(app)/')
+      }
     } catch (e: unknown) {
       console.log('[pix.register] caught error:', e)
       setIsCreating(false)

@@ -9,6 +9,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
+import { logError } from '../_shared/error-log.ts'
 
 interface TransferirRequest {
   destinatario_identifier: string   // CPF, @handle ou e-mail
@@ -117,9 +118,13 @@ Deno.serve(async (req: Request) => {
   // ── Parse body ───────────────────────────────────────────────────────────────
 
   let body: TransferirRequest
-  try { body = await req.json() } catch { return err('INVALID_BODY', 'JSON inválido', 400) }
+  try { body = await req.json() } catch (e) {
+    await logError(supabaseAdmin, 'financial-transferir', e, {})
+    return err('INVALID_BODY', 'JSON inválido', 400)
+  }
 
   const { destinatario_identifier, amount_albers, pin_hash, security_answer_hash } = body
+  const safePayload = { destinatario_identifier, amount_albers } as Record<string, unknown>
 
   if (!destinatario_identifier || !amount_albers || !pin_hash || !security_answer_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -219,6 +224,7 @@ Deno.serve(async (req: Request) => {
     senderApiKey = await aesDecrypt(sender.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
   } catch (e) {
     console.error('Sender API key decryption failed:', e)
+    await logError(supabaseAdmin, 'financial-transferir', e, safePayload)
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
   }
 
@@ -229,6 +235,7 @@ Deno.serve(async (req: Request) => {
     senderBalance = await getSubcontaBalance(senderApiKey)
   } catch (e) {
     console.error('Sender balance check failed:', e)
+    await logError(supabaseAdmin, 'financial-transferir', e, safePayload)
     return err('ASAAS_ERROR', 'Não foi possível verificar o saldo. Tente novamente.', 503)
   }
 
@@ -259,6 +266,7 @@ Deno.serve(async (req: Request) => {
 
   if (stxErr || !sndTxData) {
     console.error('Sender transaction insert failed:', stxErr)
+    await logError(supabaseAdmin, 'financial-transferir', stxErr ?? new Error('sender_tx_insert_failed'), safePayload)
     return err('DB_ERROR', 'Erro ao registrar transação', 500)
   }
   const senderTxId = sndTxData.id
@@ -294,6 +302,7 @@ Deno.serve(async (req: Request) => {
     )
   } catch (e) {
     console.error('Asaas transfer sender→recipient failed:', e)
+    await logError(supabaseAdmin, 'financial-transferir', e, { ...safePayload, sender_tx_id: senderTxId })
     const failIds = [senderTxId, recipientTxId].filter(Boolean) as string[]
     await supabaseAdmin.from('transactions').update({ status: 'failed' }).in('id', failIds)
     return err('ASAAS_ERROR', 'Falha ao processar a transferência. Tente novamente.', 503)

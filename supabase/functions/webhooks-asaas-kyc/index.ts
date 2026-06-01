@@ -9,6 +9,7 @@
 //   outros     → sem alteração (200 imediato)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { logError } from '../_shared/error-log.ts'
 
 // Asaas envia o authToken configurado no header 'asaas-access-token' (mesmo padrão do pix webhook)
 const HANDLED_EVENTS = new Set([
@@ -76,8 +77,9 @@ Deno.serve(async (req: Request) => {
 
   try {
     payload = await req.json()
-  } catch {
+  } catch (e) {
     console.error('[kyc-webhook] JSON inválido')
+    await logError(supabaseAdmin, 'webhooks-asaas-kyc', e, {})
     return new Response('Bad Request', { status: 400 })
   }
 
@@ -131,14 +133,20 @@ Deno.serve(async (req: Request) => {
 
   // ── Atualizar kyc_status ──────────────────────────────────────────────────────
 
+  const now = new Date().toISOString()
+  const updatePayload: Record<string, unknown> = { kyc_status: newKycStatus, updated_at: now }
+  if (newKycStatus === 'approved') {
+    updatePayload.onboarding_completed_at = now
+  }
+
   const { error: updateErr } = await supabaseAdmin
     .from('users')
-    .update({ kyc_status: newKycStatus, updated_at: new Date().toISOString() })
+    .update(updatePayload)
     .eq('id', userData.id)
 
   if (updateErr) {
     console.error('[kyc-webhook] falha ao atualizar kyc_status:', updateErr)
-    // Retorna 500 → Asaas tentará reenviar o webhook
+    await logError(supabaseAdmin, 'webhooks-asaas-kyc', updateErr, { event, asaas_account_id: asaasAccountId, new_kyc_status: newKycStatus })
     return new Response('Internal Server Error', { status: 500 })
   }
 
@@ -149,8 +157,8 @@ Deno.serve(async (req: Request) => {
   if (newKycStatus === 'approved') {
     await sendPushNotification(
       userData.id,
-      'Identidade verificada ✓',
-      'Sua verificação de identidade foi aprovada. Você já pode usar todos os recursos do Alber.',
+      'Conta verificada!',
+      'Sua conta foi verificada! Já pode usar o Alber.',
     ).catch(e => console.error('[kyc-webhook] push failed:', e))
   } else {
     await sendPushNotification(

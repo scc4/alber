@@ -8,6 +8,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
+import { logError } from '../_shared/error-log.ts'
 
 interface ReceberRequest {
   amount_albers:               number
@@ -120,9 +121,13 @@ Deno.serve(async (req: Request) => {
   // ── Parse body ───────────────────────────────────────────────────────────────
 
   let body: ReceberRequest
-  try { body = await req.json() } catch { return err('INVALID_BODY', 'JSON inválido', 400) }
+  try { body = await req.json() } catch (e) {
+    await logError(supabaseAdmin, 'financial-receber', e, {})
+    return err('INVALID_BODY', 'JSON inválido', 400)
+  }
 
   const { amount_albers, payer_identifier, payer_pin_hash, payer_security_answer_hash } = body
+  const safePayload = { amount_albers, payer_identifier } as Record<string, unknown>
 
   if (!amount_albers || !payer_identifier || !payer_pin_hash || !payer_security_answer_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -239,6 +244,7 @@ Deno.serve(async (req: Request) => {
     payerApiKey = await aesDecrypt(payer.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
   } catch (e) {
     console.error('Payer API key decryption failed:', e)
+    await logError(supabaseAdmin, 'financial-receber', e, safePayload)
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
   }
 
@@ -247,6 +253,7 @@ Deno.serve(async (req: Request) => {
     payerBalance = await getSubcontaBalance(payerApiKey)
   } catch (e) {
     console.error('Payer balance check failed:', e)
+    await logError(supabaseAdmin, 'financial-receber', e, safePayload)
     return err('ASAAS_ERROR', 'Não foi possível verificar saldo do pagador', 503)
   }
 
@@ -273,6 +280,7 @@ Deno.serve(async (req: Request) => {
 
   if (ptxErr || !payerTxData) {
     console.error('Payer transaction insert failed:', ptxErr)
+    await logError(supabaseAdmin, 'financial-receber', ptxErr ?? new Error('payer_tx_insert_failed'), safePayload)
     return err('DB_ERROR', 'Erro ao registrar transação', 500)
   }
   const payerTxId = payerTxData.id
@@ -327,6 +335,7 @@ Deno.serve(async (req: Request) => {
     )
   } catch (e) {
     console.error('Asaas transfer payer→receiver failed:', e)
+    await logError(supabaseAdmin, 'financial-receber', e, { ...safePayload, payer_tx_id: payerTxId })
     const failIds = [payerTxId, rcvTxId, feeTxId].filter(Boolean) as string[]
     await supabaseAdmin.from('transactions').update({ status: 'failed' }).in('id', failIds)
     return err('ASAAS_ERROR', 'Falha ao processar a transferência. Tente novamente.', 503)
@@ -347,6 +356,7 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
       // Não-crítico: taxa fica na subconta do pagador — reconciliar manualmente
       console.error('Fee transfer to parent failed (non-critical):', e)
+      await logError(supabaseAdmin, 'financial-receber', e, { ...safePayload, fee, payer_tx_id: payerTxId })
     }
   }
 

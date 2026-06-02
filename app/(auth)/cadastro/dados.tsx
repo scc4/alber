@@ -9,6 +9,7 @@ import { OnboardShell } from '../../../components/core/OnboardShell'
 import { Field } from '../../../components/core/Field'
 import { AlertCard } from '../../../components/core/AlertCard'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
+import { DatePickerField, formatDateBR } from '../../../components/shared/DatePickerField'
 import { updateDraft } from '../../../store/signup-draft'
 import { validateCPF } from '../../../utils/cpf'
 import { colors } from '../../../tokens/colors'
@@ -30,11 +31,12 @@ function maskPhone(v: string) {
   if (v.length > 2)  return `(${v.slice(0,2)}) ${v.slice(2)}`
   return v
 }
-function maskDate(v: string) {
-  v = v.replace(/\D/g, '').slice(0, 8)
-  if (v.length > 4) return `${v.slice(0,2)}/${v.slice(2,4)}/${v.slice(4)}`
-  if (v.length > 2) return `${v.slice(0,2)}/${v.slice(2)}`
-  return v
+
+// Limite de 18 anos: hoje menos 18 anos
+function maxBirthDate(): Date {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 18)
+  return d
 }
 
 const MOCK_DUPLICATE_CPF = '11111111111'
@@ -42,22 +44,23 @@ const MOCK_DUPLICATE_CPF = '11111111111'
 export default function DadosScreen() {
   const { t } = useTranslation()
 
-  const [name, setName]   = useState('')
-  const [cpf, setCpf]     = useState('')
-  const [birth, setBirth] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [touched, setTouch] = useState<Record<string, boolean>>({})
+  const [name, setName]       = useState('')
+  const [cpf, setCpf]         = useState('')
+  const [birthDate, setBirth] = useState<Date | null>(null)
+  const [email, setEmail]     = useState('')
+  const [phone, setPhone]     = useState('')
+  const [touched, setTouch]   = useState<Record<string, boolean>>({})
 
   const touch = (field: string) => setTouch(t => ({ ...t, [field]: true }))
 
   const cpfDigits  = cpf.replace(/\D/g, '')
   const cpfValid   = validateCPF(cpf)
 
+  const birth = birthDate ? formatDateBR(birthDate) : ''
+
   const errors = {
     name:  name && name.trim().split(/\s+/).length < 2 ? t('auth.onboarding.dados.nameError') : null,
     cpf:   cpfDigits.length === 11 && !cpfValid ? t('auth.onboarding.dados.cpfError') : null,
-    birth: birth && birth.length < 10 ? t('auth.onboarding.dados.birthError') : null,
     email: email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? t('auth.onboarding.dados.emailError') : null,
     phone: phone && phone.replace(/\D/g,'').length < 11 ? t('auth.onboarding.dados.phoneError') : null,
   }
@@ -67,7 +70,7 @@ export default function DadosScreen() {
   const isReady =
     name.trim().split(/\s+/).length >= 2 &&
     cpfValid &&
-    birth.length === 10 &&
+    birthDate !== null &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
     phone.replace(/\D/g,'').length === 11 &&
     !isDuplicate
@@ -126,15 +129,12 @@ export default function DadosScreen() {
         </View>
       )}
 
-      <Field
+      <DatePickerField
         label={t('auth.onboarding.dados.birth')}
-        value={birth}
-        onChangeText={v => setBirth(maskDate(v))}
-        placeholder={t('auth.onboarding.dados.birthPlaceholder')}
-        keyboardType="numeric"
+        value={birthDate}
+        onChange={d => { setBirth(d); touch('birth') }}
+        maximumDate={maxBirthDate()}
         hint={t('auth.onboarding.dados.birthHint')}
-        onBlur={() => touch('birth')}
-        error={touched.birth ? errors.birth : null}
       />
 
       <Field

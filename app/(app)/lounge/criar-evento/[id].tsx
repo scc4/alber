@@ -21,6 +21,8 @@ import type { LoungeEvent, EventBatch } from '../../../../components/lounge/Even
 import { Header } from '../../../../components/core/Header'
 import { Eyebrow } from '../../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
+import { DatePickerField, formatDateBR } from '../../../../components/shared/DatePickerField'
+import { TimePickerField, formatTimeBR } from '../../../../components/shared/TimePickerField'
 import { colors } from '../../../../tokens/colors'
 import { spacing } from '../../../../tokens/spacing'
 import { typography } from '../../../../tokens/typography'
@@ -40,6 +42,15 @@ interface BatchDraft {
   until:  string
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function tomorrow(): Date {
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function CriarEventoScreen() {
@@ -57,8 +68,10 @@ export default function CriarEventoScreen() {
   const [step, setStep]               = useState<Step>(1)
   const [name, setName]               = useState('')
   const [desc, setDesc]               = useState('')
-  const [date, setDate]               = useState('')
-  const [time, setTime]               = useState('')
+  const [dateObj, setDateObj]         = useState<Date | null>(null)
+  const [timeObj, setTimeObj]         = useState<Date | null>(null)
+  const date = dateObj ? formatDateBR(dateObj) : ''
+  const time = timeObj ? formatTimeBR(timeObj) : ''
   const [capacity, setCapacity]       = useState('')
   const [recurrence, setRecurrence]   = useState<Recurrence>('none')
   const [freq, setFreq]               = useState<FreqOption>('monthly')
@@ -67,6 +80,7 @@ export default function CriarEventoScreen() {
   const [batches, setBatches]         = useState<BatchDraft[]>([
     { name: '1º Lote', priceR: '', qty: '', until: '' },
   ])
+  const [batchUntilDates, setBatchUntilDates] = useState<(Date | null)[]>([null])
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
@@ -81,10 +95,17 @@ export default function CriarEventoScreen() {
 
   function addBatch() {
     setBatches(bs => [...bs, { name: `${bs.length + 1}º Lote`, priceR: '', qty: '', until: '' }])
+    setBatchUntilDates(ds => [...ds, null])
   }
 
   function removeBatch(i: number) {
     setBatches(bs => bs.filter((_, j) => j !== i))
+    setBatchUntilDates(ds => ds.filter((_, j) => j !== i))
+  }
+
+  function setBatchUntilDate(i: number, d: Date) {
+    setBatchUntilDates(ds => ds.map((v, j) => j === i ? d : v))
+    updateBatch(i, 'until', formatDateBR(d))
   }
 
   // ── Publish ───────────────────────────────────────────────────────────────────
@@ -190,27 +211,23 @@ export default function CriarEventoScreen() {
             </View>
 
             {/* Date + Time */}
-            <View style={[styles.fieldGap, styles.row]}>
+            <View style={[styles.fieldGap, styles.row, { gap: 16 }]}>
               <View style={styles.flex}>
-                <Eyebrow>{t('lounge.criarEvento.dateLabel')}</Eyebrow>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={date}
-                  onChangeText={setDate}
+                <DatePickerField
+                  label={t('lounge.criarEvento.dateLabel')}
+                  value={dateObj}
+                  onChange={setDateObj}
+                  minimumDate={tomorrow()}
                   placeholder="DD/MM/AAAA"
-                  placeholderTextColor="rgba(255,255,255,0.25)"
-                  keyboardType="numeric"
                 />
               </View>
               <View style={styles.flex}>
-                <Eyebrow>{t('lounge.criarEvento.timeLabel')}</Eyebrow>
-                <TextInput
-                  style={styles.fieldInput}
-                  value={time}
-                  onChangeText={setTime}
+                <TimePickerField
+                  label={t('lounge.criarEvento.timeLabel')}
+                  value={timeObj}
+                  onChange={setTimeObj}
                   placeholder="HH:MM"
-                  placeholderTextColor="rgba(255,255,255,0.25)"
-                  keyboardType="numeric"
+                  minuteInterval={5}
                 />
               </View>
             </View>
@@ -389,14 +406,12 @@ export default function CriarEventoScreen() {
 
                         {/* Until date */}
                         <View style={{ marginTop: 8 }}>
-                          <Text style={styles.batchFieldLabel}>{t('lounge.criarEvento.batchUntilLabel')}</Text>
-                          <TextInput
-                            style={styles.batchInput}
-                            value={batch.until}
-                            onChangeText={v => updateBatch(i, 'until', v)}
+                          <DatePickerField
+                            label={t('lounge.criarEvento.batchUntilLabel')}
+                            value={batchUntilDates[i] ?? null}
+                            onChange={d => setBatchUntilDate(i, d)}
+                            minimumDate={tomorrow()}
                             placeholder="DD/MM/AAAA"
-                            placeholderTextColor="rgba(255,255,255,0.25)"
-                            keyboardType="numeric"
                           />
                         </View>
 

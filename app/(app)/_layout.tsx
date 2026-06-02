@@ -5,20 +5,6 @@ import * as Notifications from 'expo-notifications'
 import { BottomNav, BottomNavItem } from '../../components/core/BottomNav'
 import { useAuthStore } from '../../store/auth.store'
 
-// Handler de notificação em foreground — exibir como alerta + som
-// Envolvido em try/catch: expo-notifications não está disponível no Expo Go SDK 53+
-try {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge:  false,
-    }),
-  })
-} catch {
-  console.log('[notifications] not available in Expo Go')
-}
-
 // Rotas onde o BottomNav deve aparecer
 const NAV_PATHS = new Set(['/', '/atividade', '/achar', '/lounge', '/perfil'])
 
@@ -56,9 +42,17 @@ export default function AppLayout() {
     }
   }, [isAuthenticated, isLoadingSession])
 
-  // Listeners de notificação push
+  // Setup de notificações push (expo-notifications indisponível no Expo Go SDK 53+)
   useEffect(() => {
     try {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge:  false,
+        }),
+      })
+
       notifListener.current = Notifications.addNotificationReceivedListener(_notification => {
         // A notificação já aparece via setNotificationHandler acima — sem ação adicional
       })

@@ -1,3 +1,7 @@
+// Design: /design/flows-rest.jsx — AcharScreen
+// Spec: /specs/06_modules/achar.md
+// Busca de usuários por @handle ou nome — backend real via user-search EF
+
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   View,
@@ -16,38 +20,54 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import * as SecureStore from 'expo-secure-store'
+import { useAuthStore } from '../../store/auth.store'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing, layout } from '../../tokens/spacing'
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface AlberUser {
-  id: string
-  name: string
-  handle: string
-  memberSince: string
+  id:           string
+  name:         string
+  handle:       string
+  kyc_status:   'pending' | 'submitted' | 'approved' | 'rejected'
+  member_since: string
 }
 
-const MOCK_USERS: AlberUser[] = [
-  { id: 'u1', name: 'João Silva Pereira', handle: '@joaosilva',    memberSince: 'jan/2024' },
-  { id: 'u2', name: 'Ana Maria Costa',    handle: '@ana_costa',    memberSince: 'mar/2024' },
-  { id: 'u3', name: 'Pedro Henrique',     handle: '@phenrique',    memberSince: 'fev/2023' },
-  { id: 'u4', name: 'Camila Rocha',       handle: '@cami',         memberSince: 'mai/2024' },
-  { id: 'u5', name: 'Lucas Ferreira',     handle: '@lucas_f',      memberSince: 'jun/2023' },
-  { id: 'u6', name: 'Marina Santos',      handle: '@marinasantos', memberSince: 'abr/2024' },
-  { id: 'u7', name: 'Rafael Oliveira',    handle: '@rafa',         memberSince: 'jan/2023' },
-  { id: 'u8', name: 'Beatriz Lima',       handle: '@beatriz_lima', memberSince: 'out/2023' },
-]
+// ─── Constantes ───────────────────────────────────────────────────────────────
 
 const HISTORY_KEY = 'achar_history'
 const MAX_HISTORY = 10
 const MIN_QUERY   = 2
 const DEBOUNCE_MS = 300
 
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
+// ─── Service ──────────────────────────────────────────────────────────────────
+
+async function searchUsers(q: string, token: string): Promise<AlberUser[]> {
+  const params = new URLSearchParams({ q })
+  const res = await fetch(`${BFF}/user-search?${params}`, {
+    method:  'GET',
+    headers: {
+      'apikey':        ANON_KEY,
+      'Authorization': `Bearer ${token}`,
+    },
+  })
+  const json = await res.json()
+  if (!res.ok) throw new Error(json.message ?? 'Erro ao buscar usuários')
+  return json as AlberUser[]
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function avatarHue(handle: string): number {
   return (handle.charCodeAt(1) * 23) % 360
 }
 
-// ── Avatar ──────────────────────────────────────────────────────────────────
+// ─── Avatar ───────────────────────────────────────────────────────────────────
 
 interface AvatarProps { name: string; handle: string; size?: number }
 
@@ -61,13 +81,23 @@ function Avatar({ name, handle, size = 38 }: AvatarProps) {
       ]}
     >
       <Text style={[styles.avatarInitial, { fontSize: size * 0.37 }]}>
-        {name[0].toUpperCase()}
+        {(name[0] ?? '?').toUpperCase()}
       </Text>
     </View>
   )
 }
 
-// ── UserRow ──────────────────────────────────────────────────────────────────
+// ─── VerifiedBadge ────────────────────────────────────────────────────────────
+
+function VerifiedBadge() {
+  return (
+    <View style={styles.verifiedBadge}>
+      <Text style={styles.verifiedText}>✓</Text>
+    </View>
+  )
+}
+
+// ─── UserRow ──────────────────────────────────────────────────────────────────
 
 interface UserRowProps { user: AlberUser; onPress: (u: AlberUser) => void }
 
@@ -76,7 +106,10 @@ function UserRow({ user, onPress }: UserRowProps) {
     <TouchableOpacity style={styles.row} onPress={() => onPress(user)} activeOpacity={0.65}>
       <Avatar name={user.name} handle={user.handle} />
       <View style={styles.rowMeta}>
-        <Text style={styles.rowName}>{user.name}</Text>
+        <View style={styles.rowNameRow}>
+          <Text style={styles.rowName}>{user.name}</Text>
+          {user.kyc_status === 'approved' && <VerifiedBadge />}
+        </View>
         <Text style={styles.rowHandle}>{user.handle}</Text>
       </View>
       <Text style={styles.chevron}>›</Text>
@@ -84,7 +117,7 @@ function UserRow({ user, onPress }: UserRowProps) {
   )
 }
 
-// ── ProfileSheet ─────────────────────────────────────────────────────────────
+// ─── ProfileSheet ─────────────────────────────────────────────────────────────
 
 interface ProfileSheetProps {
   user: AlberUser | null
@@ -110,10 +143,13 @@ function ProfileSheet({ user, onClose }: ProfileSheetProps) {
 
               <Avatar name={user.name} handle={user.handle} size={72} />
 
-              <Text style={styles.profileName}>{user.name}</Text>
+              <View style={styles.profileNameRow}>
+                <Text style={styles.profileName}>{user.name}</Text>
+                {user.kyc_status === 'approved' && <VerifiedBadge />}
+              </View>
               <Text style={styles.profileHandle}>{user.handle}</Text>
               <Text style={styles.profileSince}>
-                {t('achar.memberSince', { date: user.memberSince })}
+                {t('achar.memberSince', { date: user.member_since })}
               </Text>
 
               <TouchableOpacity style={styles.shareBtn} onPress={handleShare} activeOpacity={0.75}>
@@ -127,10 +163,11 @@ function ProfileSheet({ user, onClose }: ProfileSheetProps) {
   )
 }
 
-// ── Main ─────────────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function AcharScreen() {
-  const { t } = useTranslation()
+  const { t }  = useTranslation()
+  const token  = useAuthStore(s => s.token)
 
   const [q, setQ]               = useState('')
   const [results, setResults]   = useState<AlberUser[]>([])
@@ -141,7 +178,8 @@ export default function AcharScreen() {
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Load history from SecureStore
+  // ── Histórico (SecureStore) ────────────────────────────────────────────────
+
   useEffect(() => {
     SecureStore.getItemAsync(HISTORY_KEY).then(raw => {
       if (!raw) return
@@ -167,11 +205,13 @@ export default function AcharScreen() {
     SecureStore.deleteItemAsync(HISTORY_KEY).catch(() => {})
   }, [])
 
-  // Debounced search
+  // ── Busca com debounce ────────────────────────────────────────────────────
+
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
 
-    const trimmed = q.trim().replace(/^@/, '').toLowerCase()
+    const trimmed = q.trim().replace(/^@/, '')
+
     if (trimmed.length < MIN_QUERY) {
       setResults([])
       setSearched(false)
@@ -180,35 +220,46 @@ export default function AcharScreen() {
     }
 
     setLoading(true)
-    debounceRef.current = setTimeout(() => {
-      const found = MOCK_USERS.filter(u =>
-        u.handle.toLowerCase().replace('@', '').includes(trimmed) ||
-        u.name.toLowerCase().includes(trimmed)
-      )
-      setResults(found)
-      setSearched(true)
-      setLoading(false)
+
+    debounceRef.current = setTimeout(async () => {
+      if (!token) {
+        setLoading(false)
+        return
+      }
+      try {
+        const found = await searchUsers(trimmed, token)
+        setResults(found)
+        setSearched(true)
+      } catch {
+        setResults([])
+        setSearched(true)
+      } finally {
+        setLoading(false)
+      }
     }, DEBOUNCE_MS)
 
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [q])
+  }, [q, token])
 
   const handleUserPress = useCallback((user: AlberUser) => {
     addToHistory(user)
     setProfile(user)
   }, [addToHistory])
 
+  // ── Derivados ─────────────────────────────────────────────────────────────
+
   const isSearching  = q.trim().replace(/^@/, '').length >= MIN_QUERY
   const showResults  = isSearching && searched
-  const showRecents  = !isSearching
   const displayList  = showResults ? results : history
   const sectionLabel = showResults ? t('achar.sectionResults') : t('achar.sectionRecent')
 
   const emptyText = showResults
     ? t('achar.emptyResults', { q: q.trim().replace(/^@/, '') })
     : t('achar.emptyHistory')
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -222,7 +273,7 @@ export default function AcharScreen() {
           <Text style={styles.title}>{t('achar.title')}</Text>
         </View>
 
-        {/* Search field */}
+        {/* Campo de busca */}
         <View style={styles.searchWrap}>
           <View style={styles.searchField}>
             <SearchIcon />
@@ -247,7 +298,7 @@ export default function AcharScreen() {
           </View>
         </View>
 
-        {/* List */}
+        {/* Lista */}
         <FlatList
           data={displayList}
           keyExtractor={u => u.id}
@@ -256,7 +307,7 @@ export default function AcharScreen() {
           ListHeaderComponent={
             <View style={styles.sectionHeader}>
               <Text style={styles.eyebrow}>{sectionLabel}</Text>
-              {showRecents && history.length > 0 && (
+              {!isSearching && history.length > 0 && (
                 <TouchableOpacity onPress={clearHistory} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
                   <Text style={styles.clearHistory}>{t('achar.clearHistory')}</Text>
                 </TouchableOpacity>
@@ -279,29 +330,25 @@ export default function AcharScreen() {
   )
 }
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function SearchIcon() {
   return (
     <View style={{ width: 14, height: 14, justifyContent: 'center', alignItems: 'center' }}>
-      {/* circle */}
       <View style={{ width: 10, height: 10, borderRadius: 5, borderWidth: 1.3, borderColor: 'rgba(255,255,255,0.4)', position: 'absolute', top: 0, left: 0 }} />
-      {/* stem */}
       <View style={{ width: 1.3, height: 4, backgroundColor: 'rgba(255,255,255,0.4)', position: 'absolute', bottom: 0, right: 0, borderRadius: 1, transform: [{ rotate: '-45deg' }] }} />
     </View>
   )
 }
 
-// ── Styles ────────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: colors.black[100],
   },
-  flex: {
-    flex: 1,
-  },
+  flex: { flex: 1 },
   header: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -372,8 +419,11 @@ const styles = StyleSheet.create({
     fontWeight: typography.weight.bold,
     color: colors.white[100],
   },
-  rowMeta: {
-    flex: 1,
+  rowMeta: { flex: 1 },
+  rowNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   rowName: {
     ...typography.size.label,
@@ -388,6 +438,23 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: 'rgba(255,255,255,0.2)',
   },
+
+  // Badge verificado
+  verifiedBadge: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: '#5BCEC9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifiedText: {
+    fontSize: 8,
+    fontWeight: '700',
+    color: colors.black[100],
+    lineHeight: 10,
+  },
+
   emptyText: {
     ...typography.size.bodySmall,
     color: 'rgba(255,255,255,0.4)',
@@ -396,6 +463,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     paddingHorizontal: spacing.md,
   },
+
   // Profile sheet
   backdrop: {
     flex: 1,
@@ -423,11 +491,16 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     marginBottom: spacing.lg,
   },
+  profileNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: spacing.md,
+  },
   profileName: {
     ...typography.size.h1,
     fontWeight: typography.weight.bold,
     color: colors.white[100],
-    marginTop: spacing.md,
     letterSpacing: -0.3,
   },
   profileHandle: {

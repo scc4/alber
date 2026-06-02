@@ -10,7 +10,8 @@
       "PowerShell(cd C:\\\\Users\\\\fernando\\\\alber; $output = npx tsc --noEmit 2>&1; $output | Where-Object { $_ -match \"lounge\" })",
       "PowerShell(cd C:\\\\Users\\\\fernando\\\\alber; npx tsc --noEmit 2>&1 | Where-Object { $_ -match \"lounge\" })",
       "Bash(supabase functions *)",
-      "Bash(supabase db *)"
+      "Bash(supabase db *)",
+      "Bash(npx supabase *)"
     ]
   }
 }

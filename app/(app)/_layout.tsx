@@ -6,13 +6,18 @@ import { BottomNav, BottomNavItem } from '../../components/core/BottomNav'
 import { useAuthStore } from '../../store/auth.store'
 
 // Handler de notificação em foreground — exibir como alerta + som
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge:  false,
-  }),
-})
+// Envolvido em try/catch: expo-notifications não está disponível no Expo Go SDK 53+
+try {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge:  false,
+    }),
+  })
+} catch {
+  console.log('[notifications] not available in Expo Go')
+}
 
 // Rotas onde o BottomNav deve aparecer
 const NAV_PATHS = new Set(['/', '/atividade', '/achar', '/lounge', '/perfil'])
@@ -41,8 +46,8 @@ export default function AppLayout() {
   const isAuthenticated = useAuthStore(s => s.isAuthenticated)
   const isLoadingSession = useAuthStore(s => s.isLoadingSession)
 
-  const notifListener   = useRef<Notifications.Subscription | null>(null)
-  const responseListener = useRef<Notifications.Subscription | null>(null)
+  const notifListener    = useRef<{ remove: () => void } | null>(null)
+  const responseListener = useRef<{ remove: () => void } | null>(null)
 
   // Auth guard (spec 01_frontend §4)
   useEffect(() => {
@@ -53,22 +58,24 @@ export default function AppLayout() {
 
   // Listeners de notificação push
   useEffect(() => {
-    // Notificação recebida com app em foreground
-    notifListener.current = Notifications.addNotificationReceivedListener(_notification => {
-      // A notificação já aparece via setNotificationHandler acima — sem ação adicional
-    })
+    try {
+      notifListener.current = Notifications.addNotificationReceivedListener(_notification => {
+        // A notificação já aparece via setNotificationHandler acima — sem ação adicional
+      })
 
-    // Usuário tocou em uma notificação
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = (response.notification.request.content.data ?? {}) as Record<string, string>
-      if (data.route) {
-        router.push(data.route as Parameters<typeof router.push>[0])
-      }
-    })
+      responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+        const data = (response.notification.request.content.data ?? {}) as Record<string, string>
+        if (data.route) {
+          router.push(data.route as Parameters<typeof router.push>[0])
+        }
+      })
+    } catch {
+      console.log('[notifications] not available in Expo Go')
+    }
 
     return () => {
-      notifListener.current?.remove()
-      responseListener.current?.remove()
+      try { notifListener.current?.remove() } catch {}
+      try { responseListener.current?.remove() } catch {}
     }
   }, [])
 

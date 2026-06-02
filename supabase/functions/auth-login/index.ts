@@ -145,22 +145,36 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
-  // ── Sucesso — gerar sessão JWT ────────────────────────────────────────────────
+  // ── Sucesso — gerar sessão JWT via Supabase Auth password flow ───────────────
 
-  const { data: session, error: sessionError } = await supabaseAdmin.auth.admin.createSession({
-    user_id: user.auth_id,
-  })
+  const signInRes = await fetch(
+    `${Deno.env.get('SUPABASE_URL')}/auth/v1/token?grant_type=password`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
+      },
+      body: JSON.stringify({ email: user.email, password: pin_hash }),
+    },
+  )
 
-  if (sessionError || !session) {
-    console.error('Session creation failed:', sessionError)
+  if (!signInRes.ok) {
+    const signInErr = await signInRes.json().catch(() => ({}))
+    console.error('[auth-login] session creation failed:', signInErr)
     return err('SESSION_ERROR', 'Erro ao gerar sessão', 500)
+  }
+
+  const { access_token, refresh_token } = await signInRes.json() as {
+    access_token: string
+    refresh_token: string
   }
 
   await logAudit(user.id, 'login_success', {})
 
   return json({
-    token:         session.access_token,
-    refresh_token: session.refresh_token,
+    token:         access_token,
+    refresh_token: refresh_token,
     user: {
       id:             user.id,
       name:           user.name,

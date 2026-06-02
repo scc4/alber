@@ -87,7 +87,7 @@ const MOCK_SKIN = 'surf' as const  // Sprint 5: lounge.store retornará o skin a
 
 export default function HomeScreen() {
   const { t } = useTranslation()
-  const { user, kycStatus, accountStatus } = useAuthStore()
+  const { user, kycStatus, accountStatus, logout } = useAuthStore()
   const {
     balance,
     stale,
@@ -145,6 +145,11 @@ export default function HomeScreen() {
   console.log('[home] user object:', JSON.stringify(user))
   const firstName = user?.name?.split(' ')[0] ?? ''
 
+  const handleDebugLogout = async () => {
+    await logout()
+    router.replace('/(auth)/welcome' as never)
+  }
+
   return (
     <View style={[styles.root, { backgroundColor: skin.bgDark }]}>
 
@@ -186,7 +191,11 @@ export default function HomeScreen() {
           hasNotification={kycStatus !== 'approved'}
           onLogoPress={() => router.replace('/(app)/')}
           onBell={() => { /* Sprint 6: notificações */ }}
-          onAvatarPress={() => router.push('/(app)/perfil' as never)}
+          onAvatarPress={() => {
+            console.log('[home] onAvatarPress fired, navigating to perfil')
+            router.push('/(app)/perfil' as never)
+          }}
+          onDebugLogout={handleDebugLogout}
         />
 
         {/* Banner contextual por prioridade (máx 1 por vez) */}

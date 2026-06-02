@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { View, StyleSheet } from 'react-native'
 import { Stack, usePathname, router } from 'expo-router'
-import * as Notifications from 'expo-notifications'
 import { BottomNav, BottomNavItem } from '../../components/core/BottomNav'
 import { useAuthStore } from '../../store/auth.store'
 
@@ -44,28 +43,34 @@ export default function AppLayout() {
 
   // Setup de notificações push (expo-notifications indisponível no Expo Go SDK 53+)
   useEffect(() => {
-    try {
-      Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldShowAlert: true,
-          shouldPlaySound: true,
-          shouldSetBadge:  false,
-        }),
-      })
+    const setupNotifications = async () => {
+      try {
+        const Notifications = await import('expo-notifications')
 
-      notifListener.current = Notifications.addNotificationReceivedListener(_notification => {
-        // A notificação já aparece via setNotificationHandler acima — sem ação adicional
-      })
+        Notifications.setNotificationHandler({
+          handleNotification: async () => ({
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge:  false,
+          }),
+        })
 
-      responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-        const data = (response.notification.request.content.data ?? {}) as Record<string, string>
-        if (data.route) {
-          router.push(data.route as Parameters<typeof router.push>[0])
-        }
-      })
-    } catch {
-      console.log('[notifications] not available in Expo Go')
+        notifListener.current = Notifications.addNotificationReceivedListener(_notification => {
+          // A notificação já aparece via setNotificationHandler acima — sem ação adicional
+        })
+
+        responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+          const data = (response.notification.request.content.data ?? {}) as Record<string, string>
+          if (data.route) {
+            router.push(data.route as Parameters<typeof router.push>[0])
+          }
+        })
+      } catch (e) {
+        console.log('[notifications] not available:', e)
+      }
     }
+
+    setupNotifications()
 
     return () => {
       try { notifListener.current?.remove() } catch {}

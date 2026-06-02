@@ -1,8 +1,18 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { View, StyleSheet } from 'react-native'
 import { Stack, usePathname, router } from 'expo-router'
+import * as Notifications from 'expo-notifications'
 import { BottomNav, BottomNavItem } from '../../components/core/BottomNav'
 import { useAuthStore } from '../../store/auth.store'
+
+// Handler de notificação em foreground — exibir como alerta + som
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge:  false,
+  }),
+})
 
 // Rotas onde o BottomNav deve aparecer
 const NAV_PATHS = new Set(['/', '/atividade', '/achar', '/lounge', '/perfil'])
@@ -31,12 +41,36 @@ export default function AppLayout() {
   const isAuthenticated = useAuthStore(s => s.isAuthenticated)
   const isLoadingSession = useAuthStore(s => s.isLoadingSession)
 
+  const notifListener   = useRef<Notifications.Subscription | null>(null)
+  const responseListener = useRef<Notifications.Subscription | null>(null)
+
   // Auth guard (spec 01_frontend §4)
   useEffect(() => {
     if (!isLoadingSession && !isAuthenticated) {
       router.replace('/(auth)/login')
     }
   }, [isAuthenticated, isLoadingSession])
+
+  // Listeners de notificação push
+  useEffect(() => {
+    // Notificação recebida com app em foreground
+    notifListener.current = Notifications.addNotificationReceivedListener(_notification => {
+      // A notificação já aparece via setNotificationHandler acima — sem ação adicional
+    })
+
+    // Usuário tocou em uma notificação
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+      const data = (response.notification.request.content.data ?? {}) as Record<string, string>
+      if (data.route) {
+        router.push(data.route as Parameters<typeof router.push>[0])
+      }
+    })
+
+    return () => {
+      notifListener.current?.remove()
+      responseListener.current?.remove()
+    }
+  }, [])
 
   return (
     <View style={styles.root}>

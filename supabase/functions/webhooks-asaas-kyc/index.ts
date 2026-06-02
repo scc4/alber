@@ -10,6 +10,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 // Asaas envia o authToken configurado no header 'asaas-access-token' (mesmo padrão do pix webhook)
 const HANDLED_EVENTS = new Set([
@@ -30,17 +31,6 @@ function mapKycStatus(asaasStatus: string): 'approved' | 'rejected' | null {
   if (s === 'APPROVED') return 'approved'
   if (s === 'REJECTED' || s === 'RESTRICTED') return 'rejected'
   return null   // PENDING ou outros — sem alteração
-}
-
-// ── Push notification (best-effort) ─────────────────────────────────────────
-// TODO: integrar Expo Push Notifications quando push_tokens estiver no schema.
-
-async function sendPushNotification(userId: string, title: string, body: string): Promise<void> {
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    userId,
-    event_type: 'push_notification_queued',
-    metadata:   { title, body },
-  })
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -155,17 +145,19 @@ Deno.serve(async (req: Request) => {
   // ── Push notification ao usuário ─────────────────────────────────────────────
 
   if (newKycStatus === 'approved') {
-    await sendPushNotification(
+    await sendPush(
       userData.id,
       'Conta verificada!',
       'Sua conta foi verificada! Já pode usar o Alber.',
-    ).catch(e => console.error('[kyc-webhook] push failed:', e))
+      { route: '/(app)/perfil/kyc' },
+    )
   } else {
-    await sendPushNotification(
+    await sendPush(
       userData.id,
       'Verificação não aprovada',
       'Sua verificação de identidade não foi concluída. Acesse o app para mais informações.',
-    ).catch(e => console.error('[kyc-webhook] push failed:', e))
+      { route: '/(app)/perfil/kyc' },
+    )
   }
 
   // ── Audit log ────────────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
 import { getSubcontaBalance, transferToWallet } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface TicketRequest {
   event_id:  string
@@ -298,6 +299,13 @@ Deno.serve(async (req: Request) => {
     user_id: user.id, event_type: 'event_ticket_completed',
     metadata: { event_id: body.event_id, ticket_id: ticket.id, price_albers: priceAlbers, tx_id: txData.id },
   })
+
+  await sendPush(
+    user.id,
+    'Ingresso confirmado!',
+    `Seu ingresso para o evento foi confirmado.`,
+    { route: `/(app)/lounge/evento/${body.event_id}` },
+  )
 
   return json({
     ticket_id:    ticket.id,

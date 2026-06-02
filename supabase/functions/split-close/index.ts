@@ -12,6 +12,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { bcryptVerify } from '../_shared/crypto.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface CloseRequest {
   split_id:    string
@@ -156,6 +157,15 @@ Deno.serve(async (req: Request) => {
     event_type: 'split_closed',
     metadata:   { split_id, participant_count: allocationEntries.length },
   }).catch(() => {})
+
+  // ── Push para todos os participantes (best-effort) ────────────────────────────
+
+  const participantIds = Object.keys(allocations).filter(id => id !== user.id)
+  await Promise.allSettled(
+    participantIds.map(pid =>
+      sendPush(pid, 'Split encerrado', `O split "${split.name}" foi fechado.`, { route: `/(app)/split/${split_id}` })
+    )
+  )
 
   return json({ split_id, status: 'closed', closed_at: now })
 })

@@ -10,6 +10,7 @@ import { sha256hex, bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface TransferirRequest {
   destinatario_identifier: string   // CPF, @handle ou e-mail
@@ -82,17 +83,6 @@ async function failedAttempts(userId: string): Promise<number> {
     .in('event_type', ['transferir_pin_failed', 'transferir_security_failed'])
     .gte('created_at', since)
   return count ?? 0
-}
-
-// ── Push notification (best-effort) ─────────────────────────────────────────
-// TODO: integrar Expo Push Notifications quando push_tokens estiver no schema.
-
-async function sendPushNotification(userId: string, title: string, body: string): Promise<void> {
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    userId,
-    event_type: 'push_notification_queued',
-    metadata:   { title, body },
-  })
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -327,11 +317,12 @@ Deno.serve(async (req: Request) => {
 
   // ── Push notification para destinatário (best-effort) ────────────────────────
 
-  await sendPushNotification(
+  await sendPush(
     recipient.id,
     'Transferência recebida',
     `${sender.name} transferiu ${amount_albers} Albers para você`,
-  ).catch(e => console.error('Push notification failed:', e))
+    { route: '/(app)/atividade' },
+  )
 
   // ── Audit log ────────────────────────────────────────────────────────────────
 

@@ -5,6 +5,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface ApproveRequest {
   member_id: string   // space_members.id
@@ -100,13 +101,27 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao processar solicitação', 500)
   }
 
-  // ── Audit log (push real quando push_tokens estiver no schema) ───────────────
+  // ── Audit log + push para o membro (best-effort) ─────────────────────────────
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    target.user_id,
-    event_type: body.approved ? 'lounge_request_approved' : 'lounge_request_rejected',
-    metadata:   { space_id: target.space_id, approved_by: caller.id },
-  })
+  await Promise.allSettled([
+    supabaseAdmin.from('audit_logs').insert({
+      user_id:    target.user_id,
+      event_type: body.approved ? 'lounge_request_approved' : 'lounge_request_rejected',
+      metadata:   { space_id: target.space_id, approved_by: caller.id },
+    }),
+    body.approved
+      ? sendPush(
+          target.user_id,
+          'Entrada aprovada no Lounge!',
+          'Sua solicitação de entrada foi aprovada.',
+          { route: `/(app)/lounge/${target.space_id}` },
+        )
+      : sendPush(
+          target.user_id,
+          'Solicitação não aprovada',
+          'Sua solicitação de entrada no Lounge não foi aprovada.',
+        ),
+  ])
 
   return json({ status: newStatus, member_id: body.member_id, space_id: target.space_id })
 })

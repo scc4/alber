@@ -9,6 +9,7 @@ import { sha256hex, bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface ReceberRequest {
   amount_albers:               number
@@ -85,17 +86,6 @@ async function payerFailedAttempts(payerId: string): Promise<number> {
     .in('event_type', ['receber_payer_pin_failed', 'receber_payer_security_failed'])
     .gte('created_at', since)
   return count ?? 0
-}
-
-// ── Push notification (best-effort) ─────────────────────────────────────────
-// TODO: integrar Expo Push Notifications quando push_tokens estiver no schema.
-
-async function sendPushNotification(userId: string, title: string, body: string): Promise<void> {
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    userId,
-    event_type: 'push_notification_queued',
-    metadata:   { title, body },
-  }).then(() => {/* non-blocking */})
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -371,15 +361,17 @@ Deno.serve(async (req: Request) => {
   // ── Push notifications (best-effort) ────────────────────────────────────────
 
   await Promise.allSettled([
-    sendPushNotification(
+    sendPush(
       payer.id,
       'Pagamento enviado',
       `Você pagou ${amount_albers} Albers para ${receiver.handle}`,
+      { route: '/(app)/atividade' },
     ),
-    sendPushNotification(
+    sendPush(
       receiver.id,
       'Pagamento recebido',
       `${payer.name} pagou ${amount_albers} Albers para você`,
+      { route: '/(app)/atividade' },
     ),
   ])
 

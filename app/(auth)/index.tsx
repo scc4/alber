@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { AlberLogo } from '../../components/core/AlberLogo'
 import { useAuthStore } from '../../store/auth.store'
+import { registerPushToken } from '../../services/notifications.service'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 
@@ -35,7 +36,10 @@ export default function SplashScreen() {
 
     // Restaura sessão do SecureStore; redireciona conforme resultado
     loadSession().then(() => {
-      const isAuthenticated = useAuthStore.getState().isAuthenticated
+      const { isAuthenticated, token } = useAuthStore.getState()
+      if (isAuthenticated && token) {
+        registerPushToken(token).catch(() => {})  // best-effort
+      }
       router.replace(isAuthenticated ? '/(app)/' : '/(auth)/welcome')
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

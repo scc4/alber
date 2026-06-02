@@ -10,6 +10,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface LaunchRequest {
   split_id:    string
@@ -24,12 +25,6 @@ const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
-
-function sendPush(userId: string, title: string, body: string) {
-  return supabaseAdmin.from('audit_logs').insert({
-    user_id: userId, event_type: 'push_notification_queued', metadata: { title, body },
-  }).then(() => {}).catch(() => {})
-}
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req)

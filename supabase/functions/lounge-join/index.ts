@@ -6,6 +6,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface LoungeJoinRequest {
   space_id?:     string
@@ -144,12 +145,20 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao solicitar entrada', 500)
   }
 
-  // Notificar dono via audit log (best-effort; push real quando push_tokens estiver no schema)
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    space.owner_id,
-    event_type: 'lounge_join_request',
-    metadata:   { space_id: space.id, requester_id: user.id },
-  })
+  // Notificar dono (best-effort)
+  await Promise.allSettled([
+    supabaseAdmin.from('audit_logs').insert({
+      user_id:    space.owner_id,
+      event_type: 'lounge_join_request',
+      metadata:   { space_id: space.id, requester_id: user.id },
+    }),
+    sendPush(
+      space.owner_id,
+      'Nova solicitação no Lounge',
+      `${user.name ?? user.handle} quer entrar no seu Lounge.`,
+      { route: `/(app)/lounge/${space.id}` },
+    ),
+  ])
 
   return json({ status: 'pending', space_id: space.id })
 })

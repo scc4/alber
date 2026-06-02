@@ -47,9 +47,16 @@ export const useAuthStore = create<AuthState>((set) => ({
   // ── Restaura sessão do SecureStore ao iniciar o app ────────────────────────
   loadSession: async () => {
     try {
-      const token = await authService.getStoredToken()
+      const [token, storedUser] = await Promise.all([
+        authService.getStoredToken(),
+        authService.getStoredUser(),
+      ])
       if (token) {
-        set({ token, isAuthenticated: true })
+        set({
+          token,
+          isAuthenticated: true,
+          ...(storedUser ? { user: storedUser as unknown as AuthUser } : {}),
+        })
       }
     } catch {
       // SecureStore indisponível — inicia sem sessão
@@ -73,6 +80,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
 
     await authService.saveTokens(res.token, res.refresh_token)
+    await authService.saveUser(user as unknown as Record<string, unknown>)
 
     set({
       user,
@@ -86,6 +94,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   // ── Sessão criada após registro ────────────────────────────────────────────
   setSession: async (token, refreshToken, user, kycStatus, accountStatus) => {
     await authService.saveTokens(token, refreshToken)
+    await authService.saveUser(user as unknown as Record<string, unknown>)
     set({ user, token, kycStatus, accountStatus, isAuthenticated: true })
   },
 

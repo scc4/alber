@@ -18,18 +18,21 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../components/financial/PINInput'
-import {
-  SecurityConfirmation,
-  MOCK_SECURITY_QUESTIONS,
-} from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
 import { receber, ReceberResponse } from '../../services/financial.service'
 import { BffError } from '../../services/auth.service'
+import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
+
+// ─── Constantes ───────────────────────────────────────────────────────────────
+
+const BFF          = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -42,13 +45,10 @@ interface Payer {
   initials: string
 }
 
-// ─── UI shortcuts (recentes para seleção rápida — não usado na validação) ──────
-
-const MOCK_RECENTS: Payer[] = [
-  { name: 'João Silva Pereira', handle: '@joaosilva', maskedCpf: '***.***.789-01', initials: 'JS' },
-  { name: 'Ana Maria Costa',   handle: '@ana_costa',  maskedCpf: '***.***.234-56', initials: 'AC' },
-  { name: 'Pedro Henrique',    handle: '@phenrique',  maskedCpf: '***.***.012-34', initials: 'PH' },
-]
+interface PayerQuestion {
+  id:       string
+  question: string
+}
 
 const MAX_ATTEMPTS = 3
 
@@ -70,50 +70,84 @@ export default function ReceberScreen() {
   const [pinAttempts, setPinAttempts] = useState(0)
   const [receberResult, setReceberResult] = useState<ReceberResponse | null>(null)
 
+  // Perguntas de segurança do pagador (somente texto — answer_hash nunca exposto)
+  const [payerQuestions, setPayerQuestions]   = useState<PayerQuestion[]>([])
+  const [pickedQuestion, setPickedQuestion]   = useState<PayerQuestion | null>(null)
+  const [securityAnswer, setSecurityAnswer]   = useState('')
+  const [securitySubmitting, setSecuritySubmitting] = useState(false)
+
   const amountNum = parseInt(amount || '0', 10)
 
   const handleClose = () => router.back()
 
-  const handleSearch = () => {
+  // ─── Busca real de usuário + perguntas de segurança ──────────────────────────
+
+  const handleSearch = async () => {
     const clean = identifier.trim()
     if (!clean) return
+
     setSearching(true)
-    const q = clean.replace('@', '').toLowerCase()
-    const found = MOCK_RECENTS.find(
-      p =>
-        p.handle.replace('@', '').toLowerCase().includes(q) ||
-        p.name.toLowerCase().includes(q),
-    )
-    setPayer(
-      found ?? {
-        name:      clean,
-        handle:    clean.startsWith('@') ? clean : '',
-        maskedCpf: '',
-        initials:  clean.slice(0, 2).toUpperCase(),
-      },
-    )
     setNotFound(false)
     setApiError(null)
-    setSearching(false)
-    setStep('payer')
-  }
 
-  const handleSelectRecent = (p: Payer) => {
-    setIdentifier(p.handle)
-    setPayer(p)
-    setApiError(null)
-    setStep('payer')
+    try {
+      const searchRes = await fetch(
+        `${BFF}/user-search?q=${encodeURIComponent(clean.replace('@', ''))}`,
+        { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } },
+      )
+      const results = await searchRes.json()
+
+      if (!Array.isArray(results) || results.length === 0) {
+        setNotFound(true)
+        return
+      }
+
+      // Preferência por handle exato, senão usa primeiro resultado
+      const cleanLower = clean.replace('@', '').toLowerCase()
+      const found = results.find(
+        (u: { handle?: string }) => u.handle?.replace('@', '').toLowerCase() === cleanLower,
+      ) ?? results[0]
+
+      // Buscar perguntas de segurança do pagador (answer_hash inacessível por RLS)
+      const qRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/security_questions?user_id=eq.${found.id}&select=id,question,position`,
+        { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } },
+      )
+      const questions = await qRes.json()
+      setPayerQuestions(Array.isArray(questions) ? questions : [])
+
+      const initials = (found.name as string)
+        .split(' ')
+        .map((w: string) => w[0] ?? '')
+        .join('')
+        .slice(0, 2)
+        .toUpperCase()
+
+      setPayer({ name: found.name, handle: found.handle, maskedCpf: '', initials })
+      setNotFound(false)
+      setApiError(null)
+      setStep('payer')
+    } catch {
+      setApiError(t('receber.errorApi'))
+    } finally {
+      setSearching(false)
+    }
   }
 
   const handlePinComplete = (hash: string) => {
     setPayerPinHash(hash)
     setPinError(null)
     setApiError(null)
+    // Sorteia uma pergunta aleatória do pagador para o passo de segurança
+    if (payerQuestions.length > 0) {
+      setPickedQuestion(payerQuestions[Math.floor(Math.random() * payerQuestions.length)])
+    }
+    setSecurityAnswer('')
     setTimeout(() => setStep('security'), 300)
   }
 
-  const handleSecurityPass = async (answerHash?: string) => {
-    if (!answerHash || !payerPinHash || !token) return
+  const handleSecurityPass = async (answerHash: string) => {
+    if (!payerPinHash || !token) return
     setStep('processing')
     try {
       const result = await receber(token, amountNum, identifier, payerPinHash, answerHash)
@@ -143,14 +177,6 @@ export default function ReceberScreen() {
         setStep('identify')
       }
     }
-  }
-
-  const handleSecurityFail = (_attemptsLeft: number) => {
-    // BFF incrementa contador internamente — nenhuma ação local necessária
-  }
-
-  const handleSecurityBlocked = () => {
-    setStep('value')
   }
 
   // ─── Etapa 1: Valor ──────────────────────────────────────────────────────────
@@ -233,23 +259,8 @@ export default function ReceberScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <Text style={[s.eyebrow, s.recentLabel]}>{t('receber.recentLabel')}</Text>
-            {MOCK_RECENTS.map(p => (
-              <Pressable
-                key={p.handle}
-                onPress={() => handleSelectRecent(p)}
-                style={({ pressed }) => [s.recentRow, pressed && s.pressed]}
-                accessibilityRole="button"
-                accessibilityLabel={p.name}
-              >
-                <View style={s.avatar}>
-                  <Text style={s.avatarText}>{p.initials}</Text>
-                </View>
-                <View style={s.recentInfo}>
-                  <Text style={s.recentName}>{p.name}</Text>
-                  <Text style={s.recentHandle}>{p.handle}</Text>
-                </View>
-              </Pressable>
-            ))}
+            {/* Recentes: histórico real será implementado em sprint futuro */}
+            <Text style={s.emptyRecentsHint}>Nenhuma transação recente</Text>
           </ScrollView>
 
           <View style={s.spacer} />
@@ -285,7 +296,7 @@ export default function ReceberScreen() {
           <View style={s.payerInfo}>
             <Text style={s.payerName}>{payer.name}</Text>
             <Text style={s.payerMeta}>
-              {payer.handle} · {payer.maskedCpf}
+              {payer.handle}{payer.maskedCpf ? ` · ${payer.maskedCpf}` : ''}
             </Text>
           </View>
         </View>
@@ -347,23 +358,64 @@ export default function ReceberScreen() {
     )
   }
 
-  // ─── Etapa 5: Confirmação de segurança ───────────────────────────────────────
+  // ─── Etapa 5: Confirmação de segurança (pergunta real do pagador) ─────────────
 
   if (step === 'security') {
+    const canSubmit = securityAnswer.trim().length >= 2 && !securitySubmitting
+
+    const handleSubmitSecurity = async () => {
+      if (!securityAnswer.trim() || !payerPinHash || !token) return
+      setSecuritySubmitting(true)
+      try {
+        const hash = await sha256Hex(normalizeSecurityAnswer(securityAnswer))
+        await handleSecurityPass(hash)
+      } finally {
+        setSecuritySubmitting(false)
+      }
+    }
+
     return (
-      <FlowShell
-        subtitle={t('receber.subtitleSecurity')}
-        title={t('receber.title')}
-        onClose={() => setStep('pin')}
-        closeLabel={t('receber.back')}
+      <KeyboardAvoidingView
+        style={s.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <SecurityConfirmation
-          questions={MOCK_SECURITY_QUESTIONS}
-          onPass={handleSecurityPass}
-          onFail={handleSecurityFail}
-          onBlocked={handleSecurityBlocked}
-        />
-      </FlowShell>
+        <FlowShell
+          subtitle={t('receber.subtitleSecurity')}
+          title={t('receber.title')}
+          onClose={() => setStep('pin')}
+          closeLabel={t('receber.back')}
+        >
+          <Text style={s.pinContext}>{t('auth.security.header')}</Text>
+          <Text style={s.pinSubtitle}>{t('auth.security.title')}</Text>
+
+          {pickedQuestion ? (
+            <>
+              <Text style={s.securityQuestion}>{pickedQuestion.question}</Text>
+              <TextInput
+                style={s.securityInput}
+                value={securityAnswer}
+                onChangeText={setSecurityAnswer}
+                placeholder={t('auth.login.securityAnswerPlaceholder')}
+                placeholderTextColor="rgba(255,255,255,0.25)"
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="done"
+                onSubmitEditing={canSubmit ? handleSubmitSecurity : undefined}
+              />
+              <Text style={s.securityHint}>{t('auth.login.securityHint')}</Text>
+            </>
+          ) : (
+            <Text style={s.notFoundText}>Perguntas de segurança não disponíveis.</Text>
+          )}
+
+          <View style={s.spacer} />
+          <PrimaryButton
+            label={securitySubmitting ? t('receber.processing') : t('receber.requestCta')}
+            onPress={handleSubmitSecurity}
+            state={canSubmit ? 'default' : 'disabled'}
+          />
+        </FlowShell>
+      </KeyboardAvoidingView>
     )
   }
 
@@ -499,7 +551,6 @@ function SuccessScreen({
     >
       <View style={s.successBody}>
         <View style={s.checkCircle}>
-          {/* Checkmark SVG inline — sem dependência extra */}
           <Text style={s.checkMark}>✓</Text>
         </View>
         <Text style={s.successTitle}>{title}</Text>
@@ -673,40 +724,13 @@ const s = StyleSheet.create({
   // Recents
   recentScroll: { flex: 1 },
   recentLabel: { marginTop: spacing.md },
-  recentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingVertical: spacing.sm + 4,
+  emptyRecentsHint: {
+    fontSize: typography.size.caption.fontSize,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: typography.fontFamily.primary,
+    paddingVertical: spacing.md,
     borderTopWidth: 0.5,
     borderTopColor: 'rgba(255,255,255,0.07)',
-  },
-  pressed: { opacity: 0.6 },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.7)',
-    fontFamily: typography.fontFamily.primary,
-  },
-  recentInfo: { flex: 1 },
-  recentName: {
-    fontSize: typography.size.bodySmall.fontSize,
-    color: colors.white[100],
-    fontFamily: typography.fontFamily.primary,
-  },
-  recentHandle: {
-    fontSize: typography.size.caption.fontSize,
-    color: 'rgba(255,255,255,0.4)',
-    fontFamily: typography.fontFamily.primary,
-    marginTop: 2,
   },
 
   // Payer card
@@ -804,6 +828,31 @@ const s = StyleSheet.create({
     marginBottom: spacing.md,
   },
 
+  // Security step
+  securityQuestion: {
+    fontSize: typography.size.body.fontSize,
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: typography.size.body.lineHeight,
+    marginBottom: spacing.lg,
+  },
+  securityInput: {
+    width: '100%',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.18)',
+    paddingVertical: spacing.sm + 2,
+    fontSize: 18,
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: spacing.sm,
+  },
+  securityHint: {
+    fontSize: typography.size.caption.fontSize,
+    color: 'rgba(255,255,255,0.35)',
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: typography.size.caption.lineHeight,
+  },
+
   // Insufficient
   insufficientBlock: {
     marginTop: spacing.md,
@@ -859,7 +908,7 @@ const s = StyleSheet.create({
   successBottom: { paddingBottom: spacing.sm },
   successAsaas: { alignItems: 'center', marginBottom: spacing.md },
 
-  // Receipt row (shared entre success e insufficient)
+  // Receipt row
   receiptRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

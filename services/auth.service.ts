@@ -12,6 +12,7 @@ const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 export const TOKEN_KEY          = 'auth_access_token'
 export const REFRESH_TOKEN_KEY  = 'auth_refresh_token'
 export const SEC_QUESTIONS_KEY  = 'auth_sec_questions'
+export const USER_KEY           = 'auth_user'
 
 // ── Erro tipado do BFF ────────────────────────────────────────────────────────
 
@@ -130,7 +131,20 @@ export async function logout(): Promise<void> {
     SecureStore.deleteItemAsync(TOKEN_KEY),
     SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
     SecureStore.deleteItemAsync(SEC_QUESTIONS_KEY),
+    SecureStore.deleteItemAsync(USER_KEY),
   ])
+}
+
+export async function saveUser(user: Record<string, unknown>): Promise<void> {
+  try   { await SecureStore.setItemAsync(USER_KEY, JSON.stringify(user)) }
+  catch { /* não-crítico */ }
+}
+
+export async function getStoredUser(): Promise<Record<string, unknown> | null> {
+  try {
+    const raw = await SecureStore.getItemAsync(USER_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, unknown>) : null
+  } catch { return null }
 }
 
 // ── Helpers de sessão ─────────────────────────────────────────────────────────

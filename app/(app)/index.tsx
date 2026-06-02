@@ -142,7 +142,8 @@ export default function HomeScreen() {
     }
   }
 
-  const firstName = user?.name.split(' ')[0] ?? ''
+  console.log('[home] user object:', JSON.stringify(user))
+  const firstName = user?.name?.split(' ')[0] ?? ''
 
   return (
     <View style={[styles.root, { backgroundColor: skin.bgDark }]}>

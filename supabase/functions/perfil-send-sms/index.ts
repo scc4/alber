@@ -6,6 +6,55 @@ const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
 
+const VALID_PURPOSES = ['pin_change', 'pix_change', 'forgot_pin'] as const
+type Purpose = typeof VALID_PURPOSES[number]
+
+// ── Normalizar número de telefone ─────────────────────────────────────────────
+// Remove não-dígitos e garante prefixo 55 (Brasil)
+
+function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '')
+  return digits.startsWith('55') ? digits : '55' + digits
+}
+
+// ── Enviar via Infobip ────────────────────────────────────────────────────────
+
+async function sendViaInfobip(to: string, code: string): Promise<void> {
+  const apiKey  = Deno.env.get('INFOBIP_API_KEY')
+  const baseUrl = Deno.env.get('INFOBIP_BASE_URL')  // ex: xxxxx.api.infobip.com
+
+  if (!apiKey || !baseUrl) {
+    console.log(`[perfil-send-sms] DEV — código para ${to}: ${code}`)
+    return
+  }
+
+  const body = {
+    messages: [
+      {
+        destinations: [{ to }],
+        from: 'Alber',
+        text: `Seu código de verificação Alber: ${code}. Válido por 10 minutos.`,
+      },
+    ],
+  }
+
+  const res = await fetch(`https://${baseUrl}/sms/3/messages`, {
+    method:  'POST',
+    headers: {
+      'Authorization': `App ${apiKey}`,
+      'Content-Type':  'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`Infobip ${res.status}: ${text}`)
+  }
+}
+
+// ── Handler ───────────────────────────────────────────────────────────────────
+
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
@@ -25,10 +74,12 @@ Deno.serve(async (req: Request) => {
   let body: { purpose?: string }
   try { body = await req.json() } catch { body = {} }
 
-  const purpose = body.purpose ?? 'pin_change'
-  if (!['pin_change', 'pix_change'].includes(purpose)) {
-    return err('INVALID_PURPOSE', 'purpose inválido', 400)
+  const purpose = (body.purpose ?? 'pin_change') as Purpose
+  if (!VALID_PURPOSES.includes(purpose)) {
+    return err('INVALID_PURPOSE', `purpose deve ser um de: ${VALID_PURPOSES.join(', ')}`, 400)
   }
+
+  // ── Buscar usuário e telefone ─────────────────────────────────────────────
 
   const { data: user } = await supabaseAdmin
     .from('users')
@@ -38,7 +89,13 @@ Deno.serve(async (req: Request) => {
 
   if (!user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
 
-  // Rate limit: máx 3 códigos em 10 minutos
+  const phone = authUser.phone
+  if (!phone) return err('NO_PHONE', 'Nenhum telefone cadastrado na conta', 422)
+
+  const normalizedPhone = normalizePhone(phone)
+
+  // ── Rate limit: máx 3 códigos por número por 10 minutos ──────────────────
+
   const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString()
   const { count } = await supabaseAdmin
     .from('sms_codes')
@@ -51,7 +108,9 @@ Deno.serve(async (req: Request) => {
     return err('RATE_LIMITED', 'Muitas tentativas. Aguarde alguns minutos.', 429)
   }
 
-  const code = String(Math.floor(100000 + Math.random() * 900000))
+  // ── Gerar e persistir código ──────────────────────────────────────────────
+
+  const code      = String(Math.floor(100000 + Math.random() * 900000))
   const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
 
   await supabaseAdmin.from('sms_codes').insert({
@@ -61,35 +120,14 @@ Deno.serve(async (req: Request) => {
     expires_at: expiresAt,
   })
 
-  // Production: Twilio send. During development, log for testing.
-  const twilioSid    = Deno.env.get('TWILIO_ACCOUNT_SID')
-  const twilioToken  = Deno.env.get('TWILIO_AUTH_TOKEN')
-  const twilioFrom   = Deno.env.get('TWILIO_FROM_NUMBER')
+  // ── Enviar ────────────────────────────────────────────────────────────────
 
-  const phone = authUser.phone
-  if (twilioSid && twilioToken && twilioFrom && phone) {
-    try {
-      const twilioBody = new URLSearchParams({
-        To:   phone,
-        From: twilioFrom,
-        Body: `Alber: seu código de verificação é ${code}. Válido por 10 minutos.`,
-      })
-      await fetch(
-        `https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: 'Basic ' + btoa(`${twilioSid}:${twilioToken}`),
-            'Content-Type': 'application/x-www-form-urlencoded',
-          },
-          body: twilioBody.toString(),
-        },
-      )
-    } catch (e) {
-      console.error('[perfil-send-sms] Twilio error:', e)
-    }
-  } else {
-    console.log(`[perfil-send-sms] DEV — código para user ${user.id}: ${code}`)
+  try {
+    await sendViaInfobip(normalizedPhone, code)
+  } catch (e) {
+    console.error('[perfil-send-sms] Infobip error:', e)
+    // Código já foi inserido — não bloquear o usuário por falha de envio.
+    // O código ainda pode ser usado se o usuário já o tiver recebido.
   }
 
   return json({ success: true })

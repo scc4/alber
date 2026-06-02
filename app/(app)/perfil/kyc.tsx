@@ -2,22 +2,26 @@ import React, { useState } from 'react'
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
+import * as ImagePicker from 'expo-image-picker'
 import { useAuthStore } from '../../../store/auth.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 
-type Step = 'status' | 'choose_doc' | 'capture_front' | 'capture_back' | 'capture_selfie' | 'review' | 'sent'
-type DocType = 'rg' | 'cnh'
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
-const MOCK_REJECTED_REASON = 'Documento ilegível. Envie novas fotos com boa iluminação.'
+type Step    = 'status' | 'choose_doc' | 'capture_front' | 'capture_back' | 'capture_selfie' | 'review' | 'sent'
+type DocType = 'rg' | 'cnh'
 
 // ── Header ────────────────────────────────────────────────────────────────────
 
@@ -77,7 +81,7 @@ function StatusCard({ onStartFlow }: StatusCardProps) {
       iconBg: `${colors.state.error}1A`,
       iconBorder: `${colors.state.error}4D`,
       title: t('perfil.kyc.rejectedTitle'),
-      body:  t('perfil.kyc.rejectedBody', { reason: MOCK_REJECTED_REASON }),
+      body:  t('perfil.kyc.rejectedBody', { reason: '' }),
       cta:   t('perfil.kyc.rejectedCta'),
     },
   }[kycStatus]
@@ -130,27 +134,49 @@ function ChooseDoc({ onChoose }: ChooseDocProps) {
   )
 }
 
-// ── MockCamera ────────────────────────────────────────────────────────────────
+// ── CaptureStep ───────────────────────────────────────────────────────────────
 
-interface MockCameraProps {
-  label: string
-  ctaLabel: string
+interface CaptureStepProps {
+  label:     string
+  ctaLabel:  string
   isSelfie?: boolean
-  onCapture: (uri: string) => void
+  onCapture: (base64: string) => void
 }
 
-function MockCamera({ label, ctaLabel, isSelfie = false, onCapture }: MockCameraProps) {
-  const handleCapture = () => {
-    onCapture(`mock://photo/${Date.now()}`)
+function CaptureStep({ label, ctaLabel, isSelfie = false, onCapture }: CaptureStepProps) {
+  const { t } = useTranslation()
+  const [cameraStatus, requestCameraPermission] = ImagePicker.useCameraPermissions()
+  const [capturing, setCapturing]               = useState(false)
+  const [permError, setPermError]               = useState(false)
+
+  const handleCapture = async () => {
+    setPermError(false)
+    if (!cameraStatus?.granted) {
+      const res = await requestCameraPermission()
+      if (!res.granted) { setPermError(true); return }
+    }
+    setCapturing(true)
+    try {
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes:    ImagePicker.MediaTypeOptions.Images,
+        quality:       0.7,
+        base64:        true,
+        allowsEditing: true,
+        aspect:        isSelfie ? [1, 1] : [4, 3],
+      })
+      if (!result.canceled && result.assets[0]?.base64) {
+        onCapture(result.assets[0].base64)
+      }
+    } finally {
+      setCapturing(false)
+    }
   }
 
   return (
     <View style={styles.cameraWrap}>
       <Text style={styles.cameraLabel}>{label}</Text>
 
-      {/* Viewfinder */}
       <View style={[styles.viewfinder, isSelfie && styles.viewfinderSelfie]}>
-        {/* Corner marks */}
         <View style={[styles.corner, styles.cornerTL]} />
         <View style={[styles.corner, styles.cornerTR]} />
         <View style={[styles.corner, styles.cornerBL]} />
@@ -160,9 +186,20 @@ function MockCamera({ label, ctaLabel, isSelfie = false, onCapture }: MockCamera
         </Text>
       </View>
 
-      {/* Capture button */}
-      <TouchableOpacity style={styles.captureBtn} onPress={handleCapture} activeOpacity={0.8}>
-        <View style={styles.captureBtnInner} />
+      {permError && (
+        <Text style={styles.permError}>{t('perfil.kyc.cameraPermissionDenied')}</Text>
+      )}
+
+      <TouchableOpacity
+        style={[styles.captureBtn, capturing && { opacity: 0.5 }]}
+        onPress={handleCapture}
+        disabled={capturing}
+        activeOpacity={0.8}
+      >
+        {capturing
+          ? <ActivityIndicator color={colors.black[100]} />
+          : <View style={styles.captureBtnInner} />
+        }
       </TouchableOpacity>
       <Text style={styles.captureBtnLabel}>{ctaLabel}</Text>
     </View>
@@ -172,13 +209,15 @@ function MockCamera({ label, ctaLabel, isSelfie = false, onCapture }: MockCamera
 // ── Review ────────────────────────────────────────────────────────────────────
 
 interface ReviewProps {
-  docType: DocType
-  photos: { front: string; back: string; selfie: string }
-  onRetake: (which: 'front' | 'back' | 'selfie') => void
-  onSubmit: () => void
+  docType:     DocType
+  photos:      { front: string; back: string; selfie: string }
+  submitting:  boolean
+  submitError: string | null
+  onRetake:    (which: 'front' | 'back' | 'selfie') => void
+  onSubmit:    () => void
 }
 
-function Review({ docType, photos, onRetake, onSubmit }: ReviewProps) {
+function Review({ docType, photos, submitting, submitError, onRetake, onSubmit }: ReviewProps) {
   const { t } = useTranslation()
 
   const items: { key: 'front' | 'back' | 'selfie'; label: string }[] = [
@@ -200,22 +239,39 @@ function Review({ docType, photos, onRetake, onSubmit }: ReviewProps) {
 
       {items.map(({ key, label }) => (
         <View key={key} style={styles.reviewItem}>
-          {/* Photo placeholder (mock URI can't be displayed) */}
-          <View style={styles.reviewThumb}>
-            <Text style={styles.reviewThumbCheck}>✓</Text>
-          </View>
+          <Image
+            source={{ uri: `data:image/jpeg;base64,${photos[key]}` }}
+            style={styles.reviewThumb}
+            resizeMode="cover"
+          />
           <View style={styles.reviewItemMeta}>
             <Text style={styles.reviewItemLabel}>{label}</Text>
             <Text style={styles.reviewItemCaptured}>Capturado</Text>
           </View>
-          <TouchableOpacity onPress={() => onRetake(key)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={() => onRetake(key)}
+            disabled={submitting}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Text style={styles.retakeBtn}>{t('perfil.kyc.retake')}</Text>
           </TouchableOpacity>
         </View>
       ))}
 
-      <TouchableOpacity style={[styles.cta, { marginTop: spacing.xl }]} onPress={onSubmit} activeOpacity={0.75}>
-        <Text style={styles.ctaText}>{t('perfil.kyc.publishCta')}</Text>
+      {submitError && (
+        <Text style={styles.submitError}>{submitError}</Text>
+      )}
+
+      <TouchableOpacity
+        style={[styles.cta, { marginTop: spacing.xl }, submitting && { opacity: 0.6 }]}
+        onPress={onSubmit}
+        disabled={submitting}
+        activeOpacity={0.75}
+      >
+        {submitting
+          ? <ActivityIndicator color={colors.black[100]} />
+          : <Text style={styles.ctaText}>{t('perfil.kyc.publishCta')}</Text>
+        }
       </TouchableOpacity>
     </ScrollView>
   )
@@ -243,15 +299,18 @@ function Sent() {
 
 export default function KycScreen() {
   const { t }        = useTranslation()
+  const token        = useAuthStore(s => s.token)
   const setKycStatus = useAuthStore(s => s.setKycStatus)
 
-  const [step, setStep]         = useState<Step>('status')
-  const [docType, setDocType]   = useState<DocType | null>(null)
-  const [photoFront, setFront]  = useState<string | null>(null)
-  const [photoBack, setBack]    = useState<string | null>(null)
-  const [photoSelfie, setSelfie] = useState<string | null>(null)
+  const [step, setStep]           = useState<Step>('status')
+  const [docType, setDocType]     = useState<DocType | null>(null)
+  const [photoFront, setFront]    = useState<string | null>(null)
+  const [photoBack, setBack]      = useState<string | null>(null)
+  const [photoSelfie, setSelfie]  = useState<string | null>(null)
+  const [submitting, setSubmitting]   = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const headerLabel = step === 'status' ? t('perfil.kyc.title') : t('perfil.kyc.title')
+  const headerLabel = t('perfil.kyc.title')
 
   const handleBack = () => {
     switch (step) {
@@ -269,20 +328,9 @@ export default function KycScreen() {
     setStep('capture_front')
   }
 
-  const handleCaptureFront = (uri: string) => {
-    setFront(uri)
-    setStep('capture_back')
-  }
-
-  const handleCaptureBack = (uri: string) => {
-    setBack(uri)
-    setStep('capture_selfie')
-  }
-
-  const handleCaptureSelfie = (uri: string) => {
-    setSelfie(uri)
-    setStep('review')
-  }
+  const handleCaptureFront = (b64: string) => { setFront(b64);  setStep('capture_back') }
+  const handleCaptureBack  = (b64: string) => { setBack(b64);   setStep('capture_selfie') }
+  const handleCaptureSelfie = (b64: string) => { setSelfie(b64); setStep('review') }
 
   const handleRetake = (which: 'front' | 'back' | 'selfie') => {
     if (which === 'front')  { setFront(null);  setStep('capture_front') }
@@ -290,9 +338,40 @@ export default function KycScreen() {
     if (which === 'selfie') { setSelfie(null); setStep('capture_selfie') }
   }
 
-  const handleSubmit = () => {
-    setKycStatus('submitted')
-    setStep('sent')
+  const handleSubmit = async () => {
+    if (!photoFront || !photoBack || !photoSelfie || !token) return
+    setSubmitting(true)
+    setSubmitError(null)
+
+    try {
+      const res = await fetch(`${BFF}/kyc-submit`, {
+        method:  'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization:  `Bearer ${token}`,
+          apikey:         ANON_KEY,
+        },
+        body: JSON.stringify({
+          doc_type:      docType,
+          front_base64:  photoFront,
+          back_base64:   photoBack,
+          selfie_base64: photoSelfie,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setSubmitError((data as { message?: string }).message ?? t('perfil.kyc.submitError'))
+        return
+      }
+
+      setKycStatus('submitted')
+      setStep('sent')
+    } catch {
+      setSubmitError(t('perfil.kyc.submitError'))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   return (
@@ -310,7 +389,7 @@ export default function KycScreen() {
       )}
 
       {step === 'capture_front' && (
-        <MockCamera
+        <CaptureStep
           label={t('perfil.kyc.stepFront')}
           ctaLabel={t('perfil.kyc.captureFront')}
           onCapture={handleCaptureFront}
@@ -318,7 +397,7 @@ export default function KycScreen() {
       )}
 
       {step === 'capture_back' && (
-        <MockCamera
+        <CaptureStep
           label={t('perfil.kyc.stepBack')}
           ctaLabel={t('perfil.kyc.captureBack')}
           onCapture={handleCaptureBack}
@@ -326,7 +405,7 @@ export default function KycScreen() {
       )}
 
       {step === 'capture_selfie' && (
-        <MockCamera
+        <CaptureStep
           label={t('perfil.kyc.stepSelfie')}
           ctaLabel={t('perfil.kyc.captureSelfie')}
           isSelfie
@@ -338,6 +417,8 @@ export default function KycScreen() {
         <Review
           docType={docType}
           photos={{ front: photoFront, back: photoBack, selfie: photoSelfie }}
+          submitting={submitting}
+          submitError={submitError}
           onRetake={handleRetake}
           onSubmit={handleSubmit}
         />
@@ -350,7 +431,7 @@ export default function KycScreen() {
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
-const CORNER_SIZE = 20
+const CORNER_SIZE  = 20
 const CORNER_THICK = 2.5
 
 const styles = StyleSheet.create({
@@ -437,7 +518,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: 'rgba(255,255,255,0.25)',
   },
-  // Camera
+  // Camera capture
   cameraWrap: {
     flex: 1,
     backgroundColor: '#000',
@@ -483,6 +564,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: spacing.md,
   },
+  permError: {
+    ...typography.size.caption,
+    color: colors.state.error,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
+  },
   captureBtn: {
     width: 68,
     height: 68,
@@ -527,15 +614,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 36,
     borderRadius: 4,
-    backgroundColor: `${colors.state.success}1A`,
-    borderWidth: 0.5,
-    borderColor: `${colors.state.success}4D`,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  reviewThumbCheck: {
-    fontSize: 16,
-    color: colors.state.success,
+    backgroundColor: 'rgba(255,255,255,0.05)',
   },
   reviewItemMeta: { flex: 1 },
   reviewItemLabel: {
@@ -551,6 +630,13 @@ const styles = StyleSheet.create({
     ...typography.size.caption,
     color: 'rgba(255,255,255,0.4)',
     textDecorationLine: 'underline',
+  },
+  submitError: {
+    ...typography.size.caption,
+    color: colors.state.error,
+    textAlign: 'center',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.sm,
   },
   // Sent
   sentWrap: {

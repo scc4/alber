@@ -780,7 +780,11 @@
       "email": "E-mail",
       "phone": "Telefone",
       "address": "Endereço",
-      "readOnly": "Somente leitura. Para atualizar, entre em contato com o suporte."
+      "readOnly": "Somente leitura. Para atualizar, entre em contato com o suporte.",
+      "loading": "Carregando dados...",
+      "errorLoad": "Erro ao carregar dados cadastrais",
+      "retry": "Tentar novamente",
+      "addressPlaceholder": "—"
     },
     "handle": {
       "title": "@handle",
@@ -852,7 +856,10 @@
       "backCta": "Voltar ao perfil",
       "frontLabel": "Frente",
       "backLabel": "Verso",
-      "selfieLabel": "Selfie"
+      "selfieLabel": "Selfie",
+      "cameraPermissionDenied": "Permissão de câmera necessária. Acesse as configurações para habilitar.",
+      "submitting": "Enviando...",
+      "submitError": "Erro ao enviar documentos. Tente novamente."
     },
     "notificacoes": {
       "title": "Notificações",

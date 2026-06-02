@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
@@ -14,12 +15,16 @@ import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 
-// Dados mascarados conforme /specs/05_security.md §6.3
-// Em produção, vêm do BFF já mascarados — nunca dados completos no app
-const MOCK_BIRTH   = '**/07/19**'
-const MOCK_EMAIL   = 'ma***@email.com'
-const MOCK_PHONE   = '(11) ****-1234'
-const MOCK_ADDRESS = 'Rua ***, 000 — São Paulo, SP'
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
+interface ProfileData {
+  email_masked:   string
+  phone_masked:   string
+  birth_masked:   string
+  pix_key_masked: string
+  pix_key_type:   string
+}
 
 // ── DataRow ───────────────────────────────────────────────────────────────────
 
@@ -37,8 +42,33 @@ function DataRow({ label, value }: DataRowProps) {
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function DadosScreen() {
-  const { t } = useTranslation()
-  const user  = useAuthStore(s => s.user)
+  const { t }  = useTranslation()
+  const user   = useAuthStore(s => s.user)
+  const token  = useAuthStore(s => s.token)
+
+  const [loading, setLoading]   = useState(true)
+  const [error, setError]       = useState(false)
+  const [data, setData]         = useState<ProfileData | null>(null)
+
+  const load = async () => {
+    if (!token) return
+    setLoading(true)
+    setError(false)
+    try {
+      const res = await fetch(`${BFF}/user-profile`, {
+        headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY },
+      })
+      if (!res.ok) { setError(true); return }
+      const json = await res.json()
+      setData(json)
+    } catch {
+      setError(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [token])
 
   if (!user) return null
 
@@ -53,20 +83,38 @@ export default function DadosScreen() {
         <View style={styles.backBtn} />
       </View>
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <DataRow label={t('perfil.dados.name')}    value={user.name} />
-        <DataRow label={t('perfil.dados.cpf')}     value={user.cpfMasked} />
-        <DataRow label={t('perfil.dados.birth')}   value={MOCK_BIRTH} />
-        <DataRow label={t('perfil.dados.email')}   value={MOCK_EMAIL} />
-        <DataRow label={t('perfil.dados.phone')}   value={MOCK_PHONE} />
-        <DataRow label={t('perfil.dados.address')} value={MOCK_ADDRESS} />
+      {loading && (
+        <View style={styles.center}>
+          <ActivityIndicator color="rgba(255,255,255,0.4)" />
+          <Text style={styles.loadingText}>{t('perfil.dados.loading')}</Text>
+        </View>
+      )}
 
-        <Text style={styles.readOnly}>{t('perfil.dados.readOnly')}</Text>
-      </ScrollView>
+      {!loading && error && (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{t('perfil.dados.errorLoad')}</Text>
+          <TouchableOpacity style={styles.retryBtn} onPress={load} activeOpacity={0.75}>
+            <Text style={styles.retryText}>{t('perfil.dados.retry')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!loading && !error && (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          <DataRow label={t('perfil.dados.name')}    value={user.name} />
+          <DataRow label={t('perfil.dados.cpf')}     value={user.cpfMasked || '***.***.***-**'} />
+          <DataRow label={t('perfil.dados.birth')}   value={data?.birth_masked ?? '—'} />
+          <DataRow label={t('perfil.dados.email')}   value={data?.email_masked ?? '—'} />
+          <DataRow label={t('perfil.dados.phone')}   value={data?.phone_masked ?? '—'} />
+          <DataRow label={t('perfil.dados.address')} value={t('perfil.dados.addressPlaceholder')} />
+
+          <Text style={styles.readOnly}>{t('perfil.dados.readOnly')}</Text>
+        </ScrollView>
+      )}
     </SafeAreaView>
   )
 }
@@ -98,6 +146,34 @@ const styles = StyleSheet.create({
     color: colors.white[100],
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  loadingText: {
+    ...typography.size.caption,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: spacing.sm,
+  },
+  errorText: {
+    ...typography.size.body,
+    color: colors.state.error,
+    textAlign: 'center',
+  },
+  retryBtn: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: spacing.radius.sm,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  retryText: {
+    ...typography.size.caption,
+    color: colors.white[100],
   },
   scroll: {
     flex: 1,

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -16,6 +16,9 @@ import { useAuthStore } from '../../../store/auth.store'
 import { colors, spaceSkins } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
+
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 // ── ActionRow ─────────────────────────────────────────────────────────────────
 
@@ -92,23 +95,34 @@ function kycInfo(status: string, t: (k: string) => string): { label: string; col
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 
-const MOCK_MEMBER_SINCE = 'abr/2026'
-
 export default function PerfilScreen() {
   const { t }          = useTranslation()
   const router         = useRouter()
   const user           = useAuthStore(s => s.user)
+  const token          = useAuthStore(s => s.token)
   const kycStatus      = useAuthStore(s => s.kycStatus)
   const logout         = useAuthStore(s => s.logout)
 
   const isLoadingSession = useAuthStore(s => s.isLoadingSession)
   const { label: kycLabel, color: kycColor } = kycInfo(kycStatus, t)
 
+  const [memberSince, setMemberSince] = useState('')
+
   useEffect(() => {
     if (!isLoadingSession && !user) {
       router.back()
     }
   }, [isLoadingSession, user, router])
+
+  useEffect(() => {
+    if (!token) return
+    fetch(`${BFF}/user-profile`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY },
+    })
+      .then(r => r.json())
+      .then(d => { if (d.member_since) setMemberSince(d.member_since) })
+      .catch(() => {})
+  }, [token])
 
   const handleLogout = useCallback(() => {
     Alert.alert(
@@ -155,9 +169,11 @@ export default function PerfilScreen() {
               <Text style={styles.heroHandle}>{user.handle}</Text>
               {kycStatus === 'approved' && <VerifiedBadge />}
             </View>
-            <Text style={styles.heroSince}>
-              {t('perfil.memberSince', { date: MOCK_MEMBER_SINCE })}
-            </Text>
+            {memberSince ? (
+              <Text style={styles.heroSince}>
+                {t('perfil.memberSince', { date: memberSince })}
+              </Text>
+            ) : null}
           </View>
         </View>
 

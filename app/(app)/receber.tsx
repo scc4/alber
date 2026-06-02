@@ -24,6 +24,7 @@ import { useAuthStore } from '../../store/auth.store'
 import { receber, ReceberResponse } from '../../services/financial.service'
 import { BffError } from '../../services/auth.service'
 import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
+import { formatAlbers } from '../../utils/format'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -304,7 +305,7 @@ export default function ReceberScreen() {
         <View style={s.amountSummaryBlock}>
           <Text style={s.eyebrow}>{t('receber.amountSummary')}</Text>
           <View style={s.amountRow}>
-            <Text style={s.amountBig}>{amountNum}</Text>
+            <Text style={s.amountBig}>{formatAlbers(amountNum)}</Text>
             <Text style={s.amountUnit}>{t('receber.amountUnit')}</Text>
           </View>
         </View>
@@ -342,7 +343,7 @@ export default function ReceberScreen() {
           <View style={s.pinCardRow}>
             <Text style={s.pinCardLabel}>{t('receber.amountSummary')}</Text>
             <Text style={s.pinCardValue}>
-              {amountNum} {t('receber.amountUnit')}
+              {formatAlbers(amountNum)} {t('receber.amountUnit')}
             </Text>
           </View>
         </View>
@@ -449,7 +450,7 @@ export default function ReceberScreen() {
         <View style={s.insufficientBlock}>
           <ReceiptRow
             label={t('receber.insufficientNeeded')}
-            value={`${amountNum} ${t('receber.amountUnit')}`}
+            value={`${formatAlbers(amountNum)} ${t('receber.amountUnit')}`}
           />
           <ReceiptRow
             label={t('receber.insufficientMissing')}
@@ -474,7 +475,7 @@ export default function ReceberScreen() {
     const displayTo   = user?.handle ?? ''
     return (
       <SuccessScreen
-        title={t('receber.successTitle', { amount: receberResult?.amount_received ?? amountNum })}
+        title={t('receber.successTitle', { amount: formatAlbers(receberResult?.amount_received ?? amountNum) })}
         rows={[
           { label: t('receber.successFrom'), value: displayFrom },
           { label: t('receber.successTo'),   value: displayTo },

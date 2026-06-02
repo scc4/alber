@@ -21,6 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import * as SecureStore from 'expo-secure-store'
 import { useAuthStore } from '../../store/auth.store'
+import { formatDate } from '../../utils/format'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing, layout } from '../../tokens/spacing'
@@ -149,7 +150,7 @@ function ProfileSheet({ user, onClose }: ProfileSheetProps) {
               </View>
               <Text style={styles.profileHandle}>{user.handle}</Text>
               <Text style={styles.profileSince}>
-                {t('achar.memberSince', { date: user.member_since })}
+                {t('achar.memberSince', { date: formatDate(user.member_since) })}
               </Text>
 
               <TouchableOpacity style={styles.shareBtn} onPress={handleShare} activeOpacity={0.75}>

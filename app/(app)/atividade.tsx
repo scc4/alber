@@ -19,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
+import { formatAlbers, formatDateTime } from '../../utils/format'
 import { Header } from '../../components/core/Header'
 import { Eyebrow } from '../../components/shared/Eyebrow'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
@@ -93,9 +94,9 @@ function txColor(type: TxType, amount: number): string {
 }
 
 function txSign(type: TxType, amount: number): string {
-  if (type === 'split_block') return `−${Math.abs(amount)}`
-  if (amount > 0) return `+${amount}`
-  return `${amount}`
+  if (type === 'split_block') return `−${formatAlbers(Math.abs(amount))}`
+  if (amount > 0) return `+${formatAlbers(amount)}`
+  return formatAlbers(amount)
 }
 
 function formatDateGroup(iso: string): string {
@@ -107,13 +108,6 @@ function formatDateGroup(iso: string): string {
   if (diff === 0) return 'HOJE'
   if (diff === 86_400_000) return 'ONTEM'
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).toUpperCase()
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  })
 }
 
 interface TxGroup { date: string; items: Transaction[] }
@@ -513,7 +507,7 @@ function BalanceStat({ label, value, muted }: { label: string; value: number; mu
     <View style={balanceStat.wrap}>
       <Text style={balanceStat.label}>{label}</Text>
       <View style={balanceStat.row}>
-        <Text style={[balanceStat.value, muted && balanceStat.muted]}>{value}</Text>
+        <Text style={[balanceStat.value, muted && balanceStat.muted]}>{formatAlbers(value)}</Text>
         <Text style={balanceStat.unit}> {t('atividade.unit')}</Text>
       </View>
     </View>
@@ -558,8 +552,8 @@ function TxDetailModal({ tx, onClose }: { tx: Transaction; onClose: () => void }
         <View style={detail.rows}>
           {(tx.type === 'receber' || tx.type === 'enviar') && tx.fee ? (
             <>
-              <DetailRow label={t('atividade.detailGross')} value={`${tx.gross ?? Math.abs(tx.amount)} A`} />
-              <DetailRow label={t('atividade.detailFee')}   value={`−${tx.fee} A`} />
+              <DetailRow label={t('atividade.detailGross')} value={`${formatAlbers(tx.gross ?? Math.abs(tx.amount))} A`} />
+              <DetailRow label={t('atividade.detailFee')}   value={`−${formatAlbers(tx.fee!)} A`} />
             </>
           ) : null}
 

@@ -19,6 +19,7 @@ import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 import { sha256Hex, normalizeSecurityAnswer } from '../../../utils/crypto'
+import { formatDate } from '../../../utils/format'
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
@@ -274,8 +275,7 @@ export default function HandleScreen() {
         const data = await res.json()
         if (data.code === 'HANDLE_COOLDOWN' && data.next_allowed_at) {
           setInCooldown(true)
-          const d = new Date(data.next_allowed_at)
-          setNextAllowed(d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }))
+          setNextAllowed(formatDate(data.next_allowed_at))
         }
       } catch {}
     })()

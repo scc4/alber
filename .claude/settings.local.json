@@ -14,7 +14,10 @@
       "Bash(npx supabase *)",
       "Bash(npm install *)",
       "Bash(powershell *)",
-      "Bash(dir C:Usersfernandoalberassets *)"
+      "Bash(dir C:Usersfernandoalberassets *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(npx expo *)"
     ]
   }
 }

@@ -30,6 +30,7 @@ import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { descarregar, DescarregarResponse } from '../../services/financial.service'
+import { formatAlbers, formatCurrency } from '../../utils/format'
 import { BffError } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -262,7 +263,7 @@ export default function CarregarScreen() {
             {tab === 'descarregar' && (
               <View style={s.balanceHint}>
                 <Text style={s.balanceHintText}>
-                  Disponível: {balance} Albers (R$ {balance.toFixed(2).replace('.', ',')})
+                  Disponível: {formatAlbers(balance)} Albers ({formatCurrency(balance)})
                 </Text>
               </View>
             )}

@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../../store/auth.store'
+import { formatDate } from '../../../utils/format'
 import { colors, spaceSkins } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -171,7 +172,7 @@ export default function PerfilScreen() {
             </View>
             {memberSince ? (
               <Text style={styles.heroSince}>
-                {t('perfil.memberSince', { date: memberSince })}
+                {t('perfil.memberSince', { date: formatDate(memberSince) })}
               </Text>
             ) : null}
           </View>

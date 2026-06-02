@@ -26,6 +26,7 @@ import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { transferir, TransferirResponse } from '../../services/financial.service'
+import { formatAlbers } from '../../utils/format'
 import { BffError } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -269,7 +270,7 @@ export default function TransferirScreen() {
         <View style={s.recapCard}>
           <RecapRow label={t('transferir.recipientLabel')} value={recipient.handle} />
           <View style={s.recapDivider} />
-          <RecapRow label={t('transferir.amountLabel')} value={`${amount} ${t('transferir.amountUnit')}`} />
+          <RecapRow label={t('transferir.amountLabel')} value={`${formatAlbers(amount)} ${t('transferir.amountUnit')}`} />
           <View style={s.recapDivider} />
           <RecapRow
             label={t('transferir.feeLabel')}
@@ -428,7 +429,7 @@ function NumpadValueScreen({ recipient, balance, apiError, onSwap, onClose, clos
             ? t('transferir.balanceInsufficient')
             : apiError
               ? apiError
-              : t('transferir.balanceAvailable', { balance })}
+              : t('transferir.balanceAvailable', { balance: formatAlbers(balance) })}
         </Text>
       </View>
 
@@ -490,7 +491,7 @@ function SuccessScreen({
           <Text style={s.checkMark}>✓</Text>
         </View>
         <Text style={s.successTitle}>
-          {t('transferir.successTitle', { amount })}
+          {t('transferir.successTitle', { amount: formatAlbers(amount) })}
         </Text>
         <Text style={s.successSubtitle}>
           {t('transferir.successSubtitle', { handle: recipient.handle })}
@@ -499,7 +500,7 @@ function SuccessScreen({
         {/* Recibo formal — spec 3.5 */}
         <View style={s.receiptCard}>
           <ReceiptRow label={t('transferir.receiptTo')}     value={recipient.handle} />
-          <ReceiptRow label={t('transferir.receiptAmount')} value={`${amount} Albers`} />
+          <ReceiptRow label={t('transferir.receiptAmount')} value={`${formatAlbers(amount)} Albers`} />
           <ReceiptRow
             label={t('transferir.receiptFee')}
             value={t('transferir.receiptFeeFree')}
@@ -507,7 +508,7 @@ function SuccessScreen({
           />
           <ReceiptRow
             label={t('transferir.receiptRemaining')}
-            value={`${remaining} Albers`}
+            value={`${formatAlbers(remaining)} Albers`}
             last
           />
         </View>

@@ -16,6 +16,7 @@ import {
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '../../../store/auth.store'
 import { useLoungeStore } from '../../../store/lounge.store'
 import { Header } from '../../../components/core/Header'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
@@ -37,7 +38,10 @@ export default function LoungeCreateScreen() {
   const { t }   = useTranslation()
   const insets  = useSafeAreaInsets()
 
+  const token                  = useAuthStore(s => s.token)
+  const userId                 = useAuthStore(s => s.user?.id ?? '')
   const createLounge           = useLoungeStore(s => s.createLounge)
+  const fetchLounge            = useLoungeStore(s => s.fetchLounge)
   const hasActiveLoungeAsOwner = useLoungeStore(s => s.hasActiveLoungeAsOwner)
 
   const [step, setStep]             = useState<Step>(1)
@@ -45,20 +49,31 @@ export default function LoungeCreateScreen() {
   const [desc, setDesc]             = useState('')
   const [visibility, setVisibility] = useState<Visibility>('public')
   const [accent, setAccent]         = useState(PALETTE[0])
+  const [creating, setCreating]     = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
 
   const isOwner = hasActiveLoungeAsOwner()
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
-  function handleCreate() {
-    const lounge = createLounge({
-      name:        name.trim(),
-      description: desc.trim(),
-      visibility,
-      accent,
-      imageUri:    null,
-    })
-    router.replace(`/(app)/lounge/${lounge.id}`)
+  async function handleCreate() {
+    if (!token || !userId) return
+    setCreating(true)
+    setCreateError(null)
+    try {
+      const res = await createLounge({
+        name:        name.trim(),
+        description: desc.trim(),
+        visibility,
+        accent,
+        imageUri:    null,
+      }, token)
+      await fetchLounge(res.space_id, userId, token)
+      router.replace(`/(app)/lounge/${res.space_id}`)
+    } catch (e: any) {
+      setCreateError(e?.message ?? 'Erro ao criar Lounge')
+      setCreating(false)
+    }
   }
 
   // ── Step 1: Nome e descrição ─────────────────────────────────────────────────
@@ -268,9 +283,13 @@ export default function LoungeCreateScreen() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        {createError && (
+          <Text style={styles.createError}>{createError}</Text>
+        )}
         <PrimaryButton
           label={t('lounge.criar.createCta')}
           onPress={handleCreate}
+          state={creating ? 'loading' : 'default'}
         />
       </View>
     </View>
@@ -498,6 +517,14 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: typography.fontFamily.primary,
     lineHeight: 17,
+  },
+
+  createError: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(239,68,68,0.9)',
+    textAlign: 'center',
+    marginBottom: 8,
   },
 
   // Bottom bar

@@ -13,6 +13,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '../../../../store/auth.store'
 import { useLoungeStore } from '../../../../store/lounge.store'
 import { useBalanceStore } from '../../../../store/balance.store'
 import { getActiveBatch, isSoldOut } from '../../../../components/lounge/EventCard'
@@ -37,6 +38,7 @@ export default function EventoScreen() {
   const { t }   = useTranslation()
   const insets  = useSafeAreaInsets()
 
+  const token        = useAuthStore(s => s.token)
   const getEventById = useLoungeStore(s => s.getEventById)
   const buyTicket    = useLoungeStore(s => s.buyTicket)
   const balance      = useBalanceStore(s => s.balance)
@@ -44,6 +46,7 @@ export default function EventoScreen() {
   const found = getEventById(id)
 
   const [step, setStep]         = useState<Step>('detail')
+  const [buying, setBuying]     = useState(false)
   const [pinError, setPinError] = useState<string | null>(null)
 
   // ── Not found ─────────────────────────────────────────────────────────────────
@@ -76,15 +79,31 @@ export default function EventoScreen() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
-  function handleFreeTicket() {
-    buyTicket(event.id, '')
-    setStep('confirmed')
+  async function handleFreeTicket() {
+    if (!token) return
+    setBuying(true)
+    try {
+      await buyTicket(event.id, undefined, token)
+      setStep('confirmed')
+    } catch (e: any) {
+      setPinError(e?.message ?? 'Erro ao confirmar ingresso')
+    } finally {
+      setBuying(false)
+    }
   }
 
-  function handlePinComplete() {
-    if (!activeBatch) return
-    buyTicket(event.id, activeBatch.id)
-    setStep('confirmed')
+  async function handlePinComplete(pinHash: string) {
+    if (!token) return
+    setPinError(null)
+    setBuying(true)
+    try {
+      await buyTicket(event.id, pinHash, token)
+      setStep('confirmed')
+    } catch (e: any) {
+      setPinError(e?.message ?? 'PIN incorreto ou erro ao processar')
+    } finally {
+      setBuying(false)
+    }
   }
 
   // ── Step: PIN ─────────────────────────────────────────────────────────────────
@@ -101,7 +120,7 @@ export default function EventoScreen() {
           <Text style={styles.pinContext}>{t('lounge.evento.pinContext')}</Text>
           <Text style={styles.pinSubtitle}>{t('lounge.evento.pinSubtitle')}</Text>
           {pinError && <Text style={styles.pinErrorText}>{pinError}</Text>}
-          <PINInput onComplete={handlePinComplete} error={pinError} />
+          <PINInput onComplete={handlePinComplete} error={pinError} disabled={buying} />
         </View>
       </View>
     )
@@ -281,6 +300,9 @@ export default function EventoScreen() {
 
       {/* Bottom CTA */}
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        {!event.isPaid && pinError && (
+          <Text style={styles.freeTicketError}>{pinError}</Text>
+        )}
         {soldOut || (!event.isPaid && !activeBatch && event.totalCapacity > 0 && event.confirmed >= event.totalCapacity) ? (
           <PrimaryButton
             label={t('lounge.evento.soldOutCta')}
@@ -291,6 +313,7 @@ export default function EventoScreen() {
           <PrimaryButton
             label={t('lounge.evento.freeCta')}
             onPress={handleFreeTicket}
+            state={buying ? 'loading' : 'default'}
           />
         ) : !hasSufficientBalance ? (
           <PrimaryButton
@@ -507,6 +530,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(239,68,68,0.85)',
+  },
+
+  freeTicketError: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(239,68,68,0.9)',
+    textAlign: 'center',
+    marginBottom: 8,
   },
 
   // Bottom bar

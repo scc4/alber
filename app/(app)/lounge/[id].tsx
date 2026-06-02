@@ -2,8 +2,9 @@
 // Spec: /specs/06_modules/alber_lounge.md § 5 "Tela de detalhe"
 // Hero + eventos + mensagens + CTAs por papel
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +14,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '../../../store/auth.store'
 import { useLoungeStore } from '../../../store/lounge.store'
 import { EventCard } from '../../../components/lounge/EventCard'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
@@ -29,15 +31,41 @@ export default function LoungeDetailScreen() {
   const { t }    = useTranslation()
   const insets   = useSafeAreaInsets()
 
+  const token      = useAuthStore(s => s.token)
+  const userId     = useAuthStore(s => s.user?.id ?? '')
+
   const getLoungeById  = useLoungeStore(s => s.getLoungeById)
+  const fetchLounge    = useLoungeStore(s => s.fetchLounge)
   const joinLounge     = useLoungeStore(s => s.joinLounge)
   const setActive      = useLoungeStore(s => s.setCurrentLounge)
+  const loading        = useLoungeStore(s => s.loading)
+  const storeError     = useLoungeStore(s => s.error)
 
   const lounge = getLoungeById(id)
 
   const [joinSent, setJoinSent] = useState(false)
+  const [joinError, setJoinError] = useState<string | null>(null)
 
-  // ── Not found ─────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (id && token && userId) fetchLounge(id, userId, token)
+  }, [id, token, userId])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Loading / not found ───────────────────────────────────────────────────────
+
+  if (loading && !lounge) {
+    return (
+      <View style={styles.root}>
+        <View style={[styles.heroBack, { paddingTop: insets.top + 14 }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Text style={styles.backArrow}>‹</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.centerState}>
+          <ActivityIndicator color="rgba(255,255,255,0.5)" />
+        </View>
+      </View>
+    )
+  }
 
   if (!lounge) {
     return (
@@ -48,7 +76,7 @@ export default function LoungeDetailScreen() {
           </TouchableOpacity>
         </View>
         <View style={styles.centerState}>
-          <Text style={styles.errorText}>Lounge não encontrado.</Text>
+          <Text style={styles.errorText}>{storeError ?? 'Lounge não encontrado.'}</Text>
         </View>
       </View>
     )
@@ -68,10 +96,15 @@ export default function LoungeDetailScreen() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
-  function handleJoin() {
-    if (!lounge) return
-    joinLounge(lounge.id)
-    setJoinSent(true)
+  async function handleJoin() {
+    if (!lounge || !token) return
+    setJoinError(null)
+    try {
+      await joinLounge({ space_id: lounge.id }, token)
+      setJoinSent(true)
+    } catch (e: any) {
+      setJoinError(e?.message ?? 'Erro ao entrar no Lounge')
+    }
   }
 
   function handleSetActive() {
@@ -186,6 +219,10 @@ export default function LoungeDetailScreen() {
             </TouchableOpacity>
           )}
         </View>
+
+        {joinError && (
+          <Text style={styles.joinError}>{joinError}</Text>
+        )}
 
         {/* ── Events ──────────────────────────────────────────────────────────── */}
         <View style={styles.sectionHeader}>
@@ -527,6 +564,15 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.85)',
     lineHeight: 20,
+  },
+
+  joinError: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.state.error,
+    textAlign: 'center',
+    marginBottom: 12,
+    marginTop: -12,
   },
 
   // Error state

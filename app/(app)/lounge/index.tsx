@@ -14,6 +14,7 @@ import {
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '../../../store/auth.store'
 import { useLoungeStore } from '../../../store/lounge.store'
 import { LoungeCard } from '../../../components/lounge/LoungeCard'
 import { Header } from '../../../components/core/Header'
@@ -29,9 +30,11 @@ export default function LoungeIndexScreen() {
   const { t }   = useTranslation()
   const insets  = useSafeAreaInsets()
 
+  const token              = useAuthStore(s => s.token)
   const myLounges          = useLoungeStore(s => s.myLounges)
   const exploring          = useLoungeStore(s => s.exploring)
   const loading            = useLoungeStore(s => s.loading)
+  const error              = useLoungeStore(s => s.error)
   const fetchMyLounges     = useLoungeStore(s => s.fetchMyLounges)
   const fetchExploring     = useLoungeStore(s => s.fetchExploring)
   const hasActiveLoungeAsOwner = useLoungeStore(s => s.hasActiveLoungeAsOwner)
@@ -42,11 +45,13 @@ export default function LoungeIndexScreen() {
 
   const isOwner = hasActiveLoungeAsOwner()
 
-  useEffect(() => { fetchMyLounges() }, [])
+  useEffect(() => {
+    if (token) fetchMyLounges(token)
+  }, [token])
 
   useEffect(() => {
-    if (tab === 'explore') fetchExploring(query)
-  }, [tab, query])
+    if (tab === 'explore') fetchExploring(query, token ?? '')
+  }, [tab, query, token])
 
   const handleCreate = useCallback(() => {
     if (isOwner) {
@@ -135,6 +140,11 @@ export default function LoungeIndexScreen() {
         {/* Loading */}
         {loading && (
           <Text style={styles.loadingText}>…</Text>
+        )}
+
+        {/* Error */}
+        {!loading && error && (
+          <Text style={styles.errorText}>{error}</Text>
         )}
 
         {/* Empty state */}
@@ -346,6 +356,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.35)',
+    textAlign: 'center',
+    paddingVertical: spacing.xl,
+  },
+  errorText: {
+    fontSize: 13,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.state.error,
     textAlign: 'center',
     paddingVertical: spacing.xl,
   },

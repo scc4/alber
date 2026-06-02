@@ -13,7 +13,8 @@
       "Bash(supabase db *)",
       "Bash(npx supabase *)",
       "Bash(npm install *)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(dir C:Usersfernandoalberassets *)"
     ]
   }
 }

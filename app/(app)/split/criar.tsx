@@ -19,6 +19,7 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useSplitStore, SplitType, LinkValidity } from '../../../store/split.store'
+import { useAuthStore } from '../../../store/auth.store'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
 import { colors, spaceSkins } from '../../../tokens/colors'
@@ -28,13 +29,6 @@ import { typography } from '../../../tokens/typography'
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 type Step = 1 | 2 | 3 | 'share'
-
-const MOCK_ME = {
-  id:       'usr_mock_001',
-  name:     'Mayte',
-  handle:   '@mayte',
-  initials: 'MA',
-}
 
 const MOCK_CONTACTS = [
   { name: 'João S.',  handle: '@joaosilva' },
@@ -56,14 +50,17 @@ const VALIDITY_OPTIONS: { id: LinkValidity; key: string }[] = [
 export default function SplitCriarScreen() {
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
+  const token    = useAuthStore(s => s.token)
   const { draft, updateDraft, resetDraft, createSplit, setActiveSplitId } = useSplitStore()
 
-  const [step, setStep]               = useState<Step>(1)
-  const [valueStr, setValueStr]       = useState(draft.totalValue > 0 ? String(draft.totalValue) : '')
-  const [customDays, setCustomDays]   = useState(7)
-  const [createdId, setCreatedId]     = useState<string | null>(null)
-  const [copied, setCopied]           = useState(false)
-  const copiedTimer                   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [step, setStep]                     = useState<Step>(1)
+  const [valueStr, setValueStr]             = useState(draft.totalValue > 0 ? String(draft.totalValue) : '')
+  const [customDays, setCustomDays]         = useState(7)
+  const [createdId, setCreatedId]           = useState<string | null>(null)
+  const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null)
+  const [creating, setCreating]             = useState(false)
+  const [copied, setCopied]                 = useState(false)
+  const copiedTimer                         = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     resetDraft()
@@ -80,8 +77,6 @@ export default function SplitCriarScreen() {
     ? Math.ceil(parsedValue / draft.participantCount)
     : 0
 
-  const createdSplit = createdId ? useSplitStore.getState().getSplitById(createdId) : null
-
   // ── Actions ───────────────────────────────────────────────────────────────────
 
   function goToStep2() {
@@ -93,14 +88,23 @@ export default function SplitCriarScreen() {
     setStep(3)
   }
 
-  function handleCreate() {
+  async function handleCreate() {
+    if (!token) return
     const expiry = draft.linkValidity === 'custom'
       ? new Date(Date.now() + customDays * 86_400_000).toISOString()
       : null
     updateDraft({ totalValue: parsedValue, customExpiry: expiry })
-    const newSplit = createSplit(MOCK_ME)
-    setCreatedId(newSplit.id)
-    setStep('share')
+    setCreating(true)
+    try {
+      const res = await createSplit(token)
+      setCreatedId(res.split_id)
+      setCreatedInviteUrl(res.invite_url)
+      setStep('share')
+    } catch {
+      // error já gravado no store — o usuário vê via error state
+    } finally {
+      setCreating(false)
+    }
   }
 
   function handleDone() {
@@ -113,9 +117,9 @@ export default function SplitCriarScreen() {
   }
 
   async function handleCopy() {
-    if (!createdSplit) return
+    if (!createdInviteUrl) return
     try {
-      await Share.share({ message: createdSplit.inviteDeepLink })
+      await Share.share({ message: createdInviteUrl })
     } catch {
       /* ignore */
     }
@@ -124,12 +128,9 @@ export default function SplitCriarScreen() {
   }
 
   async function handleShare() {
-    if (!createdSplit) return
+    if (!createdInviteUrl) return
     try {
-      await Share.share({
-        message: createdSplit.inviteDeepLink,
-        title:   createdSplit.name,
-      })
+      await Share.share({ message: createdInviteUrl, title: draft.name })
     } catch {
       /* ignore */
     }
@@ -345,6 +346,7 @@ export default function SplitCriarScreen() {
           <PrimaryButton
             label={t('split.criar.createCta')}
             onPress={handleCreate}
+            state={creating ? 'loading' : 'default'}
           />
         </View>
       </WizardShell>
@@ -353,7 +355,7 @@ export default function SplitCriarScreen() {
 
   // ── Share screen ─────────────────────────────────────────────────────────────
 
-  const shareSummary = createdSplit
+  const shareSummary = createdId
     ? isFixed
       ? t('split.criar.shareSummaryFixed', {
           perPerson,
@@ -388,7 +390,7 @@ export default function SplitCriarScreen() {
         <View style={styles.linkBox}>
           <Text style={styles.linkLabel}>{t('split.criar.shareLinkLabel')}</Text>
           <Text style={styles.linkText} numberOfLines={2} selectable>
-            {createdSplit?.inviteDeepLink ?? '—'}
+            {createdInviteUrl ?? '—'}
           </Text>
         </View>
 

@@ -17,6 +17,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useSplitStore } from '../../../../store/split.store'
+import { useAuthStore } from '../../../../store/auth.store'
 import { Header } from '../../../../components/core/Header'
 import { Eyebrow } from '../../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
@@ -35,11 +36,13 @@ export default function SplitFecharScreen() {
   const { id }    = useLocalSearchParams<{ id: string }>()
   const { t }     = useTranslation()
   const insets    = useSafeAreaInsets()
-  const split     = useSplitStore(s => s.getSplitById(id))
+  const token     = useAuthStore(s => s.token)
+  const split      = useSplitStore(s => s.getSplitById(id))
   const closeSplit = useSplitStore(s => s.closeSplit)
 
-  const [step, setStep]         = useState<Step>('allocation')
-  const [pinError, setPinError] = useState<string | null>(null)
+  const [step, setStep]           = useState<Step>('allocation')
+  const [pinError, setPinError]   = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   // ── Not found / wrong type ────────────────────────────────────────────────────
 
@@ -84,16 +87,33 @@ export default function SplitFecharScreen() {
   const returnAmount  = Math.max(0, teto - totalUsed)
   const canConfirm    = !exceeds && finalAllocTotal > 0
 
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+
+  async function sha256hex(text: string): Promise<string> {
+    const data = new TextEncoder().encode(text)
+    const buf  = await crypto.subtle.digest('SHA-256', data)
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+  }
+
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
-  function handlePinComplete() {
-    if (!split) return
-    const allocMap: Record<string, number> = {}
-    accepted.forEach(p => {
-      allocMap[p.id] = parseInt(allocations[p.id] ?? '0', 10) || 0
-    })
-    closeSplit(split.id, allocMap)
-    router.replace('/(app)/split/')
+  async function handlePinComplete(pin: string) {
+    if (!split || !token) return
+    setPinError(null)
+    setSubmitting(true)
+    try {
+      const pinHash = await sha256hex(pin)
+      const allocMap: Record<string, number> = {}
+      accepted.forEach(p => {
+        allocMap[p.id] = parseInt(allocations[p.id] ?? '0', 10) || 0
+      })
+      await closeSplit(split.id, allocMap, pinHash, token)
+      router.replace('/(app)/split/')
+    } catch (e) {
+      setPinError(e instanceof Error ? e.message : 'Erro ao fechar split')
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   // ── Render: allocation step ───────────────────────────────────────────────────
@@ -214,8 +234,9 @@ export default function SplitFecharScreen() {
         <Text style={styles.pinSubtitle}>{t('split.fechar.pinSubtitle')}</Text>
         {pinError && <Text style={styles.pinErrorText}>{pinError}</Text>}
         <PINInput
-          onComplete={handlePinComplete}
+          onComplete={submitting ? undefined : handlePinComplete}
           error={pinError}
+          disabled={submitting}
         />
       </View>
     </View>

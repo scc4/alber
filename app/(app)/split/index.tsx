@@ -2,11 +2,13 @@
 // Spec: /specs/06_modules/split.md
 // Lista de splits ativos e encerrados. 5 estados: loading, error, empty, success, disabled.
 
+import { useEffect } from 'react'
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useSplitStore } from '../../../store/split.store'
+import { useAuthStore } from '../../../store/auth.store'
 import { SplitCard } from '../../../components/split/SplitCard'
 import { Header } from '../../../components/core/Header'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
@@ -20,11 +22,17 @@ export default function SplitIndexScreen() {
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
 
+  const token        = useAuthStore(s => s.token)
   const activeSplits = useSplitStore(s => s.getActiveSplits())
   const closedSplits = useSplitStore(s => s.getClosedSplits())
   const loading      = useSplitStore(s => s.loading)
   const error        = useSplitStore(s => s.error)
   const setActiveId  = useSplitStore(s => s.setActiveSplitId)
+  const fetchMySplits = useSplitStore(s => s.fetchMySplits)
+
+  useEffect(() => {
+    if (token) fetchMySplits(token)
+  }, [token])
 
   const noSplits = activeSplits.length === 0 && closedSplits.length === 0
 
@@ -62,6 +70,12 @@ export default function SplitIndexScreen() {
       {!loading && error !== null && (
         <View style={styles.centerState}>
           <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            onPress={() => { if (token) fetchMySplits(token) }}
+            style={styles.emptyCreateBtn}
+          >
+            <Text style={styles.emptyCreateText}>{t('common.retry')}</Text>
+          </TouchableOpacity>
         </View>
       )}
 

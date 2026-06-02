@@ -2,7 +2,7 @@
 // Spec: /specs/06_modules/split.md
 // Detalhe do split: stats, feed de lançamentos, participantes, ações do dono.
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Image,
   KeyboardAvoidingView,
@@ -21,6 +21,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useSplitStore } from '../../../store/split.store'
+import { useAuthStore } from '../../../store/auth.store'
 import { LaunchItem } from '../../../components/split/LaunchItem'
 import { ParticipantRow } from '../../../components/split/ParticipantRow'
 import { Header } from '../../../components/core/Header'
@@ -29,10 +30,6 @@ import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { colors, spaceSkins } from '../../../tokens/colors'
 import { spacing } from '../../../tokens/spacing'
 import { typography } from '../../../tokens/typography'
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const CURRENT_USER_ID = 'usr_mock_001'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -57,11 +54,17 @@ export default function SplitDetailScreen() {
   const { t }      = useTranslation()
   const insets     = useSafeAreaInsets()
 
+  const token         = useAuthStore(s => s.token)
+  const currentUserId = useAuthStore(s => s.user?.id ?? '')
+
   const split      = useSplitStore(s => s.getSplitById(id))
   const loading    = useSplitStore(s => s.loading)
   const launchItem = useSplitStore(s => s.launchItem)
-  const renewLink  = useSplitStore(s => s.renewInviteLink)
-  const extendExp  = useSplitStore(s => s.extendExpiry)
+  const fetchSplit = useSplitStore(s => s.fetchSplit)
+
+  useEffect(() => {
+    if (id && token) fetchSplit(id, token)
+  }, [id, token])
 
   const [recalcDismissed, setRecalcDismissed] = useState(false)
   const [showLaunchSheet, setShowLaunchSheet] = useState(false)
@@ -71,7 +74,7 @@ export default function SplitDetailScreen() {
 
   // ── Loading / not found ───────────────────────────────────────────────────────
 
-  if (loading) {
+  if (!split && loading) {
     return (
       <View style={styles.root}>
         <Header variant="title" title="…" onBack={() => router.back()} />
@@ -100,10 +103,10 @@ export default function SplitDetailScreen() {
 
   const isFixed    = split.type === 'fixed'
   const isActive   = split.status === 'active'
-  const isOwner    = split.ownerId === CURRENT_USER_ID
+  const isOwner    = split.ownerId === currentUserId
   const accepted   = acceptedCount(split)
   const perPerson  = accepted > 0 ? Math.ceil(split.totalValue / split.participantCount) : 0
-  const myShare    = useSplitStore.getState().getMyShare(split.id, CURRENT_USER_ID)
+  const myShare    = useSplitStore.getState().getMyShare(split.id, currentUserId)
   const myBlocked  = accepted > 0 ? Math.ceil((split.totalValue - split.totalLaunched) / accepted) : 0
   const remaining  = split.totalValue - split.totalLaunched
   const accent     = isFixed ? spaceSkins.tech.accent : spaceSkins.surf.accent
@@ -113,14 +116,11 @@ export default function SplitDetailScreen() {
 
   async function handleResend() {
     if (!split) return
-    const link = renewLink(split.id)
-    try { await Share.share({ message: link, title: split.name }) } catch { /* ignore */ }
+    try { await Share.share({ message: split.inviteDeepLink, title: split.name }) } catch { /* ignore */ }
   }
 
   function handleExtendConfirm() {
-    if (!split) return
-    const newExpiry = new Date(Date.now() + extendDays * 86_400_000).toISOString()
-    extendExp(split.id, newExpiry)
+    // TODO: chamar split-extend Edge Function quando implementado
     setShowExtend(false)
   }
 
@@ -260,7 +260,7 @@ export default function SplitDetailScreen() {
           <ParticipantRow
             key={p.id}
             participant={p}
-            isMe={p.id === CURRENT_USER_ID}
+            isMe={p.id === currentUserId}
             isVariable={!isFixed}
             showTopBorder={i > 0}
           />
@@ -309,8 +309,11 @@ export default function SplitDetailScreen() {
           participantCount={accepted}
           accentColor={accent}
           onClose={() => setShowLaunchSheet(false)}
-          onLaunch={(desc, value, photoUri) => {
-            launchItem(split.id, { description: desc, totalValue: value, photoUri })
+          onLaunch={async (desc, value, photoUri) => {
+            await launchItem(
+              { split_id: split.id, description: desc, value, photo_url: photoUri },
+              token!,
+            )
             setShowLaunchSheet(false)
           }}
         />
@@ -442,7 +445,7 @@ interface LaunchSheetProps {
   participantCount: number
   accentColor: string
   onClose: () => void
-  onLaunch: (description: string, value: number, photoUri?: string) => void
+  onLaunch: (description: string, value: number, photoUri?: string) => Promise<void>
 }
 
 function LaunchSheet({
@@ -454,6 +457,7 @@ function LaunchSheet({
   const [valueStr, setVal]              = useState('')
   const [photoUri, setPhotoUri]         = useState<string | null>(null)
   const [showCamera, setShowCamera]     = useState(false)
+  const [launching, setLaunching]       = useState(false)
 
   const v           = parseFloat(valueStr) || 0
   const wouldExceed = alreadyLaunched + v > target
@@ -558,8 +562,13 @@ function LaunchSheet({
 
               <PrimaryButton
                 label={t('split.lancar.confirmCta')}
-                onPress={() => canConfirm && onLaunch(desc, v, photoUri ?? undefined)}
-                state={canConfirm ? 'default' : 'disabled'}
+                onPress={async () => {
+                  if (!canConfirm || launching) return
+                  setLaunching(true)
+                  try { await onLaunch(desc, v, photoUri ?? undefined) }
+                  finally { setLaunching(false) }
+                }}
+                state={launching ? 'loading' : canConfirm ? 'default' : 'disabled'}
               />
               <TouchableOpacity onPress={onClose} style={styles.sheetCancel}>
                 <Text style={styles.sheetCancelText}>{t('split.lancar.cancelCta')}</Text>

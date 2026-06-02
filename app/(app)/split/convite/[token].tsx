@@ -1,10 +1,11 @@
 // Design: /design/flows-split.jsx — (join flow via deep link)
 // Spec: /specs/06_modules/split.md § 4 "Entrar em Split via link"
 // Deep link: alber://split/convite/{token}
-// Estados: preview, expirado, não encontrado, já participante
+// Estados: loading, preview, não encontrado/expirado, já participante
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,22 +17,15 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useSplitStore } from '../../../../store/split.store'
+import { useAuthStore } from '../../../../store/auth.store'
 import { useBalanceStore } from '../../../../store/balance.store'
+import * as splitService from '../../../../services/split.service'
+import type { Split } from '../../../../store/split.store'
 import { Header } from '../../../../components/core/Header'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
 import { colors, spaceSkins } from '../../../../tokens/colors'
 import { spacing } from '../../../../tokens/spacing'
 import { typography } from '../../../../tokens/typography'
-
-// ─── Mock — substituir por dados do auth store em produção ────────────────────
-
-const JOINING_USER = {
-  id:       'usr_current',
-  name:     'Você',
-  handle:   '@voce',
-  initials: 'VC',
-  blockedAmount: 0,
-}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -40,22 +34,46 @@ export default function SplitConviteScreen() {
   const { t }     = useTranslation()
   const insets    = useSafeAreaInsets()
 
-  const splits    = useSplitStore(s => s.splits)
-  const joinSplit = useSplitStore(s => s.joinSplit)
-  const balance   = useBalanceStore(s => s.balance)
+  const joinSplitStore = useSplitStore(s => s.joinSplit)
+  const fetchSplit     = useSplitStore(s => s.fetchSplit)
+  const authToken      = useAuthStore(s => s.token)
+  const currentUserId  = useAuthStore(s => s.user?.id ?? '')
+  const balance        = useBalanceStore(s => s.balance)
 
-  const [joining, setJoining] = useState(false)
+  const [preview, setPreview]               = useState<Split | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(true)
+  const [previewError, setPreviewError]     = useState<string | null>(null)
+  const [joining, setJoining]               = useState(false)
+  const [joinError, setJoinError]           = useState<string | null>(null)
 
-  // ── Lookup ────────────────────────────────────────────────────────────────────
+  // ── Fetch preview ─────────────────────────────────────────────────────────────
 
-  const split         = splits.find(sp => sp.inviteToken === token)
-  const isExpired     = split ? new Date(split.expiresAt) < new Date() : false
-  const isClosed      = split?.status !== 'active'
-  const alreadyJoined = split?.participants.some(p => p.id === JOINING_USER.id) ?? false
+  useEffect(() => {
+    if (!token || !authToken) return
+    setLoadingPreview(true)
+    splitService.getSplitByToken(token, authToken)
+      .then(data => setPreview(data))
+      .catch(e => setPreviewError(e instanceof Error ? e.message : 'Erro ao carregar convite'))
+      .finally(() => setLoadingPreview(false))
+  }, [token, authToken])
 
-  // ── Not found ─────────────────────────────────────────────────────────────────
+  // ── Loading ───────────────────────────────────────────────────────────────────
 
-  if (!split) {
+  if (loadingPreview) {
+    return (
+      <View style={styles.root}>
+        <Header variant="title" title={t('split.convite.title')} onBack={() => router.back()} />
+        <View style={styles.centerState}>
+          <ActivityIndicator color="rgba(255,255,255,0.5)" />
+        </View>
+      </View>
+    )
+  }
+
+  // ── Not found / expired ───────────────────────────────────────────────────────
+  // RPC only returns open, non-expired splits — null means not found or expired
+
+  if (!preview || previewError) {
     return (
       <View style={styles.root}>
         <Header variant="title" title={t('split.convite.title')} onBack={() => router.back()} />
@@ -70,27 +88,9 @@ export default function SplitConviteScreen() {
     )
   }
 
-  // ── Expired / closed ──────────────────────────────────────────────────────────
-
-  if (isExpired || isClosed) {
-    return (
-      <View style={styles.root}>
-        <Header variant="title" title={t('split.convite.title')} onBack={() => router.back()} />
-        <View style={styles.centerState}>
-          <Text style={styles.stateTitle}>{t('split.convite.expiredTitle')}</Text>
-          <Text style={styles.stateBody}>{t('split.convite.expiredBody')}</Text>
-          <TouchableOpacity
-            onPress={() => router.replace('/(app)/home')}
-            style={[styles.ghostLink, { marginTop: spacing.sm }]}
-          >
-            <Text style={styles.ghostLinkText}>{t('split.convite.expiredGoHome')}</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    )
-  }
-
   // ── Already joined ────────────────────────────────────────────────────────────
+
+  const alreadyJoined = preview.participants.some(p => p.id === currentUserId)
 
   if (alreadyJoined) {
     return (
@@ -99,7 +99,7 @@ export default function SplitConviteScreen() {
         <View style={styles.centerState}>
           <Text style={styles.stateTitle}>{t('split.convite.alreadyJoined')}</Text>
           <TouchableOpacity
-            onPress={() => router.replace(`/(app)/split/${split.id}`)}
+            onPress={() => router.replace(`/(app)/split/${preview.id}`)}
             style={[styles.ghostLink, { marginTop: spacing.sm }]}
           >
             <Text style={styles.ghostLinkText}>{t('split.convite.viewSplit')}</Text>
@@ -111,29 +111,37 @@ export default function SplitConviteScreen() {
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
-  const isFixed       = split.type === 'fixed'
+  const isFixed       = preview.type === 'fixed'
   const accent        = isFixed ? spaceSkins.tech.accent : spaceSkins.surf.accent
-  const acceptedCount = split.participants.filter(p => p.status === 'accepted').length
-  const remaining     = split.totalValue - split.totalLaunched
+  const acceptedCount = preview.participants.filter(p => p.status === 'accepted').length
+  const remaining     = preview.totalValue - preview.totalLaunched
 
   // Entry cost: fixed = totalValue / participantCount; variable = remaining / (accepted + 1)
   const entryCost = isFixed
-    ? Math.ceil(split.totalValue / split.participantCount)
+    ? Math.ceil(preview.totalValue / preview.participantCount)
     : Math.ceil(remaining / (acceptedCount + 1))
 
   const hasSufficientBalance = balance >= entryCost
 
   // ── Actions ───────────────────────────────────────────────────────────────────
 
-  function handleJoin() {
-    if (!split) return
+  async function handleJoin() {
+    if (!preview || !authToken) return
     if (!hasSufficientBalance) {
       router.push('/(app)/carregar')
       return
     }
     setJoining(true)
-    joinSplit(split.id, JOINING_USER)
-    router.replace(`/(app)/split/${split.id}`)
+    setJoinError(null)
+    try {
+      await joinSplitStore(token, authToken)
+      await fetchSplit(preview.id, authToken)
+      router.replace(`/(app)/split/${preview.id}`)
+    } catch (e) {
+      setJoinError(e instanceof Error ? e.message : 'Erro ao entrar no split')
+    } finally {
+      setJoining(false)
+    }
   }
 
   // ── Render: preview ───────────────────────────────────────────────────────────
@@ -162,16 +170,16 @@ export default function SplitConviteScreen() {
         </View>
 
         {/* Split name */}
-        <Text style={styles.splitName}>{split.name}</Text>
+        <Text style={styles.splitName}>{preview.name}</Text>
 
         {/* Owner */}
         <Text style={styles.ownerLabel}>
-          {t('split.convite.owner', { handle: split.ownerHandle })}
+          {t('split.convite.owner', { handle: preview.ownerHandle })}
         </Text>
 
         {/* Participant avatars */}
         <View style={styles.participantsRow}>
-          {split.participants.slice(0, 5).map((p, i) => (
+          {preview.participants.slice(0, 5).map((p, i) => (
             <View
               key={p.id}
               style={[
@@ -185,14 +193,14 @@ export default function SplitConviteScreen() {
           <Text style={styles.participantsLabel}>
             {t('split.convite.participants', {
               accepted: acceptedCount,
-              total: split.participantCount,
+              total: preview.participantCount,
             })}
           </Text>
         </View>
 
         {/* Expiry */}
         <Text style={styles.expiryLabel}>
-          {t('split.convite.expires', { when: formatExpiry(split.expiresAt) })}
+          {t('split.convite.expires', { when: formatExpiry(preview.expiresAt) })}
         </Text>
 
         {/* Entry cost card */}
@@ -241,6 +249,11 @@ export default function SplitConviteScreen() {
             )}
           </Text>
         </View>
+
+        {/* Join error */}
+        {joinError && (
+          <Text style={styles.joinErrorText}>{joinError}</Text>
+        )}
       </ScrollView>
 
       {/* Bottom CTAs */}
@@ -443,6 +456,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '500',
     fontFamily: typography.fontFamily.primary,
+  },
+  joinErrorText: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.state.error,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
 
   // Bottom bar

@@ -34,7 +34,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('email, phone, birth_date, pix_key, pix_key_type, created_at')
+    .select('id, name, handle, email, phone, birth_date, pix_key, pix_key_type, kyc_status, account_status, created_at')
     .eq('auth_id', authUser.id)
     .maybeSingle()
 
@@ -54,6 +54,11 @@ Deno.serve(async (req: Request) => {
   }
 
   return json({
+    id:             user.id,
+    name:           user.name,
+    handle:         user.handle,
+    kyc_status:     user.kyc_status,
+    account_status: user.account_status,
     member_since:   formatMemberSince(user.created_at),
     email_masked:   maskEmail(user.email ?? ''),
     phone_masked:   maskPhone(user.phone ?? ''),

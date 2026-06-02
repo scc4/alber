@@ -51,12 +51,39 @@ export const useAuthStore = create<AuthState>((set) => ({
         authService.getStoredToken(),
         authService.getStoredUser(),
       ])
-      if (token) {
+
+      if (!token) return
+
+      if (storedUser) {
+        set({ token, isAuthenticated: true, user: storedUser as unknown as AuthUser })
+        return
+      }
+
+      // User não estava no SecureStore (primeiro boot após atualização do app, etc.)
+      // Busca dados básicos via /user-profile para recompor o AuthUser
+      const profile = await authService.fetchUserProfile(token)
+      if (profile) {
+        const user: AuthUser = {
+          id:         profile.id,
+          name:       profile.name,
+          handle:     profile.handle,
+          email:      '',
+          cpfMasked:  '',
+          pixKey:     profile.pix_key_masked ?? '',
+          pixKeyType: (profile.pix_key_type ?? 'cpf') as AuthUser['pixKeyType'],
+        }
+        await authService.saveUser(user as unknown as Record<string, unknown>)
         set({
           token,
-          isAuthenticated: true,
-          ...(storedUser ? { user: storedUser as unknown as AuthUser } : {}),
+          isAuthenticated:  true,
+          user,
+          kycStatus:        profile.kyc_status    as KycStatus,
+          accountStatus:    profile.account_status as AccountStatus,
         })
+      } else {
+        // Token expirado ou rede indisponível — mantém autenticado sem user
+        // O app funciona, mas o nome fica em branco até próximo login
+        set({ token, isAuthenticated: true })
       }
     } catch {
       // SecureStore indisponível — inicia sem sessão

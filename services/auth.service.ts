@@ -147,6 +147,28 @@ export async function getStoredUser(): Promise<Record<string, unknown> | null> {
   } catch { return null }
 }
 
+export interface UserProfileResponse {
+  id:             string
+  name:           string
+  handle:         string
+  kyc_status:     string
+  account_status: string
+  member_since:   string
+  email_masked:   string
+  pix_key_masked: string
+  pix_key_type:   string
+}
+
+export async function fetchUserProfile(token: string): Promise<UserProfileResponse | null> {
+  try {
+    const res = await fetch(`${BFF}/user-profile`, {
+      headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY },
+    })
+    if (!res.ok) return null
+    return (await res.json()) as UserProfileResponse
+  } catch { return null }
+}
+
 // ── Helpers de sessão ─────────────────────────────────────────────────────────
 
 export async function saveTokens(token: string, refreshToken: string): Promise<void> {

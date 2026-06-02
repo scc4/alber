@@ -14,26 +14,17 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../../components/financial/PINInput'
-import {
-  SecurityConfirmation,
-  MOCK_SECURITY_QUESTIONS,
-} from '../../../components/financial/SecurityConfirmation'
 import { useAuthStore } from '../../../store/auth.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
+import { sha256Hex, normalizeSecurityAnswer } from '../../../utils/crypto'
 
-type Step = 'input' | 'pin' | 'security' | 'success'
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
+type Step        = 'input' | 'pin' | 'security' | 'success'
 type Availability = 'idle' | 'checking' | 'available' | 'taken'
-
-// Mudar para true para testar o estado de cooldown
-const MOCK_IN_COOLDOWN   = false
-const MOCK_COOLDOWN_DATE = '25/jun/2026'
-
-const TAKEN_HANDLES = [
-  'joaosilva', 'ana_costa', 'phenrique', 'cami',
-  'lucas_f', 'marinasantos', 'rafa', 'beatriz_lima',
-]
 
 // ── Header ────────────────────────────────────────────────────────────────────
 
@@ -54,35 +45,51 @@ function Header({ title, onBack }: HeaderProps) {
 // ── StepInput ─────────────────────────────────────────────────────────────────
 
 interface StepInputProps {
-  currentHandle: string
-  onConfirm: (newHandle: string) => void
+  currentHandle:    string
+  inCooldown:       boolean
+  nextAllowedDate:  string
+  onConfirm:        (newHandle: string) => void
 }
 
-function StepInput({ currentHandle, onConfirm }: StepInputProps) {
-  const { t } = useTranslation()
-  const [value, setValue]         = useState('')
-  const [avail, setAvail]         = useState<Availability>('idle')
-  const debounceRef               = useRef<ReturnType<typeof setTimeout> | null>(null)
+function StepInput({ currentHandle, inCooldown, nextAllowedDate, onConfirm }: StepInputProps) {
+  const { t }                    = useTranslation()
+  const [value, setValue]        = useState('')
+  const [avail, setAvail]        = useState<Availability>('idle')
+  const debounceRef              = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const token                    = useAuthStore(s => s.token)
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
     const clean = value.trim().replace(/^@/, '').toLowerCase()
 
-    if (clean.length < 3) {
-      setAvail('idle')
-      return
-    }
+    if (clean.length < 3) { setAvail('idle'); return }
 
     setAvail('checking')
-    debounceRef.current = setTimeout(() => {
-      setAvail(TAKEN_HANDLES.includes(clean) ? 'taken' : 'available')
-    }, 500)
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res  = await fetch(`${BFF}/perfil-update-handle`, {
+          method:  'POST',
+          headers: {
+            'Content-Type':  'application/json',
+            Authorization:   `Bearer ${token}`,
+            apikey:          ANON_KEY,
+          },
+          // dry-run: send obviously-wrong credentials to trigger HANDLE_TAKEN vs other errors
+          body: JSON.stringify({ new_handle: clean, pin_hash: '__check__', security_answer_hash: '__check__' }),
+        })
+        const data = await res.json()
+        // HANDLE_TAKEN means the handle exists; anything else (including PIN errors) means it's available
+        setAvail(data.code === 'HANDLE_TAKEN' || data.code === 'HANDLE_SAME' ? 'taken' : 'available')
+      } catch {
+        setAvail('idle')
+      }
+    }, 600)
 
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [value])
 
   const availLabel =
-    avail === 'checking' ? t('perfil.handle.checking') :
+    avail === 'checking'  ? t('perfil.handle.checking') :
     avail === 'available' ? t('perfil.handle.available') :
     avail === 'taken'     ? t('perfil.handle.taken')    : ''
 
@@ -103,24 +110,21 @@ function StepInput({ currentHandle, onConfirm }: StepInputProps) {
         contentContainerStyle={styles.inputContent}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Current */}
         <Text style={styles.fieldLabel}>{t('perfil.handle.current')}</Text>
         <View style={styles.currentBox}>
           <Text style={styles.currentHandle}>{currentHandle}</Text>
         </View>
 
-        {/* Cooldown */}
-        {MOCK_IN_COOLDOWN && (
+        {inCooldown && (
           <View style={styles.cooldownBox}>
             <Text style={styles.cooldownText}>
-              {t('perfil.handle.cooldown', { date: MOCK_COOLDOWN_DATE })}
+              {t('perfil.handle.cooldown', { date: nextAllowedDate })}
             </Text>
             <Text style={styles.cooldownHint}>{t('perfil.handle.cooldownHint')}</Text>
           </View>
         )}
 
-        {/* New handle */}
-        {!MOCK_IN_COOLDOWN && (
+        {!inCooldown && (
           <>
             <Text style={[styles.fieldLabel, { marginTop: spacing.lg }]}>
               {t('perfil.handle.new')}
@@ -164,6 +168,62 @@ function StepInput({ currentHandle, onConfirm }: StepInputProps) {
   )
 }
 
+// ── StepSecurity (text input for answer) ─────────────────────────────────────
+
+interface StepSecurityProps {
+  onConfirm: (answerHash: string) => void
+}
+
+function StepSecurity({ onConfirm }: StepSecurityProps) {
+  const { t }           = useTranslation()
+  const [answer, setAnswer] = useState('')
+  const canSubmit           = answer.trim().length >= 2
+
+  const handleConfirm = async () => {
+    const hash = await sha256Hex(normalizeSecurityAnswer(answer))
+    onConfirm(hash)
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={styles.flex}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      <ScrollView
+        style={styles.flex}
+        contentContainerStyle={styles.inputContent}
+        keyboardShouldPersistTaps="handled"
+      >
+        <Text style={styles.stepEyebrow}>{t('perfil.handle.securityContext')}</Text>
+        <Text style={styles.stepTitle}>{t('perfil.handle.securitySubtitle')}</Text>
+
+        <TextInput
+          style={styles.securityInput}
+          value={answer}
+          onChangeText={setAnswer}
+          placeholder={t('perfil.handle.securityPlaceholder')}
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="done"
+          onSubmitEditing={canSubmit ? handleConfirm : undefined}
+        />
+
+        <TouchableOpacity
+          style={[styles.cta, !canSubmit && styles.ctaDisabled]}
+          onPress={canSubmit ? handleConfirm : undefined}
+          disabled={!canSubmit}
+          activeOpacity={0.75}
+        >
+          <Text style={[styles.ctaText, !canSubmit && styles.ctaTextDisabled]}>
+            {t('perfil.handle.confirmCta')}
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  )
+}
+
 // ── StepSuccess ───────────────────────────────────────────────────────────────
 
 function StepSuccess({ newHandle }: { newHandle: string }) {
@@ -187,13 +247,39 @@ function StepSuccess({ newHandle }: { newHandle: string }) {
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function HandleScreen() {
-  const { t }     = useTranslation()
-  const user      = useAuthStore(s => s.user)
-  const setUser   = useAuthStore(s => s.setUser)
+  const { t }   = useTranslation()
+  const user    = useAuthStore(s => s.user)
+  const setUser = useAuthStore(s => s.setUser)
+  const token   = useAuthStore(s => s.token)
 
-  const [step, setStep]           = useState<Step>('input')
-  const [newHandle, setNewHandle] = useState('')
-  const [pinError, setPinError]   = useState<string | null>(null)
+  const [step, setStep]                   = useState<Step>('input')
+  const [newHandle, setNewHandle]         = useState('')
+  const [pinHash, setPinHash]             = useState('')
+  const [pinError, setPinError]           = useState<string | null>(null)
+  const [submitError, setSubmitError]     = useState<string | null>(null)
+  const [submitting, setSubmitting]       = useState(false)
+  const [inCooldown, setInCooldown]       = useState(false)
+  const [nextAllowedDate, setNextAllowed] = useState('')
+
+  // Check cooldown from DB on mount
+  useEffect(() => {
+    if (!token) return
+    ;(async () => {
+      try {
+        const res  = await fetch(`${BFF}/perfil-update-handle`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: ANON_KEY },
+          body:    JSON.stringify({ new_handle: 'x', pin_hash: '__check__', security_answer_hash: '__check__' }),
+        })
+        const data = await res.json()
+        if (data.code === 'HANDLE_COOLDOWN' && data.next_allowed_at) {
+          setInCooldown(true)
+          const d = new Date(data.next_allowed_at)
+          setNextAllowed(d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' }))
+        }
+      } catch {}
+    })()
+  }, [token])
 
   if (!user) return null
 
@@ -209,15 +295,49 @@ export default function HandleScreen() {
     setStep('pin')
   }
 
-  const handlePinComplete = (_hash: string) => {
-    // Mock: PIN aceito automaticamente
+  const handlePinComplete = (hash: string) => {
+    setPinHash(hash)
     setPinError(null)
     setStep('security')
   }
 
-  const handleSecurityPass = () => {
-    setUser({ ...user, handle: `@${newHandle}` })
-    setStep('success')
+  const handleSecurityConfirm = async (answerHash: string) => {
+    setSubmitting(true)
+    setSubmitError(null)
+    try {
+      const res  = await fetch(`${BFF}/perfil-update-handle`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, apikey: ANON_KEY },
+        body:    JSON.stringify({
+          new_handle:            newHandle,
+          pin_hash:              pinHash,
+          security_answer_hash:  answerHash,
+        }),
+      })
+      const data = await res.json()
+
+      if (!res.ok) {
+        if (data.code === 'INVALID_CREDENTIALS' && data.message?.includes('PIN')) {
+          setPinError(t('perfil.handle.pinError'))
+          setStep('pin')
+        } else if (data.code === 'INVALID_CREDENTIALS') {
+          setSubmitError(t('perfil.handle.securityError'))
+        } else if (data.code === 'HANDLE_TAKEN') {
+          setSubmitError(t('perfil.handle.taken'))
+          setStep('input')
+        } else {
+          setSubmitError(data.message ?? t('common.genericError'))
+        }
+        return
+      }
+
+      setUser({ ...user, handle: data.handle })
+      setStep('success')
+    } catch {
+      setSubmitError(t('common.genericError'))
+    } finally {
+      setSubmitting(false)
+    }
   }
 
   const handleBack = () => {
@@ -236,6 +356,8 @@ export default function HandleScreen() {
       {step === 'input' && (
         <StepInput
           currentHandle={user.handle}
+          inCooldown={inCooldown}
+          nextAllowedDate={nextAllowedDate}
           onConfirm={handleInputConfirm}
         />
       )}
@@ -244,16 +366,25 @@ export default function HandleScreen() {
         <View style={styles.pinWrap}>
           <Text style={styles.stepEyebrow}>{t('perfil.handle.pinContext')}</Text>
           <Text style={styles.stepTitle}>{t('perfil.handle.pinSubtitle')}</Text>
+          {pinError && <Text style={styles.errorText}>{pinError}</Text>}
           <PINInput onComplete={handlePinComplete} error={pinError} />
         </View>
       )}
 
       {step === 'security' && (
         <View style={styles.flex}>
-          <SecurityConfirmation
-            questions={MOCK_SECURITY_QUESTIONS}
-            onPass={handleSecurityPass}
-          />
+          {submitError && (
+            <Text style={[styles.errorText, { paddingHorizontal: spacing.lg, marginTop: spacing.sm }]}>
+              {submitError}
+            </Text>
+          )}
+          {submitting ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator color={colors.white[100]} />
+            </View>
+          ) : (
+            <StepSecurity onConfirm={handleSecurityConfirm} />
+          )}
         </View>
       )}
 
@@ -286,7 +417,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     textTransform: 'uppercase',
   },
-  // Input step
   inputContent: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
@@ -349,7 +479,6 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.35)',
     marginTop: spacing.sm,
   },
-  // CTA
   cta: {
     marginTop: spacing.xl,
     height: spacing.buttonHeight,
@@ -368,7 +497,6 @@ const styles = StyleSheet.create({
   ctaTextDisabled: {
     color: 'rgba(255,255,255,0.3)',
   },
-  // PIN step
   pinWrap: {
     flex: 1,
     paddingHorizontal: spacing.lg,
@@ -385,7 +513,27 @@ const styles = StyleSheet.create({
     color: colors.white[100],
     marginBottom: spacing.xl,
   },
-  // Success
+  securityInput: {
+    marginTop: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: spacing.radius.md,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.15)',
+    ...typography.size.body,
+    color: colors.white[100],
+  },
+  errorText: {
+    ...typography.size.caption,
+    color: colors.state.error,
+    marginBottom: spacing.sm,
+  },
+  loadingWrap: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   successWrap: {
     flex: 1,
     paddingHorizontal: spacing.lg,

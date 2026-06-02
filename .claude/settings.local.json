@@ -12,7 +12,8 @@
       "Bash(supabase functions *)",
       "Bash(supabase db *)",
       "Bash(npx supabase *)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(powershell *)"
     ]
   }
 }

@@ -798,9 +798,14 @@
       "cooldownHint": "Troca permitida uma vez a cada 30 dias.",
       "pinContext": "TROCAR HANDLE",
       "pinSubtitle": "Digite seu PIN para confirmar.",
-      "confirmCta": "Trocar handle",
+      "confirmCta": "Confirmar",
+      "securityContext": "PERGUNTA DE SEGURANÇA",
+      "securitySubtitle": "Responda uma de suas perguntas cadastradas.",
+      "securityPlaceholder": "Sua resposta",
+      "securityError": "Resposta de segurança incorreta.",
+      "pinError": "PIN incorreto. Tente novamente.",
       "successTitle": "Handle trocado!",
-      "successBody": "Seu novo handle é @{{handle}}. O anterior ficará em quarentena por 30 dias.",
+      "successBody": "Seu novo handle é {{handle}}. O anterior ficará em quarentena por 30 dias.",
       "backCta": "Voltar ao perfil"
     },
     "seguranca": {
@@ -825,7 +830,15 @@
       "updateQuestions": "Atualizar perguntas",
       "sectionPix": "CHAVE PIX",
       "pixCurrent": "Chave atual",
-      "pixChange": "Trocar chave Pix"
+      "pixChange": "Trocar chave Pix",
+      "pixChanged": "Chave Pix atualizada com sucesso.",
+      "pixNewTitle": "Nova chave Pix",
+      "pixKeyType": "Tipo de chave",
+      "pixKeyValue": "Chave",
+      "pixKeyPlaceholder": "Digite sua chave Pix",
+      "securityHint": "Digite a resposta de uma de suas perguntas de segurança.",
+      "smsError": "Código inválido ou expirado.",
+      "pinCurrentError": "PIN atual incorreto."
     },
     "kyc": {
       "title": "Verificação de identidade",
@@ -887,5 +900,8 @@
   },
   "shared": {
     "asaasBadge": "Serviços financeiros Asaas"
+  },
+  "common": {
+    "genericError": "Ocorreu um erro. Tente novamente."
   }
 }

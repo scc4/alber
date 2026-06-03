@@ -1,10 +1,10 @@
 // Design: /design/flows1.jsx — QRCodeArt + countdown do CarregarFlow
 // Spec: /specs/06_modules/carregar_descarregar.md seção 3.3
 // QR placeholder (grid 25×25 com finder patterns) + countdown 30min em tempo real
-// Sprint 3: substituir o grid mock por encodedImage retornado pelo BFF (Asaas)
+// Exibe imagem real do Asaas (qrCodeImage prop) ou grid placeholder como fallback
 
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -22,6 +22,10 @@ const CELL_SIZE   = GRID_SIZE / GRID_CELLS  // 6.8 px
 export interface QRCodeDisplayProps {
   /** CPF mascarado exibido abaixo do QR, ex: "***.***.456-78" */
   cpfMasked: string
+  /** Base64 da imagem QR retornada pelo Asaas (sem prefixo data:). Quando ausente exibe grid placeholder. */
+  qrCodeImage?: string
+  /** ISO timestamp de expiração real (do Asaas). Quando ausente usa QR_DURATION padrão. */
+  expiresAt?: string
   /** Chamado quando o countdown chega a zero */
   onExpire?: () => void
   /** Chamado ao pressionar "Gerar novo QR Code" (estado expirado) */
@@ -65,12 +69,19 @@ function fmtTime(seconds: number): string {
 
 export function QRCodeDisplay({
   cpfMasked,
+  qrCodeImage,
+  expiresAt,
   onExpire,
   onGenerateNew,
 }: QRCodeDisplayProps) {
   const { t }     = useTranslation()
   const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null)
-  const [countdown, setCountdown] = useState(QR_DURATION)
+  const [countdown, setCountdown] = useState(() => {
+    if (expiresAt) {
+      return Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+    }
+    return QR_DURATION
+  })
 
   const cells   = useMemo(generateQRGrid, [])
   const expired  = countdown === 0
@@ -99,20 +110,29 @@ export function QRCodeDisplay({
 
       {/* Caixa branca do QR — padding lateral cria margem de silêncio (quiet zone) */}
       <View style={styles.qrBox}>
-        <View style={[styles.qrGrid, expired && styles.qrGridExpired]}>
-          {cells.map((row, i) => (
-            <View key={i} style={styles.qrRow}>
-              {row.map((v, j) => (
-                <View
-                  key={j}
-                  style={v === 1 ? styles.cellBlack : styles.cellWhite}
-                />
-              ))}
-            </View>
-          ))}
-        </View>
+        {qrCodeImage ? (
+          <Image
+            source={{ uri: `data:image/png;base64,${qrCodeImage}` }}
+            style={[styles.qrImage, expired && styles.qrGridExpired]}
+            resizeMode="contain"
+            accessibilityLabel={t('carregar.qr.imageAlt')}
+          />
+        ) : (
+          <View style={[styles.qrGrid, expired && styles.qrGridExpired]}>
+            {cells.map((row, i) => (
+              <View key={i} style={styles.qrRow}>
+                {row.map((v, j) => (
+                  <View
+                    key={j}
+                    style={v === 1 ? styles.cellBlack : styles.cellWhite}
+                  />
+                ))}
+              </View>
+            ))}
+          </View>
+        )}
 
-        {/* Overlay de expirado sobrepõe o grid */}
+        {/* Overlay de expirado sobrepõe o QR */}
         {expired && (
           <View style={styles.expiredOverlay}>
             <Text style={styles.expiredIcon}>⌛</Text>
@@ -175,7 +195,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
-  // Grid 170×170 de células
+  // Imagem real ou grid placeholder — mesmas dimensões
+  qrImage: {
+    width: GRID_SIZE,
+    height: GRID_SIZE,
+  },
   qrGrid: {
     width: GRID_SIZE,
     height: GRID_SIZE,

@@ -2,7 +2,7 @@
 // Spec: /specs/06_modules/transferir.md
 // Fluxo: busca → valor (numpad nativo) → PIN scrambled → segurança → sucesso com recibo
 
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   ActivityIndicator,
   Pressable,
@@ -19,7 +19,7 @@ import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../components/financial/PINInput'
 import {
   SecurityConfirmation,
-  MOCK_SECURITY_QUESTIONS,
+  SecurityQuestion,
 } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
@@ -43,13 +43,11 @@ interface Recipient {
   initials: string
 }
 
-// ─── UI shortcuts (recentes para seleção rápida) ──────────────────────────────
+// ─── BFF ──────────────────────────────────────────────────────────────────────
 
-const MOCK_RECENTS: Recipient[] = [
-  { name: 'João Pedro',    handle: '@joaopedro', initials: 'JP' },
-  { name: 'Ana Lima',      handle: '@analima',   initials: 'AL' },
-  { name: 'Carlos Mendes', handle: '@carlos',    initials: 'CM' },
-]
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
+const BFF_URL      = SUPABASE_URL + '/functions/v1'
+const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 const MAX_ATTEMPTS = 3
 
@@ -71,6 +69,56 @@ export default function TransferirScreen() {
   const [apiError, setApiError]     = useState<string | null>(null)
   const [pinAttempts, setPinAttempts] = useState(0)
   const [transferirResult, setTransferirResult] = useState<TransferirResponse | null>(null)
+  const [recents, setRecents]               = useState<Recipient[]>([])
+  const [recentsLoading, setRecentsLoading] = useState(true)
+  const [securityQuestions, setSecurityQuestions] = useState<SecurityQuestion[]>([])
+
+  useEffect(() => {
+    if (!token || !user?.id) return
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/security_questions?user_id=eq.${user.id}&select=question&order=position.asc`,
+          { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
+        )
+        if (!res.ok) return
+        const rows: { question: string }[] = await res.json()
+        if (Array.isArray(rows) && rows.length > 0) {
+          setSecurityQuestions(rows.map(r => ({ question: r.question })))
+        }
+      } catch { /* silencioso — SecurityConfirmation usa mock */ }
+    })()
+  }, [token, user?.id])
+
+  useEffect(() => {
+    if (!token) { setRecentsLoading(false); return }
+    ;(async () => {
+      try {
+        const params = new URLSearchParams({ tipo: 'out', page: '0', limit: '20' })
+        const res = await fetch(`${BFF_URL}/financial-atividade?${params}`, {
+          headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) return
+        const json = await res.json()
+        const rows: Array<{ type: string; counterpart: { name: string; handle: string } | null }> = json.data ?? []
+        const seen = new Set<string>()
+        const list: Recipient[] = []
+        for (const row of rows) {
+          if (row.type !== 'enviar' || !row.counterpart?.handle) continue
+          const h = row.counterpart.handle
+          if (seen.has(h)) continue
+          seen.add(h)
+          const name = row.counterpart.name || h.replace('@', '')
+          const initials = name.split(' ').map((p: string) => p[0]).slice(0, 2).join('').toUpperCase()
+          list.push({ name, handle: h, initials })
+          if (list.length >= 5) break
+        }
+        setRecents(list)
+      } catch { /* silencioso */ } finally {
+        setRecentsLoading(false)
+      }
+    })()
+  }, [token])
 
   const handleClose = () => router.back()
 
@@ -86,7 +134,7 @@ export default function TransferirScreen() {
       setNotFound(false)
       return
     }
-    const found = MOCK_RECENTS.find(
+    const found = recents.find(
       r =>
         r.handle.replace('@', '').toLowerCase().includes(inputHandle) ||
         r.name.toLowerCase().includes(inputHandle),
@@ -208,23 +256,28 @@ export default function TransferirScreen() {
           keyboardShouldPersistTaps="handled"
         >
           <Text style={[s.eyebrow, s.recentLabel]}>{t('transferir.recentLabel')}</Text>
-          {MOCK_RECENTS.map(r => (
-            <Pressable
-              key={r.handle}
-              onPress={() => handleSelectRecent(r)}
-              style={({ pressed }) => [s.recentRow, pressed && s.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={r.name}
-            >
-              <View style={s.avatar}>
-                <Text style={s.avatarText}>{r.initials}</Text>
-              </View>
-              <View style={s.recentInfo}>
-                <Text style={s.recentName}>{r.name}</Text>
-                <Text style={s.recentHandle}>{r.handle}</Text>
-              </View>
-            </Pressable>
-          ))}
+          {recentsLoading
+            ? <ActivityIndicator size="small" color="rgba(255,255,255,0.3)" style={s.recentsSpinner} />
+            : recents.length === 0
+              ? <Text style={s.recentEmpty}>{t('transferir.recentEmpty')}</Text>
+              : recents.map(r => (
+                <Pressable
+                  key={r.handle}
+                  onPress={() => handleSelectRecent(r)}
+                  style={({ pressed }) => [s.recentRow, pressed && s.pressed]}
+                  accessibilityRole="button"
+                  accessibilityLabel={r.name}
+                >
+                  <View style={s.avatar}>
+                    <Text style={s.avatarText}>{r.initials}</Text>
+                  </View>
+                  <View style={s.recentInfo}>
+                    <Text style={s.recentName}>{r.name}</Text>
+                    <Text style={s.recentHandle}>{r.handle}</Text>
+                  </View>
+                </Pressable>
+              ))
+          }
         </ScrollView>
 
         <View style={s.spacer} />
@@ -302,7 +355,7 @@ export default function TransferirScreen() {
         closeLabel={t('transferir.back')}
       >
         <SecurityConfirmation
-          questions={MOCK_SECURITY_QUESTIONS}
+          questions={securityQuestions.length ? securityQuestions : undefined}
           onPass={handleSecurityPass}
           onFail={handleSecurityFail}
           onBlocked={handleSecurityBlocked}
@@ -700,6 +753,13 @@ const s = StyleSheet.create({
     marginTop: 2,
   },
 
+  recentsSpinner: { marginTop: spacing.md },
+  recentEmpty: {
+    fontSize: typography.size.caption.fontSize,
+    color: 'rgba(255,255,255,0.3)',
+    fontFamily: typography.fontFamily.primary,
+    marginTop: spacing.md,
+  },
   spacer: { flex: 1 },
   processingCenter: {
     flex: 1,

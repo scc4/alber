@@ -153,7 +153,8 @@
       "title": "Confirme sua identidade",
       "cancel": "Cancelar",
       "attempt": "Tentativa {{n}} de {{max}}.",
-      "blocked": "Conta bloqueada por 15 minutos."
+      "blocked": "Conta bloqueada por 15 minutos.",
+      "confirm": "Confirmar"
     },
     "recovery": {
       "header": "RECUPERAR PIN",
@@ -253,7 +254,8 @@
       "copyCode": "Copiar código",
       "share": "Compartilhar",
       "expiredLabel": "QR Code expirado",
-      "generateNew": "Gerar novo QR Code"
+      "generateNew": "Gerar novo QR Code",
+      "imageAlt": "QR Code Pix"
     },
     "confirm": {
       "amountLabel": "Valor",
@@ -335,6 +337,7 @@
     "searchCta": "Buscar",
     "notFound": "Usuário não encontrado. Verifique o CPF, @handle ou e-mail.",
     "recentLabel": "RECENTES",
+    "recentEmpty": "Nenhuma transferência recente",
     "swapCta": "Trocar",
     "balanceAvailable": "Saldo disponível: {{balance}} Albers",
     "balanceInsufficient": "Saldo insuficiente",
@@ -433,6 +436,7 @@
       "shareCopyCta": "Copiar",
       "shareShareCta": "Compartilhar",
       "shareContactsLabel": "CONTATOS NO ALBER",
+      "shareContactsEmpty": "Nenhum contato recente",
       "shareConcludeCta": "Concluir"
     },
     "detalhe": {

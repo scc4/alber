@@ -2,7 +2,7 @@
 // Spec: /specs/06_modules/split.md
 // Wizard de 3 etapas + tela de compartilhar.
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   KeyboardAvoidingView,
   Platform,
@@ -32,14 +32,6 @@ import { typography } from '../../../tokens/typography'
 
 type Step = 1 | 2 | 3 | 'share'
 
-const MOCK_CONTACTS = [
-  { name: 'João S.',  handle: '@joaosilva' },
-  { name: 'Ana C.',   handle: '@ana_costa' },
-  { name: 'Pedro',    handle: '@phenrique' },
-  { name: 'Cami',     handle: '@cami' },
-  { name: 'Lucas',    handle: '@lucasm' },
-]
-
 const VALIDITY_OPTIONS: { id: LinkValidity; key: string }[] = [
   { id: '1h',     key: 'split.criar.validity1h'     },
   { id: '24h',    key: 'split.criar.validity24h'    },
@@ -53,7 +45,24 @@ export default function SplitCriarScreen() {
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
   const token    = useAuthStore(s => s.token)
+  const user     = useAuthStore(s => s.user)
   const { draft, updateDraft, resetDraft, createSplit, setActiveSplitId } = useSplitStore()
+  const splits = useSplitStore(s => s.splits)
+
+  const recentContacts = useMemo(() => {
+    const seen     = new Set<string>()
+    const myHandle = user?.handle ?? ''
+    const list: { name: string; handle: string }[] = []
+    for (const split of splits.filter(sp => sp.status === 'active')) {
+      for (const p of split.participants) {
+        if (!p.handle || p.handle === myHandle || seen.has(p.handle)) continue
+        seen.add(p.handle)
+        list.push({ name: p.name, handle: p.handle })
+        if (list.length >= 5) return list
+      }
+    }
+    return list
+  }, [splits, user?.handle])
 
   const [step, setStep]                     = useState<Step>(1)
   const [valueStr, setValueStr]             = useState('')
@@ -412,20 +421,25 @@ export default function SplitCriarScreen() {
         <View style={styles.contactsHeader}>
           <Eyebrow>{t('split.criar.shareContactsLabel')}</Eyebrow>
         </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.contactsRow}
-        >
-          {MOCK_CONTACTS.map(c => (
-            <View key={c.handle} style={styles.contactItem}>
-              <View style={[styles.contactAvatar, { backgroundColor: avatarHue(c.handle) }]}>
-                <Text style={styles.contactInitial}>{c.name[0]}</Text>
-              </View>
-              <Text style={styles.contactName} numberOfLines={1}>{c.name}</Text>
-            </View>
-          ))}
-        </ScrollView>
+        {recentContacts.length === 0
+          ? <Text style={styles.contactsEmpty}>{t('split.criar.shareContactsEmpty')}</Text>
+          : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.contactsRow}
+            >
+              {recentContacts.map(c => (
+                <View key={c.handle} style={styles.contactItem}>
+                  <View style={[styles.contactAvatar, { backgroundColor: avatarHue(c.handle) }]}>
+                    <Text style={styles.contactInitial}>{c.name[0]}</Text>
+                  </View>
+                  <Text style={styles.contactName} numberOfLines={1}>{c.name}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          )
+        }
       </ScrollView>
 
       <View style={styles.actionArea}>
@@ -828,6 +842,12 @@ const styles = StyleSheet.create({
   contactsHeader: {
     marginTop: spacing.lg,
     marginBottom: 12,
+  },
+  contactsEmpty: {
+    fontSize: typography.size.caption.fontSize,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.3)',
+    marginBottom: spacing.md,
   },
   contactsRow: {
     gap: 14,

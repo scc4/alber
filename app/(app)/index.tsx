@@ -3,7 +3,7 @@
 // Shell fixa (Header, Saldo, Actions, BottomNav) + skin variável do Lounge ativo
 // Mock: skin 'surf' fixo — será dinâmico com lounge.store no Sprint 5
 
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Pressable,
   RefreshControl,
@@ -20,6 +20,7 @@ import { BalanceBlock } from '../../components/financial/BalanceBlock'
 import { Eyebrow } from '../../components/shared/Eyebrow'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
+import { useLoungeStore } from '../../store/lounge.store'
 import { spaceSkins } from '../../tokens/colors'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -83,8 +84,6 @@ function resolveBanner(
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-const MOCK_SKIN = 'surf' as const  // Sprint 5: lounge.store retornará o skin ativo
-
 export default function HomeScreen() {
   const { t } = useTranslation()
   const { user, kycStatus, accountStatus, logout } = useAuthStore()
@@ -97,11 +96,26 @@ export default function HomeScreen() {
     toggleHidden,
     loadHiddenPreference,
   } = useBalanceStore()
+  const myLounges = useLoungeStore(s => s.myLounges)
 
   const [refreshing, setRefreshing]         = useState(false)
   const [dismissedBanner, setDismissedBanner] = useState(false)
 
-  const skin = spaceSkins[MOCK_SKIN]
+  const skin = useMemo(() => {
+    if (!myLounges.length) return spaceSkins.none
+    const lounge = myLounges[0]
+    const roleLabel: string | null =
+      lounge.role === 'owner'   ? t('lounge.roleOwner')
+      : lounge.role === 'manager' ? t('lounge.roleManager')
+      : t('lounge.roleMember')
+    return {
+      name:   lounge.name,
+      accent: lounge.accent,
+      bgDark: lounge.bgDark,
+      wm:     0.035 as const,
+      role:   roleLabel,
+    }
+  }, [myLounges, t])
 
   // Carrega preferência de ocultar e saldo no mount
   useEffect(() => {
@@ -237,7 +251,7 @@ export default function HomeScreen() {
         >
           <Eyebrow>{t('home.lounge.label')}</Eyebrow>
           <View style={styles.loungeNameRow}>
-            {MOCK_SKIN !== 'none' && (
+            {myLounges.length > 0 && (
               <View style={[styles.loungeDot, { backgroundColor: skin.accent }]} />
             )}
             <Text style={styles.loungeName}>{skin.name}</Text>

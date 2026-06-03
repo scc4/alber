@@ -2,14 +2,16 @@
 // Design: /design/pin.jsx — SecurityConfirm
 // Sorteia 1 de N perguntas, exibe 4 opções mascaradas (1 correta + 3 falsas)
 
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useRef, useState } from 'react'
 import {
   Animated,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
+import { PrimaryButton } from '../core/PrimaryButton'
 import { useTranslation } from 'react-i18next'
 import { maskAnswer, sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
@@ -25,13 +27,13 @@ const MOCK_FAKES = [
 
 export interface SecurityQuestion {
   question: string
-  /** Resposta em texto puro — mascarada internamente */
-  answer: string
+  /** Resposta em texto puro — mascarada internamente. Ausente quando vinda do backend (TextInput mode). */
+  answer?: string
 }
 
 export interface SecurityConfirmationProps {
-  /** 1-4 perguntas cadastradas. O componente sorteia 1. */
-  questions: SecurityQuestion[]
+  /** 1-4 perguntas cadastradas. O componente sorteia 1. Omitir usa MOCK_SECURITY_QUESTIONS. */
+  questions?: SecurityQuestion[]
   /** Recebe o SHA-256(normalizeSecurityAnswer(answer)) para envio ao BFF. */
   onPass: (answerHash?: string) => void
   onFail?: (attemptsLeft: number) => void
@@ -58,7 +60,7 @@ function buildFakes(correct: string, pool: string[]): string[] {
 }
 
 export function SecurityConfirmation({
-  questions,
+  questions = MOCK_SECURITY_QUESTIONS,
   onPass,
   onFail,
   onBlocked,
@@ -66,23 +68,31 @@ export function SecurityConfirmation({
 }: SecurityConfirmationProps) {
   const { t } = useTranslation()
 
-  // Sorteia 1 pergunta e monta as 4 opções na inicialização
+  // Sorteia 1 pergunta. Se tiver answer → multiple-choice. Sem answer → TextInput.
   const [{ questionText, maskedCorrect, correctAnswer, options }] = useState(() => {
     const q = questions[Math.floor(Math.random() * questions.length)]
+    if (!q.answer) {
+      return { questionText: q.question, maskedCorrect: null as string | null, correctAnswer: undefined as string | undefined, options: [] as string[] }
+    }
     const masked = maskAnswer(q.answer)
     const fakes = buildFakes(q.answer, MOCK_FAKES)
     return {
       questionText:  q.question,
-      maskedCorrect: masked,
-      correctAnswer: q.answer,
+      maskedCorrect: masked as string | null,
+      correctAnswer: q.answer as string | undefined,
       options:       shuffle([masked, ...fakes]),
     }
   })
 
+  // Multiple-choice state
   const [selected, setSelected] = useState<number | null>(null)
   const [wrong, setWrong] = useState(false)
   const [attempts, setAttempts] = useState(0)
   const shakeX = useRef(new Animated.Value(0)).current
+
+  // TextInput state
+  const [textAnswer, setTextAnswer] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   const shake = () => {
     Animated.sequence([
@@ -100,7 +110,7 @@ export function SecurityConfirmation({
     const isCorrect = options[idx] === maskedCorrect
     setTimeout(() => {
       if (isCorrect) {
-        sha256Hex(normalizeSecurityAnswer(correctAnswer)).then(hash => onPass(hash))
+        sha256Hex(normalizeSecurityAnswer(correctAnswer!)).then(hash => onPass(hash))
       } else {
         const next = attempts + 1
         setAttempts(next)
@@ -118,6 +128,53 @@ export function SecurityConfirmation({
       }
     }, 280)
   }
+
+  // ── TextInput mode (perguntas reais sem answer_text) ──────────────────────
+
+  if (!correctAnswer) {
+    const canSubmit = textAnswer.trim().length >= 2 && !submitting
+
+    const handleSubmit = async () => {
+      if (!canSubmit) return
+      setSubmitting(true)
+      try {
+        const hash = await sha256Hex(normalizeSecurityAnswer(textAnswer))
+        onPass(hash)
+      } finally {
+        setSubmitting(false)
+      }
+    }
+
+    return (
+      <View style={styles.root}>
+        <Text style={styles.eyebrow}>{t('auth.security.header')}</Text>
+        <Text style={styles.title}>{t('auth.security.title')}</Text>
+        <Text style={styles.question}>{questionText}</Text>
+        <TextInput
+          style={styles.textInput}
+          value={textAnswer}
+          onChangeText={setTextAnswer}
+          placeholder={t('auth.login.securityAnswerPlaceholder')}
+          placeholderTextColor="rgba(255,255,255,0.25)"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="done"
+          onSubmitEditing={canSubmit ? handleSubmit : undefined}
+          accessibilityLabel={questionText}
+        />
+        <Text style={styles.textHint}>{t('auth.login.securityHint')}</Text>
+        <View style={styles.textSubmitWrap}>
+          <PrimaryButton
+            label={t('auth.security.confirm')}
+            onPress={handleSubmit}
+            state={submitting ? 'loading' : canSubmit ? 'default' : 'disabled'}
+          />
+        </View>
+      </View>
+    )
+  }
+
+  // ── Multiple-choice mode ──────────────────────────────────────────────────
 
   return (
     <View style={styles.root}>
@@ -235,5 +292,27 @@ const styles = StyleSheet.create({
   },
   optionTextWrong: {
     color: colors.state.error,
+  },
+
+  // TextInput mode
+  textInput: {
+    width: '100%',
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.18)',
+    paddingVertical: spacing.sm + 2,
+    fontSize: 18,
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: spacing.sm,
+  },
+  textHint: {
+    fontSize: typography.size.caption.fontSize,
+    color: 'rgba(255,255,255,0.35)',
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: typography.size.caption.lineHeight,
+    marginBottom: spacing.lg,
+  },
+  textSubmitWrap: {
+    marginTop: 'auto' as any,
   },
 })

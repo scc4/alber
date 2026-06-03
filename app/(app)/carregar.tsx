@@ -10,6 +10,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -21,7 +22,7 @@ import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../components/financial/PINInput'
 import {
   SecurityConfirmation,
-  MOCK_SECURITY_QUESTIONS,
+  SecurityQuestion,
 } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Eyebrow } from '../../components/shared/Eyebrow'
@@ -29,12 +30,17 @@ import { QRCodeDisplay } from '../../components/financial/QRCodeDisplay'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
-import { descarregar, DescarregarResponse } from '../../services/financial.service'
+import { carregar, CarregarResponse, descarregar, DescarregarResponse } from '../../services/financial.service'
 import { formatAlbers, formatCurrency } from '../../utils/format'
 import { BffError } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
+
+// ─── BFF ─────────────────────────────────────────────────────────────────────
+
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
+const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -80,7 +86,27 @@ export default function CarregarScreen() {
   const [pinError, setPinError]             = useState<string | null>(null)
   const [apiError, setApiError]             = useState<string | null>(null)
   const [descarregarResult, setDescarregarResult] = useState<DescarregarResponse | null>(null)
+  const [carregarResult, setCarregarResult]       = useState<CarregarResponse | null>(null)
+  const [carregarLoading, setCarregarLoading]     = useState(false)
+  const [securityQuestions, setSecurityQuestions] = useState<SecurityQuestion[]>([])
   const pinKey = useRef(0)
+
+  useEffect(() => {
+    if (!token || !user?.id) return
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/security_questions?user_id=eq.${user.id}&select=question&order=position.asc`,
+          { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
+        )
+        if (!res.ok) return
+        const rows: { question: string }[] = await res.json()
+        if (Array.isArray(rows) && rows.length > 0) {
+          setSecurityQuestions(rows.map(r => ({ question: r.question })))
+        }
+      } catch { /* silencioso — SecurityConfirmation usa mock */ }
+    })()
+  }, [token, user?.id])
 
   const numericAmount = parseBRL(rawAmount)
   const isValidCarregar    = numericAmount >= 5
@@ -103,6 +129,27 @@ export default function CarregarScreen() {
     setPinHash(null)
     setApiError(null)
     setDescarregarResult(null)
+    setCarregarResult(null)
+  }
+
+  const handleGenerateQr = async () => {
+    if (!token) return
+    setCarregarLoading(true)
+    setApiError(null)
+    try {
+      const result = await carregar(token, numericAmount)
+      setCarregarResult(result)
+      setStep('qr')
+    } catch (e) {
+      if (e instanceof BffError) {
+        setApiError(e.code === 'KYC_REQUIRED' ? t('carregar.kycBlockedBody') : t('carregar.errorApi'))
+        if (e.code === 'KYC_REQUIRED') setStep('kyc_blocked')
+      } else {
+        setApiError(t('carregar.errorApi'))
+      }
+    } finally {
+      setCarregarLoading(false)
+    }
   }
 
   const handleCarregarSuccess = async () => {
@@ -274,8 +321,8 @@ export default function CarregarScreen() {
 
         <PrimaryButton
           label={tab === 'carregar' ? t('carregar.generateQr') : t('carregar.continue')}
-          onPress={() => setStep(tab === 'carregar' ? 'qr' : 'confirm')}
-          state={isValid ? 'default' : 'disabled'}
+          onPress={() => tab === 'carregar' ? handleGenerateQr() : setStep('confirm')}
+          state={!isValid ? 'disabled' : carregarLoading ? 'loading' : 'default'}
         />
       </FlowShell>
     )
@@ -297,18 +344,25 @@ export default function CarregarScreen() {
 
         <QRCodeDisplay
           cpfMasked={user?.cpfMasked ?? '***.***.***-**'}
-          onExpire={() => setStep('value')}
-          onGenerateNew={() => {
-            // Mock: volta para seleção de valor para gerar novo QR
-            setStep('value')
-          }}
+          qrCodeImage={carregarResult?.qr_code_image}
+          expiresAt={carregarResult?.expires_at}
+          onExpire={() => { setCarregarResult(null); setStep('value') }}
+          onGenerateNew={() => { setCarregarResult(null); setStep('value') }}
         />
 
         <View style={s.qrActions}>
-          <Pressable style={s.ghostBtn} accessibilityRole="button">
+          <Pressable
+            style={s.ghostBtn}
+            accessibilityRole="button"
+            onPress={() => carregarResult?.qr_code && Share.share({ message: carregarResult.qr_code })}
+          >
             <Text style={s.ghostBtnText}>{t('carregar.qr.copyCode')}</Text>
           </Pressable>
-          <Pressable style={s.ghostBtn} accessibilityRole="button">
+          <Pressable
+            style={s.ghostBtn}
+            accessibilityRole="button"
+            onPress={() => carregarResult?.qr_code && Share.share({ message: carregarResult.qr_code, title: 'Pix Alber' })}
+          >
             <Text style={s.ghostBtnText}>{t('carregar.qr.share')}</Text>
           </Pressable>
         </View>
@@ -398,7 +452,7 @@ export default function CarregarScreen() {
         onBack={() => setStep('pin')}
       >
         <SecurityConfirmation
-          questions={MOCK_SECURITY_QUESTIONS}
+          questions={securityQuestions.length ? securityQuestions : undefined}
           onPass={handleSecurityPass}
           onBlocked={handleSecurityBlocked}
         />

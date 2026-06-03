@@ -226,11 +226,15 @@ Deno.serve(async (req: Request) => {
       const msg = e instanceof Error ? e.message : String(e)
       console.error('[auth-register] asaas account creation failed:', msg)
 
+      // Parsear e logar o body completo do Asaas para diagnóstico
+      let asaasErrorBody: Record<string, unknown> | null = null
       let description = ''
       try {
-        const jsonStr = msg.replace(/^ASAAS_ACCOUNT_CREATE_FAILED:\s*/, '')
-        const parsed  = JSON.parse(jsonStr) as { errors?: { description?: string }[] }
-        description   = parsed.errors?.[0]?.description ?? ''
+        const jsonStr  = msg.replace(/^ASAAS_ACCOUNT_CREATE_FAILED:\s*/, '')
+        asaasErrorBody = JSON.parse(jsonStr) as Record<string, unknown>
+        const errors   = asaasErrorBody.errors as Array<{ description?: string }> | undefined
+        description    = errors?.[0]?.description ?? ''
+        console.error('[auth-register] asaas error body:', JSON.stringify(asaasErrorBody))
       } catch { /* mensagem não estruturada */ }
 
       const lower      = description.toLowerCase()
@@ -248,11 +252,15 @@ Deno.serve(async (req: Request) => {
             return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
           }
         } catch (e2) {
-          await logError(supabaseAdmin, 'auth-register', e2, safePayload)
+          await logError(supabaseAdmin, 'auth-register', e2, safePayload, {
+            asaas_response: asaasErrorBody,
+          })
           return err(isEmailDup ? 'EMAIL_IN_USE' : 'CPF_IN_USE', description, 409)
         }
       } else {
-        await logError(supabaseAdmin, 'auth-register', e, safePayload)
+        await logError(supabaseAdmin, 'auth-register', e, safePayload, {
+          asaas_response: asaasErrorBody,
+        })
         return err('ASAAS_ERROR', description || 'Erro ao criar subconta financeira', 503)
       }
     }
@@ -263,6 +271,15 @@ Deno.serve(async (req: Request) => {
     // Manter o response bruto disponível para error_logs nas etapas seguintes.
     // A apiKey em texto claro só existe aqui — após aesEncrypt ela é descartada.
     asaasRawResponse = { id: asaasAccount.id, apiKey: asaasAccount.apiKey, walletId: asaasAccount.walletId }
+
+    console.log('[asaas] account created:', JSON.stringify({
+      id:       asaasAccount.id,
+      apiKey:   asaasAccount.apiKey ? '***presente***' : 'null',
+      walletId: asaasAccount.walletId,
+    }))
+    if (!asaasAccount.apiKey) {
+      console.warn('[asaas] WARNING: apiKey is null - White Label may not be enabled')
+    }
 
     // ── Buscar onboardingUrl (aguarda 15s — obrigatório conforme docs Asaas) ──
     // A subconta recém-criada precisa de ~15s para ser provisionada antes de

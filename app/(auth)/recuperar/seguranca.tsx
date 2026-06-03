@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { SecurityConfirmation, MOCK_SECURITY_QUESTIONS } from '../../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { Field } from '../../../components/core/Field'
+import { useRecoveryStore } from '../../../store/recovery.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -76,6 +77,7 @@ function ForgotShell({
 
 export default function RecuperarSegurancaScreen() {
   const { t } = useTranslation()
+  const setRecoveryIdentifier = useRecoveryStore(s => s.setIdentifier)
   const [phase, setPhase] = useState<Phase>('identifier')
   const [identifier, setIdentifier] = useState('')
 
@@ -130,7 +132,10 @@ export default function RecuperarSegurancaScreen() {
     >
       <SecurityConfirmation
         questions={MOCK_SECURITY_QUESTIONS}
-        onPass={() => router.push('/(auth)/recuperar/codigo')}
+        onPass={() => {
+          setRecoveryIdentifier(identifier)
+          router.push('/(auth)/recuperar/codigo')
+        }}
         onBlocked={() => router.replace('/(auth)/login')}
       />
     </ForgotShell>

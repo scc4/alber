@@ -16,12 +16,14 @@ import { OnboardShell } from '../../../components/core/OnboardShell'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
 import { updateDraft } from '../../../store/signup-draft'
+import { useAuthStore } from '../../../store/auth.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 
-// Mock: handles já em uso
-const TAKEN = new Set(['mayte','alber','admin','joao','test','luiza','ana_silva','pedro'])
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
+const BFF_URL      = SUPABASE_URL + '/functions/v1'
+const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 type Status = 'idle' | 'checking' | 'available' | 'taken' | 'invalid'
 
@@ -46,7 +48,8 @@ function buildSuggestions(base: string): string[] {
 }
 
 export default function HandleScreen() {
-  const { t } = useTranslation()
+  const { t }   = useTranslation()
+  const token   = useAuthStore(s => s.token)
   const [handle, setHandle] = useState('')
   const [status, setStatus] = useState<Status>('idle')
   const [suggestions, setSuggestions] = useState<string[]>([])
@@ -62,17 +65,35 @@ export default function HandleScreen() {
       return
     }
     setStatus('checking')
-    timer.current = setTimeout(() => {
-      if (TAKEN.has(h)) {
-        setStatus('taken')
-        setSuggestions(buildSuggestions(h))
-      } else {
+    timer.current = setTimeout(async () => {
+      try {
+        const params  = new URLSearchParams({ q: h })
+        const headers: Record<string, string> = { apikey: ANON_KEY }
+        if (token) headers['Authorization'] = `Bearer ${token}`
+        const res = await fetch(`${BFF_URL}/user-search?${params}`, { headers })
+        if (res.ok) {
+          const users: Array<{ handle: string }> = await res.json()
+          const taken = users.some(u => u.handle === `@${h}` || u.handle === h)
+          if (taken) {
+            setStatus('taken')
+            setSuggestions(buildSuggestions(h))
+          } else {
+            setStatus('available')
+            setSuggestions([])
+          }
+        } else {
+          // EF requer auth (401 durante onboarding) — não bloqueia o usuário;
+          // auth-register verifica duplicata em ETAPA 1 com HANDLE_TAKEN 409.
+          setStatus('available')
+          setSuggestions([])
+        }
+      } catch {
         setStatus('available')
         setSuggestions([])
       }
     }, 500)
     return () => { if (timer.current) clearTimeout(timer.current) }
-  }, [handle])
+  }, [handle, token])
 
   const borderColor =
     status === 'available'

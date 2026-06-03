@@ -13,22 +13,19 @@ import {
 } from 'react-native'
 import { PrimaryButton } from '../core/PrimaryButton'
 import { useTranslation } from 'react-i18next'
-import { maskAnswer, sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
+import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
 
-// Pool de respostas falsas para completar as 4 opções (mock)
-const MOCK_FAKES = [
-  'Rex', 'Luna', 'Tobias', 'Mel', 'Bolinha',
-  'Nina', 'Thor', 'Lola', 'Max', 'Princesa',
-  'Simba', 'Bidu',
-]
-
 export interface SecurityQuestion {
   question: string
-  /** Resposta em texto puro — mascarada internamente. Ausente quando vinda do backend (TextInput mode). */
+  /** Resposta em texto puro — usada para hash ao confirmar. Ausente quando vinda do backend sem plain-text. */
   answer?: string
+  /** Opções mascaradas já construídas pelo backend (1 correta + falsas). Ausente → TextInput mode. */
+  options?: string[]
+  /** Qual das options[] é a resposta correta — para feedback visual local. Obrigatório quando options presente. */
+  maskedAnswer?: string
 }
 
 export interface SecurityConfirmationProps {
@@ -50,15 +47,6 @@ function shuffle<T>(arr: T[]): T[] {
   return b
 }
 
-// Gera 3 falsas que não conflitem com a correta
-function buildFakes(correct: string, pool: string[]): string[] {
-  const masked = maskAnswer(correct)
-  const candidates = pool
-    .filter(f => f !== correct && maskAnswer(f) !== masked)
-    .map(f => maskAnswer(f))
-  return shuffle([...new Set(candidates)]).slice(0, 3)
-}
-
 export function SecurityConfirmation({
   questions = MOCK_SECURITY_QUESTIONS,
   onPass,
@@ -68,19 +56,24 @@ export function SecurityConfirmation({
 }: SecurityConfirmationProps) {
   const { t } = useTranslation()
 
-  // Sorteia 1 pergunta. Se tiver answer → multiple-choice. Sem answer → TextInput.
+  // Sorteia 1 pergunta.
+  // options + maskedAnswer presentes → multiple-choice (opções do backend).
+  // Nenhum dos dois → TextInput mode.
   const [{ questionText, maskedCorrect, correctAnswer, options }] = useState(() => {
     const q = questions[Math.floor(Math.random() * questions.length)]
-    if (!q.answer) {
-      return { questionText: q.question, maskedCorrect: null as string | null, correctAnswer: undefined as string | undefined, options: [] as string[] }
+    if (q.options && q.maskedAnswer) {
+      return {
+        questionText:  q.question,
+        maskedCorrect: q.maskedAnswer as string | null,
+        correctAnswer: q.answer as string | undefined,
+        options:       shuffle(q.options),
+      }
     }
-    const masked = maskAnswer(q.answer)
-    const fakes = buildFakes(q.answer, MOCK_FAKES)
     return {
       questionText:  q.question,
-      maskedCorrect: masked as string | null,
-      correctAnswer: q.answer as string | undefined,
-      options:       shuffle([masked, ...fakes]),
+      maskedCorrect: null as string | null,
+      correctAnswer: undefined as string | undefined,
+      options:       [] as string[],
     }
   })
 
@@ -220,13 +213,33 @@ export function SecurityConfirmation({
 }
 
 // ─── Mock questions para desenvolvimento ─────────────────────────────────────
-// Em produção: virão do backend após autenticação da sessão
+// Opções mascaradas embutidas — em produção virão do backend (EF auth-login / user-profile).
 
 export const MOCK_SECURITY_QUESTIONS: SecurityQuestion[] = [
-  { question: 'Nome do seu primeiro animal de estimação', answer: 'Bolinha' },
-  { question: 'Nome da sua avó materna', answer: 'Maria Silva' },
-  { question: 'Cidade onde seus pais se conheceram', answer: 'Santos' },
-  { question: 'Nome do seu melhor amigo da infância', answer: 'Rodrigo' },
+  {
+    question:     'Nome do seu primeiro animal de estimação',
+    answer:       'Bolinha',
+    options:      ['Bo***ha', 'L**a', 'T**r', 'M*x'],
+    maskedAnswer: 'Bo***ha',
+  },
+  {
+    question:     'Nome da sua avó materna',
+    answer:       'Maria Silva',
+    options:      ['Mar*****lva', 'An* So***', 'Lu** Fe***', 'Ca** Me***'],
+    maskedAnswer: 'Mar*****lva',
+  },
+  {
+    question:     'Cidade onde seus pais se conheceram',
+    answer:       'Santos',
+    options:      ['Sa**os', 'Ca**as', 'Cu**iba', 'Ma**lia'],
+    maskedAnswer: 'Sa**os',
+  },
+  {
+    question:     'Nome do seu melhor amigo da infância',
+    answer:       'Rodrigo',
+    options:      ['Ro***go', 'Fe***do', 'Gu***vo', 'Ma***os'],
+    maskedAnswer: 'Ro***go',
+  },
 ]
 
 // ─── Styles ──────────────────────────────────────────────────────────────────

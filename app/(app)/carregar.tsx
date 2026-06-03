@@ -68,7 +68,6 @@ function parseBRL(digits: string): number {
   return parseInt(digits || '0', 10) / 100
 }
 
-const CASHOUT_RATE_ESTIMATE = 0.02 // Preview local — taxa real vem da API
 
 // ─── Tela principal ───────────────────────────────────────────────────────────
 
@@ -81,13 +80,14 @@ export default function CarregarScreen() {
   const [step, setStep]         = useState<Step>(
     kycStatus !== 'approved' ? 'kyc_blocked' : 'value',
   )
-  const [rawAmount, setRawAmount]           = useState('10000') // centavos, default R$100,00
+  const [rawAmount, setRawAmount]           = useState('')
   const [pinHash, setPinHash]               = useState<string | null>(null)
   const [pinError, setPinError]             = useState<string | null>(null)
   const [apiError, setApiError]             = useState<string | null>(null)
   const [descarregarResult, setDescarregarResult] = useState<DescarregarResponse | null>(null)
   const [carregarResult, setCarregarResult]       = useState<CarregarResponse | null>(null)
   const [carregarLoading, setCarregarLoading]     = useState(false)
+  const [cashoutRate, setCashoutRate]             = useState(0.02) // fallback: 2%
   const [securityQuestions, setSecurityQuestions] = useState<SecurityQuestion[]>([])
   const pinKey = useRef(0)
 
@@ -108,6 +108,21 @@ export default function CarregarScreen() {
     })()
   }, [token, user?.id])
 
+  useEffect(() => {
+    if (!token) return
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/rates?type=eq.cashout&select=rate`,
+          { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
+        )
+        if (!res.ok) return
+        const rows: { rate: number }[] = await res.json()
+        if (rows?.[0]?.rate != null) setCashoutRate(Number(rows[0].rate))
+      } catch { /* mantém fallback 2% */ }
+    })()
+  }, [token])
+
   const numericAmount = parseBRL(rawAmount)
   const isValidCarregar    = numericAmount >= 5
   const isValidDescarregar = numericAmount >= 10 && numericAmount <= balance
@@ -125,7 +140,7 @@ export default function CarregarScreen() {
 
   const handleTabChange = (t: Tab) => {
     setTab(t)
-    setRawAmount('10000')
+    setRawAmount('')
     setPinHash(null)
     setApiError(null)
     setDescarregarResult(null)
@@ -264,10 +279,12 @@ export default function CarregarScreen() {
             <View style={s.amountRow}>
               <Text style={s.amountCurrency}>R$</Text>
               <TextInput
-                value={formatBRL(rawAmount)}
+                value={rawAmount ? formatBRL(rawAmount) : ''}
                 onChangeText={handleRawInput}
                 keyboardType="numeric"
                 autoFocus
+                placeholder="0,00"
+                placeholderTextColor="rgba(255,255,255,0.25)"
                 style={s.amountInput}
                 selectionColor={colors.white[100]}
                 accessibilityLabel={t('carregar.amountLabel')}
@@ -384,7 +401,7 @@ export default function CarregarScreen() {
 
   // ── Confirmação (Descarregar) ──────────────────────────────────────────────
   if (step === 'confirm') {
-    const estimatedFee = parseFloat((numericAmount * CASHOUT_RATE_ESTIMATE).toFixed(2))
+    const estimatedFee = parseFloat((numericAmount * cashoutRate).toFixed(2))
     const net          = parseFloat((numericAmount - estimatedFee).toFixed(2))
     return (
       <FlowShell

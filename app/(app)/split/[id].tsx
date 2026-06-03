@@ -33,6 +33,10 @@ import { colors, spaceSkins } from '../../../tokens/colors'
 import { spacing } from '../../../tokens/spacing'
 import { typography } from '../../../tokens/typography'
 
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
+const BFF_URL      = SUPABASE_URL + '/functions/v1'
+const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function relativeTime(iso: string, t: ReturnType<typeof useTranslation>['t']): string {
@@ -72,6 +76,8 @@ export default function SplitDetailScreen() {
   const [showLaunchSheet, setShowLaunchSheet] = useState(false)
   const [showExtend, setShowExtend]           = useState(false)
   const [extendDays, setExtendDays]           = useState(7)
+  const [extending, setExtending]             = useState(false)
+  const [extendError, setExtendError]         = useState<string | null>(null)
   const [lightboxUri, setLightboxUri]         = useState<string | null>(null)
 
   // ── Loading / not found ───────────────────────────────────────────────────────
@@ -121,9 +127,33 @@ export default function SplitDetailScreen() {
     try { await Share.share({ message: split.inviteDeepLink, title: split.name }) } catch { /* ignore */ }
   }
 
-  function handleExtendConfirm() {
-    // TODO: chamar split-extend Edge Function quando implementado
-    setShowExtend(false)
+  async function handleExtendConfirm() {
+    if (!token || !split || extending) return
+    setExtending(true)
+    setExtendError(null)
+    try {
+      const res = await fetch(`${BFF_URL}/split-extend`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: ANON_KEY,
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ split_id: split.id, days: extendDays }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        setExtendError(body?.message ?? t('split.detalhe.extendError'))
+        return
+      }
+      setShowExtend(false)
+      setExtendError(null)
+      fetchSplit(split.id, token)
+    } catch {
+      setExtendError(t('split.detalhe.extendError'))
+    } finally {
+      setExtending(false)
+    }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -371,6 +401,7 @@ export default function SplitDetailScreen() {
                 onPress={() => setExtendDays(d => Math.max(1, d - 1))}
                 style={styles.stepBtn}
                 activeOpacity={0.7}
+                disabled={extending}
               >
                 <Text style={styles.stepBtnText}>−</Text>
               </TouchableOpacity>
@@ -381,13 +412,18 @@ export default function SplitDetailScreen() {
                 onPress={() => setExtendDays(d => Math.min(90, d + 1))}
                 style={styles.stepBtn}
                 activeOpacity={0.7}
+                disabled={extending}
               >
                 <Text style={styles.stepBtnText}>+</Text>
               </TouchableOpacity>
             </View>
+            {extendError ? (
+              <Text style={styles.extendErrorText}>{extendError}</Text>
+            ) : null}
             <PrimaryButton
-              label="Confirmar"
+              label={t('split.detalhe.extendConfirmCta')}
               onPress={handleExtendConfirm}
+              state={extending ? 'loading' : 'default'}
             />
           </Pressable>
         </Pressable>
@@ -1008,6 +1044,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: typography.fontFamily.primary,
     color: colors.white[100],
+  },
+  extendErrorText: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.state.error,
+    textAlign: 'center',
   },
   stepper: {
     flexDirection: 'row',

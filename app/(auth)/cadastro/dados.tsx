@@ -2,12 +2,11 @@
 // Spec: /specs/06_modules/onboarding.md seção 3.3
 
 import { useState } from 'react'
-import { TouchableOpacity, StyleSheet, Text, View } from 'react-native'
+import { TouchableOpacity, StyleSheet, Text } from 'react-native'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { OnboardShell } from '../../../components/core/OnboardShell'
 import { Field } from '../../../components/core/Field'
-import { AlertCard } from '../../../components/core/AlertCard'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { DatePickerField, formatDateBR } from '../../../components/shared/DatePickerField'
 import { updateDraft } from '../../../store/signup-draft'
@@ -39,8 +38,6 @@ function maxBirthDate(): Date {
   return d
 }
 
-const MOCK_DUPLICATE_CPF = '11111111111'
-
 export default function DadosScreen() {
   const { t } = useTranslation()
 
@@ -65,15 +62,12 @@ export default function DadosScreen() {
     phone: phone && phone.replace(/\D/g,'').length < 11 ? t('auth.onboarding.dados.phoneError') : null,
   }
 
-  const isDuplicate = cpfValid && cpfDigits === MOCK_DUPLICATE_CPF
-
   const isReady =
     name.trim().split(/\s+/).length >= 2 &&
     cpfValid &&
     birthDate !== null &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) &&
-    phone.replace(/\D/g,'').length === 11 &&
-    !isDuplicate
+    phone.replace(/\D/g,'').length === 11
 
   const handleNext = () => {
     updateDraft({ name, cpf, birth, email, phone })
@@ -118,17 +112,6 @@ export default function DadosScreen() {
         error={touched.cpf ? errors.cpf : null}
       />
 
-      {isDuplicate && (
-        <View style={styles.dupGap}>
-          <AlertCard
-            tone="warning"
-            text={t('auth.onboarding.dados.cpfDuplicate')}
-            cta={t('auth.onboarding.dados.cpfDuplicateCta')}
-            onPress={() => router.replace('/(auth)/recuperar/seguranca')}
-          />
-        </View>
-      )}
-
       <DatePickerField
         label={t('auth.onboarding.dados.birth')}
         value={birthDate}
@@ -161,9 +144,4 @@ export default function DadosScreen() {
   )
 }
 
-const styles = StyleSheet.create({
-  dupGap: {
-    marginTop: -10,
-    marginBottom: 18,
-  },
-})
+const styles = StyleSheet.create({})

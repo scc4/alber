@@ -14,15 +14,12 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
+import { useRecoveryStore } from '../../../store/recovery.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 
 type Channel = 'sms' | 'email' | null
-
-// Mock: dados mascarados do usuário
-const MOCK_SMS   = '(**) *****-3421'
-const MOCK_EMAIL = 'ma***@gm***.com'
 
 function ForgotShell({
   step, title, subtitle, onBack, children, footer,
@@ -57,11 +54,17 @@ function ForgotShell({
 }
 
 export default function CodigoScreen() {
-  const { t } = useTranslation()
+  const { t }          = useTranslation()
+  const maskedPhone    = useRecoveryStore(s => s.maskedPhone)
+  const maskedEmail    = useRecoveryStore(s => s.maskedEmail)
   const [channel, setChannel] = useState<Channel>(null)
   const [code, setCode] = useState(['','','','','',''])
   const [resendIn, setResendIn] = useState(60)
   const inputRefs = useRef<(TextInput | null)[]>([])
+
+  // Destinos reais quando disponíveis; fallback: mostrar o identificador mascarado
+  const destSms   = maskedPhone  ?? t('auth.recovery.step2Channel.contactSms')
+  const destEmail = maskedEmail  ?? t('auth.recovery.step2Channel.contactEmail')
 
   useEffect(() => {
     if (!channel) return
@@ -95,8 +98,8 @@ export default function CodigoScreen() {
       >
         <View style={s.channelList}>
           {([
-            { id: 'sms' as Channel,   icon: '📱', label: t('auth.recovery.step2Channel.sms'),   dest: MOCK_SMS },
-            { id: 'email' as Channel, icon: '✉️',  label: t('auth.recovery.step2Channel.email'), dest: MOCK_EMAIL },
+            { id: 'sms' as Channel,   icon: '📱', label: t('auth.recovery.step2Channel.sms'),   dest: destSms },
+            { id: 'email' as Channel, icon: '✉️',  label: t('auth.recovery.step2Channel.email'), dest: destEmail },
           ] as const).map(ch => (
             <TouchableOpacity
               key={ch.id!}
@@ -120,7 +123,7 @@ export default function CodigoScreen() {
   }
 
   // ─── Inserção do código ────────────────────────────────────────────────────
-  const dest = channel === 'sms' ? MOCK_SMS : MOCK_EMAIL
+  const dest = channel === 'sms' ? destSms : destEmail
   return (
     <ForgotShell
       step={2}

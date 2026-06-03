@@ -2,7 +2,7 @@
 // Spec: /specs/06_modules/receber.md
 // Fluxo: valor → identificar pagador → confirmar → PIN scrambled → segurança → sucesso
 
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -78,9 +78,45 @@ export default function ReceberScreen() {
   const [securityAnswer, setSecurityAnswer]   = useState('')
   const [securitySubmitting, setSecuritySubmitting] = useState(false)
 
+  const [recents, setRecents]               = useState<{ name: string; handle: string; initials: string }[]>([])
+  const [recentsLoading, setRecentsLoading] = useState(true)
+
   const amountNum = parseAlbers(amount)
 
   const handleClose = () => router.back()
+
+  useEffect(() => {
+    if (!token) { setRecentsLoading(false); return }
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `${BFF}/financial-atividade?tipo=in&page=0&limit=20`,
+          { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } },
+        )
+        if (!res.ok) return
+        const { data } = await res.json()
+        const seen = new Set<string>()
+        const list: { name: string; handle: string; initials: string }[] = []
+        for (const row of (data ?? []) as Array<{ type: string; counterpart: { name: string; handle: string } | null }>) {
+          if (row.type !== 'receber') continue
+          const cp = row.counterpart
+          if (!cp?.handle || seen.has(cp.handle)) continue
+          seen.add(cp.handle)
+          const initials = cp.name
+            .split(' ')
+            .map((w: string) => w[0] ?? '')
+            .join('')
+            .slice(0, 2)
+            .toUpperCase()
+          list.push({ name: cp.name, handle: cp.handle, initials })
+          if (list.length >= 5) break
+        }
+        setRecents(list)
+      } catch { /* mantém lista vazia */ } finally {
+        setRecentsLoading(false)
+      }
+    })()
+  }, [token])
 
   // ─── Busca real de usuário + perguntas de segurança ──────────────────────────
 
@@ -260,8 +296,33 @@ export default function ReceberScreen() {
             keyboardShouldPersistTaps="handled"
           >
             <Text style={[s.eyebrow, s.recentLabel]}>{t('receber.recentLabel')}</Text>
-            {/* Recentes: histórico real será implementado em sprint futuro */}
-            <Text style={s.emptyRecentsHint}>Nenhuma transação recente</Text>
+            {recentsLoading ? (
+              <ActivityIndicator
+                color="rgba(255,255,255,0.3)"
+                size="small"
+                style={{ marginVertical: spacing.md }}
+              />
+            ) : recents.length === 0 ? (
+              <Text style={s.emptyRecentsHint}>{t('receber.recentEmpty')}</Text>
+            ) : (
+              recents.map(p => (
+                <Pressable
+                  key={p.handle}
+                  style={s.recentRow}
+                  onPress={() => { setIdentifier(p.handle); setNotFound(false); setApiError(null) }}
+                  accessibilityRole="button"
+                  accessibilityLabel={p.name}
+                >
+                  <View style={s.recentAvatar}>
+                    <Text style={s.recentAvatarText}>{p.initials}</Text>
+                  </View>
+                  <View style={s.recentInfo}>
+                    <Text style={s.recentName}>{p.name}</Text>
+                    <Text style={s.recentHandle}>{p.handle}</Text>
+                  </View>
+                </Pressable>
+              ))
+            )}
           </ScrollView>
 
           <View style={s.spacer} />
@@ -732,6 +793,41 @@ const s = StyleSheet.create({
     paddingVertical: spacing.md,
     borderTopWidth: 0.5,
     borderTopColor: 'rgba(255,255,255,0.07)',
+  },
+  recentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.sm + 2,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.07)',
+  },
+  recentAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  recentAvatarText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+  },
+  recentInfo: { flex: 1 },
+  recentName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+  },
+  recentHandle: {
+    fontSize: 11.5,
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: typography.fontFamily.primary,
+    marginTop: 1,
   },
 
   // Payer card

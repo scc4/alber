@@ -169,7 +169,9 @@
         "title": "Como prefere receber o código?",
         "subtitle": "Enviaremos um código de 6 dígitos para confirmar.",
         "sms": "SMS",
-        "email": "E-mail"
+        "email": "E-mail",
+        "contactSms": "Telefone cadastrado",
+        "contactEmail": "E-mail cadastrado"
       },
       "step2Code": {
         "title": "Insira o código",
@@ -296,6 +298,7 @@
     "identifierLabel": "CPF, @HANDLE OU TELEFONE",
     "identifierPlaceholder": "@handle, CPF ou telefone",
     "recentLabel": "RECENTES",
+    "recentEmpty": "Nenhuma transação recente",
     "notFound": "Usuário não encontrado.",
     "searchCta": "Buscar",
     "searching": "Buscando…",
@@ -460,6 +463,8 @@
       "participantsTitle": "Participantes",
       "resendLink": "Reenviar link",
       "extendDeadline": "Estender prazo",
+      "extendConfirmCta": "Confirmar",
+      "extendError": "Erro ao estender prazo. Tente novamente.",
       "closeSplitVariable": "Fechar split variável",
       "closeSplitFixed": "Encerrar split",
       "closedBanner": "Split encerrado",
@@ -784,7 +789,7 @@
       "birth": "Data de nascimento",
       "email": "E-mail",
       "phone": "Telefone",
-      "address": "Endereço",
+      "address": "Endereço (não armazenado por segurança)",
       "readOnly": "Somente leitura. Para atualizar, entre em contato com o suporte.",
       "loading": "Carregando dados...",
       "errorLoad": "Erro ao carregar dados cadastrais",

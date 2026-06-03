@@ -53,6 +53,7 @@ export default function GerenciarScreen() {
   const lounge = getLoungeById(id)
 
   const token     = useAuthStore(s => s.token)
+  const user      = useAuthStore(s => s.user)
 
   const [tab, setTab]         = useState<Tab>('overview')
   const [msgText, setMsgText] = useState('')
@@ -315,7 +316,7 @@ export default function GerenciarScreen() {
           </View>
           <View style={styles.memberList}>
             {lounge.members.map((member, i) => {
-              const isMe = member.id === 'user-self'
+              const isMe = member.id === user?.id
               const canManage = !isMe && member.role !== 'owner'
               return (
                 <View key={member.id} style={[styles.memberRow, i > 0 && styles.memberRowBorder]}>

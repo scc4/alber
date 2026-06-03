@@ -4,6 +4,7 @@
 
 import { useState } from 'react'
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -18,6 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../../store/auth.store'
 import { useLoungeStore } from '../../../store/lounge.store'
+import { pickFromGallery, uploadImage } from '../../../services/storage.service'
 import { Header } from '../../../components/core/Header'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
@@ -49,7 +51,8 @@ export default function LoungeCreateScreen() {
   const [desc, setDesc]             = useState('')
   const [visibility, setVisibility] = useState<Visibility>('public')
   const [accent, setAccent]         = useState(PALETTE[0])
-  const [creating, setCreating]     = useState(false)
+  const [imageUri, setImageUri]       = useState<string | null>(null)
+  const [creating, setCreating]       = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
   const isOwner = hasActiveLoungeAsOwner()
@@ -61,12 +64,15 @@ export default function LoungeCreateScreen() {
     setCreating(true)
     setCreateError(null)
     try {
+      const uploadedUrl = imageUri
+        ? await uploadImage(imageUri, 'lounge-images', `${userId}/${Date.now()}`, token)
+        : null
       const res = await createLounge({
         name:        name.trim(),
         description: desc.trim(),
         visibility,
         accent,
-        imageUri:    null,
+        imageUri:    uploadedUrl,
       }, token)
       await fetchLounge(res.space_id, userId, token)
       router.replace(`/(app)/lounge/${res.space_id}`)
@@ -271,8 +277,16 @@ export default function LoungeCreateScreen() {
           <TouchableOpacity
             style={styles.coverUpload}
             activeOpacity={0.7}
+            onPress={async () => {
+              const uri = await pickFromGallery()
+              if (uri) setImageUri(uri)
+            }}
           >
-            <Text style={styles.coverUploadText}>{t('lounge.criar.coverHint')}</Text>
+            {imageUri ? (
+              <Image source={{ uri: imageUri }} style={styles.coverPreview} resizeMode="cover" />
+            ) : (
+              <Text style={styles.coverUploadText}>{t('lounge.criar.coverHint')}</Text>
+            )}
           </TouchableOpacity>
         </View>
 
@@ -504,6 +518,11 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
+  },
+  coverPreview: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 10,
   },
 
   // Hint

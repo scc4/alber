@@ -603,6 +603,7 @@
       "sendCta": "Enviar para todos",
       "customizeSection": "COR DE ACENTO",
       "bgLabel": "IMAGEM DE FUNDO",
+      "bgUploadCta": "Toque para enviar imagem",
       "bgHint": "JPG ou PNG · até 4MB · 1080×1920",
       "contrastOk": "✓ Contraste suficiente. Shell fixa preservada.",
       "saveCta": "Salvar customização",

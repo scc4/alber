@@ -113,7 +113,7 @@ interface LoungeState {
   promoteMember:  (loungeId: string, memberId: string) => void
   removeMember:   (loungeId: string, memberId: string) => void
   sendMessage:    (loungeId: string, content: string, authorName: string, authorHandle: string, authorInitials: string) => void
-  updateVisual:   (loungeId: string, accent: string) => void
+  updateVisual:   (loungeId: string, accent: string, imageUri?: string | null) => void
   cancelEvent:    (eventId: string) => void
 }
 
@@ -347,10 +347,12 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     }))
   },
 
-  updateVisual: (loungeId, accent) => {
+  updateVisual: (loungeId, accent, imageUri) => {
     set(s => ({
       myLounges: s.myLounges.map(l =>
-        l.id === loungeId ? { ...l, accent } : l
+        l.id === loungeId
+          ? { ...l, accent, ...(imageUri !== undefined ? { imageUri } : {}) }
+          : l
       ),
     }))
   },

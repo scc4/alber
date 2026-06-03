@@ -4,6 +4,7 @@
 
 import { useState } from 'react'
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -17,7 +18,9 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useLoungeStore } from '../../../../store/lounge.store'
+import { useAuthStore } from '../../../../store/auth.store'
 import type { LoungeEvent, EventBatch } from '../../../../components/lounge/EventCard'
+import { pickFromGallery, uploadImage } from '../../../../services/storage.service'
 import { Header } from '../../../../components/core/Header'
 import { Eyebrow } from '../../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
@@ -62,12 +65,15 @@ export default function CriarEventoScreen() {
 
   const getLoungeById = useLoungeStore(s => s.getLoungeById)
   const createEvent   = useLoungeStore(s => s.createEvent)
+  const token         = useAuthStore(s => s.token)
+  const userId        = useAuthStore(s => s.user?.id ?? '')
 
   const lounge = getLoungeById(id)
 
   // ── Form state ────────────────────────────────────────────────────────────────
 
   const [step, setStep]               = useState<Step>(1)
+  const [eventImageUri, setEventImageUri] = useState<string | null>(null)
   const [name, setName]               = useState('')
   const [desc, setDesc]               = useState('')
   const [dateObj, setDateObj]         = useState<Date | null>(null)
@@ -112,8 +118,12 @@ export default function CriarEventoScreen() {
 
   // ── Publish ───────────────────────────────────────────────────────────────────
 
-  function handlePublish() {
+  async function handlePublish() {
     if (!lounge) return
+
+    const uploadedImageUrl = (eventImageUri && token && userId)
+      ? await uploadImage(eventImageUri, 'event-images', `${lounge.id}/${userId}/${Date.now()}`, token)
+      : null
 
     const eventBatches: EventBatch[] = eventType === 'paid'
       ? batches.map((b, i) => ({
@@ -135,7 +145,7 @@ export default function CriarEventoScreen() {
       loungeId:       lounge.id,
       name:           name.trim(),
       description:    desc.trim(),
-      imageUri:       null,
+      imageUri:       uploadedImageUrl,
       date:           `${date}${time ? ` · ${time}` : ''}`,
       visibility,
       isPaid:         eventType === 'paid',
@@ -297,8 +307,19 @@ export default function CriarEventoScreen() {
             {/* Image */}
             <View style={styles.fieldGap}>
               <Eyebrow>{t('lounge.criarEvento.imageLabel')}</Eyebrow>
-              <TouchableOpacity style={styles.imageUpload} activeOpacity={0.7}>
-                <Text style={styles.imageUploadText}>{t('lounge.criarEvento.imageHint')}</Text>
+              <TouchableOpacity
+                style={styles.imageUpload}
+                activeOpacity={0.7}
+                onPress={async () => {
+                  const uri = await pickFromGallery()
+                  if (uri) setEventImageUri(uri)
+                }}
+              >
+                {eventImageUri ? (
+                  <Image source={{ uri: eventImageUri }} style={styles.eventImagePreview} resizeMode="cover" />
+                ) : (
+                  <Text style={styles.imageUploadText}>{t('lounge.criarEvento.imageHint')}</Text>
+                )}
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -707,6 +728,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.45)',
+  },
+  eventImagePreview: {
+    width: '100%',
+    height: 140,
+    borderRadius: 10,
   },
 
   // Batches

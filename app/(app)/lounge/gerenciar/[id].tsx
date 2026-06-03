@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import {
   Alert,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +18,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useLoungeStore } from '../../../../store/lounge.store'
 import type { LoungeMember, LoungeRequest } from '../../../../store/lounge.store'
+import { useAuthStore } from '../../../../store/auth.store'
+import { pickFromGallery, uploadImage } from '../../../../services/storage.service'
 import { Header } from '../../../../components/core/Header'
 import { Eyebrow } from '../../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
@@ -49,9 +52,13 @@ export default function GerenciarScreen() {
 
   const lounge = getLoungeById(id)
 
+  const token     = useAuthStore(s => s.token)
+
   const [tab, setTab]         = useState<Tab>('overview')
   const [msgText, setMsgText] = useState('')
   const [accent, setAccent]   = useState(lounge?.accent ?? PALETTE[0])
+  const [bgImageUri, setBgImageUri] = useState<string | null>(null)
+  const [saving, setSaving]   = useState(false)
   const [inviteUrl, setInviteUrl] = useState<string | null>(
     lounge?.inviteToken ? `alber://lounge/${id}/convite/${lounge.inviteToken}` : null
   )
@@ -99,10 +106,18 @@ export default function GerenciarScreen() {
     setMsgText('')
   }
 
-  function handleSaveVisual() {
-    if (!lounge) return
-    updateVisual(lounge.id, accent)
-    router.back()
+  async function handleSaveVisual() {
+    if (!lounge || !token) return
+    setSaving(true)
+    try {
+      const uploadedUrl = bgImageUri
+        ? await uploadImage(bgImageUri, 'lounge-images', `${lounge.id}/bg/${Date.now()}`, token)
+        : null
+      updateVisual(lounge.id, accent, uploadedUrl)
+      router.back()
+    } finally {
+      setSaving(false)
+    }
   }
 
   function handleGenerateInvite() {
@@ -423,9 +438,22 @@ export default function GerenciarScreen() {
             <View style={styles.sectionGap}>
               <Eyebrow>{t('lounge.gerenciar.bgLabel')}</Eyebrow>
             </View>
-            <TouchableOpacity style={styles.bgUpload} activeOpacity={0.7}>
-              <Text style={styles.bgUploadTitle}>Toque para enviar imagem</Text>
-              <Text style={styles.bgUploadHint}>{t('lounge.gerenciar.bgHint')}</Text>
+            <TouchableOpacity
+              style={styles.bgUpload}
+              activeOpacity={0.7}
+              onPress={async () => {
+                const uri = await pickFromGallery()
+                if (uri) setBgImageUri(uri)
+              }}
+            >
+              {bgImageUri ? (
+                <Image source={{ uri: bgImageUri }} style={styles.bgPreview} resizeMode="cover" />
+              ) : (
+                <>
+                  <Text style={styles.bgUploadTitle}>{t('lounge.gerenciar.bgUploadCta')}</Text>
+                  <Text style={styles.bgUploadHint}>{t('lounge.gerenciar.bgHint')}</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             {/* Contrast note */}
@@ -438,6 +466,7 @@ export default function GerenciarScreen() {
             <PrimaryButton
               label={t('lounge.gerenciar.saveCta')}
               onPress={handleSaveVisual}
+              state={saving ? 'loading' : 'default'}
             />
           </View>
         </View>
@@ -798,6 +827,11 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.32)',
     marginTop: 4,
+  },
+  bgPreview: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 10,
   },
   contrastNote: {
     marginTop: 14,

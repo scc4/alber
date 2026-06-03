@@ -22,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useSplitStore } from '../../../store/split.store'
 import { useAuthStore } from '../../../store/auth.store'
+import { pickFromCamera, uploadImage } from '../../../services/storage.service'
 import { LaunchItem } from '../../../components/split/LaunchItem'
 import { ParticipantRow } from '../../../components/split/ParticipantRow'
 import { Header } from '../../../components/core/Header'
@@ -311,8 +312,18 @@ export default function SplitDetailScreen() {
           accentColor={accent}
           onClose={() => setShowLaunchSheet(false)}
           onLaunch={async (desc, value, photoUri) => {
+            let photoUrl: string | undefined
+            if (photoUri && token) {
+              const url = await uploadImage(
+                photoUri,
+                'split-photos',
+                `${currentUserId}/${split.id}/${Date.now()}`,
+                token,
+              )
+              photoUrl = url ?? undefined
+            }
             await launchItem(
-              { split_id: split.id, description: desc, value, photo_url: photoUri },
+              { split_id: split.id, description: desc, value, photo_url: photoUrl },
               token!,
             )
             setShowLaunchSheet(false)
@@ -437,7 +448,6 @@ const stat = StyleSheet.create({
 
 // ─── LaunchSheet ──────────────────────────────────────────────────────────────
 // Spec 11.1: foto opcional por item — somente câmera, 1 foto por item.
-// Integração real: instalar expo-image-picker e trocar capturePhoto() abaixo.
 
 interface LaunchSheetProps {
   splitId: string
@@ -454,22 +464,20 @@ function LaunchSheet({
 }: LaunchSheetProps) {
   const { t }                           = useTranslation()
   const insets                          = useSafeAreaInsets()
-  const [desc, setDesc]                 = useState('')
-  const [valueStr, setVal]              = useState('')
-  const [photoUri, setPhotoUri]         = useState<string | null>(null)
-  const [showCamera, setShowCamera]     = useState(false)
-  const [launching, setLaunching]       = useState(false)
+  const [desc, setDesc]         = useState('')
+  const [valueStr, setVal]      = useState('')
+  const [photoUri, setPhotoUri] = useState<string | null>(null)
+  const [launching, setLaunching] = useState(false)
 
   const v           = parseFloat(valueStr) || 0
   const wouldExceed = alreadyLaunched + v > target
   const perPerson   = v && participantCount > 0 ? Math.ceil(v / participantCount) : 0
   const canConfirm  = desc.trim().length > 0 && v > 0 && !wouldExceed
 
-  // Substituir pelo expo-image-picker quando instalado:
-  // import * as ImagePicker from 'expo-image-picker'
-  // const result = await ImagePicker.launchCameraAsync({ mediaTypes: 'Images', quality: 0.8 })
-  // if (!result.canceled) setPhotoUri(result.assets[0].uri)
-  function openCamera() { setShowCamera(true) }
+  async function openCamera() {
+    const uri = await pickFromCamera()
+    if (uri) setPhotoUri(uri)
+  }
 
   return (
     <>
@@ -579,160 +587,10 @@ function LaunchSheet({
         </Pressable>
       </Modal>
 
-      {/* Camera capture sheet — spec 11.1: somente câmera, não galeria */}
-      {showCamera && (
-        <CameraSheet
-          onClose={() => setShowCamera(false)}
-          onCapture={(uri) => { setPhotoUri(uri); setShowCamera(false) }}
-        />
-      )}
     </>
   )
 }
 
-// ─── CameraSheet ──────────────────────────────────────────────────────────────
-// UI do viewfinder. Substituir handleCapture por ImagePicker.launchCameraAsync()
-// quando expo-image-picker estiver instalado.
-
-function CameraSheet({
-  onClose,
-  onCapture,
-}: {
-  onClose: () => void
-  onCapture: (uri: string) => void
-}) {
-  const { t }    = useTranslation()
-  const insets   = useSafeAreaInsets()
-
-  // Mock: gera URI placeholder. Trocar por chamada real ao expo-image-picker.
-  function handleCapture() {
-    onCapture(`mock://photo/${Date.now()}`)
-  }
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={cam.root}>
-        {/* Top bar */}
-        <View style={[cam.topBar, { paddingTop: insets.top + 12 }]}>
-          <TouchableOpacity onPress={onClose} style={cam.closeBtn}>
-            <Text style={cam.closeBtnText}>{t('split.lancar.cameraClose')}</Text>
-          </TouchableOpacity>
-          <Text style={cam.topLabel}>{t('split.lancar.cameraHint')}</Text>
-          <View style={{ width: 36 }} />
-        </View>
-
-        {/* Viewfinder */}
-        <View style={cam.viewfinder}>
-          <View style={cam.frame}>
-            {/* Corner marks */}
-            <View style={[cam.corner, cam.cornerTL]} />
-            <View style={[cam.corner, cam.cornerTR]} />
-            <View style={[cam.corner, cam.cornerBL]} />
-            <View style={[cam.corner, cam.cornerBR]} />
-            <Text style={cam.hintText}>{t('split.lancar.cameraCapture')}</Text>
-          </View>
-        </View>
-
-        {/* Shutter */}
-        <View style={[cam.shutterArea, { paddingBottom: insets.bottom + 20 }]}>
-          <TouchableOpacity onPress={handleCapture} style={cam.shutter} activeOpacity={0.85}>
-            <View style={cam.shutterInner} />
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  )
-}
-
-const cam = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.96)',
-  },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: 12,
-  },
-  closeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeBtnText: {
-    fontSize: 13,
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-  },
-  topLabel: {
-    fontSize: 10,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.55)',
-    letterSpacing: 10 * 0.14,
-    textTransform: 'uppercase',
-  },
-  viewfinder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 32,
-  },
-  frame: {
-    width: '100%',
-    aspectRatio: 3 / 4,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-    position: 'relative',
-  },
-  corner: {
-    position: 'absolute',
-    width: 22,
-    height: 22,
-    borderColor: spaceSkins.surf.accent,
-    borderWidth: 2,
-  },
-  cornerTL: { top: 14, left: 14, borderRightWidth: 0, borderBottomWidth: 0, borderTopLeftRadius: 4 },
-  cornerTR: { top: 14, right: 14, borderLeftWidth: 0, borderBottomWidth: 0, borderTopRightRadius: 4 },
-  cornerBL: { bottom: 14, left: 14, borderRightWidth: 0, borderTopWidth: 0, borderBottomLeftRadius: 4 },
-  cornerBR: { bottom: 14, right: 14, borderLeftWidth: 0, borderTopWidth: 0, borderBottomRightRadius: 4 },
-  hintText: {
-    fontSize: 12,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.4)',
-  },
-  shutterArea: {
-    alignItems: 'center',
-    paddingTop: 20,
-  },
-  shutter: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    borderWidth: 3,
-    borderColor: 'rgba(255,255,255,0.85)',
-    padding: 5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  shutterInner: {
-    flex: 1,
-    width: '100%',
-    borderRadius: 32,
-    backgroundColor: colors.white[100],
-  },
-})
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 

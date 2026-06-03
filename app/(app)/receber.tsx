@@ -25,6 +25,7 @@ import { receber, ReceberResponse } from '../../services/financial.service'
 import { BffError } from '../../services/auth.service'
 import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
 import { formatAlbers } from '../../utils/format'
+import { maskAlbers, parseAlbers } from '../../utils/currency'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -77,7 +78,7 @@ export default function ReceberScreen() {
   const [securityAnswer, setSecurityAnswer]   = useState('')
   const [securitySubmitting, setSecuritySubmitting] = useState(false)
 
-  const amountNum = parseInt(amount || '0', 10)
+  const amountNum = parseAlbers(amount)
 
   const handleClose = () => router.back()
 
@@ -198,12 +199,11 @@ export default function ReceberScreen() {
           <View style={s.amountRow}>
             <TextInput
               value={amount}
-              onChangeText={v => setAmount(v.replace(/[^\d]/g, ''))}
+              onChangeText={v => setAmount(maskAlbers(v))}
               keyboardType="number-pad"
               autoFocus
               style={s.amountInput}
-              maxLength={6}
-              placeholder="0"
+              placeholder="0,00"
               placeholderTextColor="rgba(255,255,255,0.2)"
               accessibilityLabel={t('receber.amountLabel')}
             />

@@ -23,6 +23,8 @@ import { Eyebrow } from '../../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
 import { DatePickerField, formatDateBR } from '../../../../components/shared/DatePickerField'
 import { TimePickerField, formatTimeBR } from '../../../../components/shared/TimePickerField'
+import { formatAlbers, formatCurrency } from '../../../../utils/format'
+import { maskBRL, parseBRL } from '../../../../utils/currency'
 import { colors } from '../../../../tokens/colors'
 import { spacing } from '../../../../tokens/spacing'
 import { typography } from '../../../../tokens/typography'
@@ -119,8 +121,8 @@ export default function CriarEventoScreen() {
           name:        b.name,
           batchNumber: i + 1,
           batchType:   b.until ? 'date' : 'quantity',
-          priceBrl:    parseFloat(b.priceR) || 0,
-          priceAlbers: parseFloat(b.priceR) || 0,
+          priceBrl:    parseBRL(b.priceR),
+          priceAlbers: parseBRL(b.priceR),
           capacity:    parseInt(b.qty) || 0,
           sold:        0,
           validUntil:  b.until || null,
@@ -385,10 +387,10 @@ export default function CriarEventoScreen() {
                             <TextInput
                               style={styles.batchInput}
                               value={batch.priceR}
-                              onChangeText={v => updateBatch(i, 'priceR', v.replace(/[^\d.]/g, ''))}
-                              placeholder="0"
+                              onChangeText={v => updateBatch(i, 'priceR', maskBRL(v))}
+                              placeholder="R$ 0,00"
                               placeholderTextColor="rgba(255,255,255,0.25)"
-                              keyboardType="decimal-pad"
+                              keyboardType="number-pad"
                             />
                           </View>
                           <View style={styles.flex}>
@@ -416,9 +418,9 @@ export default function CriarEventoScreen() {
                         </View>
 
                         {/* Albers equivalent */}
-                        {albers > 0 && (
+                        {parseBRL(batch.priceR) > 0 && (
                           <Text style={styles.batchAlbers}>
-                            {t('lounge.criarEvento.batchAlbers', { n: albers })}
+                            {t('lounge.criarEvento.batchAlbers', { n: formatAlbers(parseBRL(batch.priceR)) })}
                           </Text>
                         )}
                       </View>
@@ -545,8 +547,8 @@ export default function CriarEventoScreen() {
                       </Text>
                     </View>
                     <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={styles.batchSummaryPrice}>{albers} A</Text>
-                      <Text style={styles.batchSummarySub}>R$ {b.priceR || '0'}</Text>
+                      <Text style={styles.batchSummaryPrice}>{formatAlbers(parseBRL(b.priceR))} A</Text>
+                      <Text style={styles.batchSummarySub}>{b.priceR || 'R$ 0,00'}</Text>
                     </View>
                   </View>
                 )

@@ -23,6 +23,7 @@ import { AlberLogo } from '../../../../components/core/AlberLogo'
 import { Header } from '../../../../components/core/Header'
 import { Eyebrow } from '../../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
+import { formatAlbers, formatCurrency } from '../../../../utils/format'
 import { colors } from '../../../../tokens/colors'
 import { spacing } from '../../../../tokens/spacing'
 import { typography } from '../../../../tokens/typography'
@@ -165,7 +166,7 @@ export default function EventoScreen() {
                   label={t('lounge.evento.confirmValue')}
                   value={
                     event.isPaid && activeBatch
-                      ? `${activeBatch.priceAlbers} A (R$ ${activeBatch.priceBrl})`
+                      ? `${formatAlbers(activeBatch.priceAlbers)} A (${formatCurrency(activeBatch.priceBrl)})`
                       : t('lounge.evento.confirmFree')
                   }
                   accent={accent}
@@ -248,8 +249,8 @@ export default function EventoScreen() {
                     )}
                   </View>
                   <View style={styles.batchPriceCol}>
-                    <Text style={styles.batchPriceAlbers}>{activeBatch.priceAlbers} A</Text>
-                    <Text style={styles.batchPriceBrl}>R$ {activeBatch.priceBrl}</Text>
+                    <Text style={styles.batchPriceAlbers}>{formatAlbers(activeBatch.priceAlbers)} A</Text>
+                    <Text style={styles.batchPriceBrl}>{formatCurrency(activeBatch.priceBrl)}</Text>
                   </View>
                 </View>
 
@@ -323,8 +324,8 @@ export default function EventoScreen() {
         ) : (
           <PrimaryButton
             label={t('lounge.evento.paidCta', {
-              price: activeBatch?.priceBrl ?? 0,
-              albers: activeBatch?.priceAlbers ?? 0,
+              price: formatCurrency(activeBatch?.priceBrl ?? 0),
+              albers: formatAlbers(activeBatch?.priceAlbers ?? 0),
             })}
             onPress={() => { setPinError(null); setStep('pin') }}
           />

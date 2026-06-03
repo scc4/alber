@@ -5,6 +5,7 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { Svg, Path } from 'react-native-svg'
 import { useTranslation } from 'react-i18next'
 import { SplitItem } from '../../store/split.store'
+import { formatAlbers } from '../../utils/format'
 import { colors, spaceSkins } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -60,11 +61,11 @@ export function LaunchItem({
 
         {/* Values */}
         <View style={styles.valueCol}>
-          <Text style={styles.total}>{item.totalValue}</Text>
+          <Text style={styles.total}>{formatAlbers(item.totalValue)}</Text>
           <Text style={styles.perPerson}>
             {t('split.detalhe.eachSuffix')
-              ? `${item.perPersonValue} ${t('split.detalhe.eachSuffix')}`
-              : `${item.perPersonValue} cada`}
+              ? `${formatAlbers(item.perPersonValue)} ${t('split.detalhe.eachSuffix')}`
+              : `${formatAlbers(item.perPersonValue)} cada`}
           </Text>
         </View>
       </View>
@@ -122,7 +123,7 @@ function ReceiptPlaceholder({ value, desc }: { value: number; desc: string }) {
         ))}
         <View style={receipt.totalLine}>
           <Text style={receipt.totalLabel}>TOTAL</Text>
-          <Text style={receipt.totalValue}>{value}</Text>
+          <Text style={receipt.totalValue}>{formatAlbers(value)}</Text>
         </View>
       </View>
     </View>

@@ -17,7 +17,9 @@
       "Bash(dir C:Usersfernandoalberassets *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(npx expo *)"
+      "Bash(npx expo *)",
+      "Bash(python *)",
+      "Bash(Select-String -Pattern \"metro|babel|app\\\\.json|expo\")"
     ]
   }
 }

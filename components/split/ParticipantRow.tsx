@@ -4,6 +4,7 @@
 import { StyleSheet, Text, View } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { SplitParticipant } from '../../store/split.store'
+import { formatAlbers } from '../../utils/format'
 import { colors, spaceSkins } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -88,7 +89,7 @@ export function ParticipantRow({
         </Text>
         {status === 'accepted' && isVariable && participant.blockedAmount > 0 && (
           <Text style={styles.blocked}>
-            {t('split.blockedAmount', { amount: participant.blockedAmount })}
+            {t('split.blockedAmount', { amount: formatAlbers(participant.blockedAmount) })}
           </Text>
         )}
       </View>

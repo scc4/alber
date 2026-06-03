@@ -6,6 +6,7 @@ import React, { useEffect, useRef } from 'react'
 import { Animated, Pressable, StyleSheet, Text, View } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { Eyebrow } from '../shared/Eyebrow'
+import { formatAlbers } from '../../utils/format'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -70,7 +71,7 @@ export function BalanceBlock({
   }
 
   const isEmpty = balance === 0
-  const displayValue = hidden ? '••••' : String(balance)
+  const displayValue = hidden ? '••••' : formatAlbers(balance)
 
   return (
     <View style={styles.root}>

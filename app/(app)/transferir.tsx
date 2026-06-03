@@ -27,6 +27,7 @@ import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { transferir, TransferirResponse } from '../../services/financial.service'
 import { formatAlbers } from '../../utils/format'
+import { maskAlbers } from '../../utils/currency'
 import { BffError } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -362,7 +363,7 @@ interface NumpadProps {
 function NumpadValueScreen({ recipient, balance, apiError, onSwap, onClose, closeLabel, onContinue, t }: NumpadProps) {
   const insets = useSafeAreaInsets()
   const [digits, setDigits] = useState('')
-  const value = parseInt(digits || '0', 10)
+  const value = parseInt(digits || '0', 10) / 100
   const tooMuch = value > balance
   const valid = value >= 1 && !tooMuch
 
@@ -372,7 +373,7 @@ function NumpadValueScreen({ recipient, balance, apiError, onSwap, onClose, clos
     } else {
       setDigits(d => {
         const next = (d + k).replace(/^0+/, '')
-        return next.length > 5 ? d : next
+        return next.length > 7 ? d : next
       })
     }
   }
@@ -420,7 +421,7 @@ function NumpadValueScreen({ recipient, balance, apiError, onSwap, onClose, clos
       <View style={s.amountCenter}>
         <View style={s.amountRow}>
           <Text style={[s.numpadAmount, tooMuch && s.numpadAmountError]}>
-            {digits || '0'}
+            {digits ? maskAlbers(digits) : '0,00'}
           </Text>
           <Text style={s.amountUnit}>{t('transferir.amountUnit')}</Text>
         </View>

@@ -22,6 +22,8 @@ import { useSplitStore, SplitType, LinkValidity } from '../../../store/split.sto
 import { useAuthStore } from '../../../store/auth.store'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
+import { formatAlbers } from '../../../utils/format'
+import { maskAlbers, parseAlbers } from '../../../utils/currency'
 import { colors, spaceSkins } from '../../../tokens/colors'
 import { spacing } from '../../../tokens/spacing'
 import { typography } from '../../../tokens/typography'
@@ -54,7 +56,7 @@ export default function SplitCriarScreen() {
   const { draft, updateDraft, resetDraft, createSplit, setActiveSplitId } = useSplitStore()
 
   const [step, setStep]                     = useState<Step>(1)
-  const [valueStr, setValueStr]             = useState(draft.totalValue > 0 ? String(draft.totalValue) : '')
+  const [valueStr, setValueStr]             = useState('')
   const [customDays, setCustomDays]         = useState(7)
   const [createdId, setCreatedId]           = useState<string | null>(null)
   const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null)
@@ -72,7 +74,7 @@ export default function SplitCriarScreen() {
   // ── Computed ─────────────────────────────────────────────────────────────────
 
   const isFixed     = draft.type === 'fixed'
-  const parsedValue = parseInt(valueStr, 10) || 0
+  const parsedValue = parseAlbers(valueStr)
   const perPerson   = draft.participantCount > 0
     ? Math.ceil(parsedValue / draft.participantCount)
     : 0
@@ -228,9 +230,9 @@ export default function SplitCriarScreen() {
               <TextInput
                 style={styles.bigInput}
                 value={valueStr}
-                onChangeText={v => setValueStr(v.replace(/[^\d]/g, ''))}
-                keyboardType="numeric"
-                placeholder="0"
+                onChangeText={v => setValueStr(maskAlbers(v))}
+                keyboardType="number-pad"
+                placeholder="0,00"
                 placeholderTextColor="rgba(255,255,255,0.2)"
                 autoFocus
               />
@@ -266,7 +268,7 @@ export default function SplitCriarScreen() {
                   {t(isFixed ? 'split.criar.eachPaysLabel' : 'split.criar.eachBlocksLabel')}
                 </Text>
                 <View style={styles.previewValue}>
-                  <Text style={styles.previewNumber}>{perPerson}</Text>
+                  <Text style={styles.previewNumber}>{formatAlbers(perPerson)}</Text>
                   <Text style={styles.previewUnit}> {t('split.criar.amountUnit')}</Text>
                 </View>
                 {!isFixed && (
@@ -358,11 +360,11 @@ export default function SplitCriarScreen() {
   const shareSummary = createdId
     ? isFixed
       ? t('split.criar.shareSummaryFixed', {
-          perPerson,
+          perPerson: formatAlbers(perPerson),
           count: draft.participantCount,
         })
       : t('split.criar.shareSummaryVariable', {
-          blockPer: perPerson,
+          blockPer: formatAlbers(perPerson),
           count: draft.participantCount,
         })
     : ''

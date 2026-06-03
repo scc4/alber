@@ -27,6 +27,7 @@ import { ParticipantRow } from '../../../components/split/ParticipantRow'
 import { Header } from '../../../components/core/Header'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
+import { formatAlbers } from '../../../utils/format'
 import { colors, spaceSkins } from '../../../tokens/colors'
 import { spacing } from '../../../tokens/spacing'
 import { typography } from '../../../tokens/typography'
@@ -186,15 +187,15 @@ export default function SplitDetailScreen() {
               <View>
                 <View style={styles.myShareValueRow}>
                   <Text style={[styles.myShareNumber, { color: accent }]}>
-                    {myShare.toFixed(0)}
+                    {formatAlbers(myShare)}
                   </Text>
                   <Text style={styles.myShareOf}>
-                    {' '}{t('split.detalhe.of')} {myBlocked} {t('split.detalhe.blockedSuffix')}
+                    {' '}{t('split.detalhe.of')} {formatAlbers(myBlocked)} {t('split.detalhe.blockedSuffix')}
                   </Text>
                 </View>
               </View>
               <Text style={styles.myShareRemaining}>
-                {t('split.detalhe.remainingBudget', { value: remaining })}
+                {t('split.detalhe.remainingBudget', { value: formatAlbers(remaining) })}
               </Text>
             </View>
             <View style={styles.progressTrack}>
@@ -391,7 +392,7 @@ function StatBox({ label, value, unit }: { label: string; value: number; unit: s
     <View style={stat.box}>
       <Text style={stat.label}>{label}</Text>
       <View style={stat.valueRow}>
-        <Text style={stat.value}>{value}</Text>
+        <Text style={stat.value}>{formatAlbers(value)}</Text>
         <Text style={stat.unit}>{unit}</Text>
       </View>
     </View>

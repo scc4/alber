@@ -5,6 +5,15 @@
 import { create } from 'zustand'
 import * as authService from '../services/auth.service'
 
+function isJwtExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]))
+    return typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)
+  } catch {
+    return true
+  }
+}
+
 export type KycStatus     = 'pending' | 'submitted' | 'approved' | 'rejected'
 export type AccountStatus = 'active' | 'evaluation' | 'blocked'
 
@@ -52,7 +61,11 @@ export const useAuthStore = create<AuthState>((set) => ({
         authService.getStoredUser(),
       ])
 
-      if (!token) return
+      // Token ausente ou expirado — limpa SecureStore e inicia sem sessão
+      if (!token || isJwtExpired(token)) {
+        await authService.logout()
+        return
+      }
 
       if (storedUser) {
         set({ token, isAuthenticated: true, user: storedUser as unknown as AuthUser })
@@ -81,8 +94,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           accountStatus:    profile.account_status as AccountStatus,
         })
       } else {
-        // Token expirado ou rede indisponível — mantém autenticado sem user
-        // O app funciona, mas o nome fica em branco até próximo login
+        // Rede indisponível (token válido localmente) — mantém autenticado sem user completo
         set({ token, isAuthenticated: true })
       }
     } catch {

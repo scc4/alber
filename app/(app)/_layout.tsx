@@ -37,7 +37,7 @@ export default function AppLayout() {
   // Auth guard (spec 01_frontend §4)
   useEffect(() => {
     if (!isLoadingSession && !isAuthenticated) {
-      router.replace('/(auth)/login')
+      router.replace('/(auth)/welcome')
     }
   }, [isAuthenticated, isLoadingSession])
 

@@ -3,6 +3,7 @@
 // Camada HTTP entre app e Edge Functions financeiras
 
 import { BffError } from './auth.service'
+import { useAuthStore } from '../store/auth.store'
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
@@ -17,9 +18,15 @@ function headers(token: string): Record<string, string> {
   }
 }
 
+function handleUnauthorized(): never {
+  useAuthStore.getState().logout().catch(() => {})
+  throw new BffError('UNAUTHORIZED', 'Sessão expirada. Faça login novamente.', 401)
+}
+
 async function get<T>(path: string, token: string): Promise<T> {
   const res  = await fetch(`${BFF}/${path}`, { method: 'GET', headers: headers(token) })
   const data = await res.json().catch(() => ({})) as Record<string, unknown>
+  if (res.status === 401) return handleUnauthorized()
   if (!res.ok) throw new BffError(String(data.code ?? 'UNKNOWN'), String(data.message ?? 'Erro'), res.status)
   return data as T
 }
@@ -27,6 +34,7 @@ async function get<T>(path: string, token: string): Promise<T> {
 async function post<T>(path: string, body: unknown, token: string): Promise<T> {
   const res  = await fetch(`${BFF}/${path}`, { method: 'POST', headers: headers(token), body: JSON.stringify(body) })
   const data = await res.json().catch(() => ({})) as Record<string, unknown>
+  if (res.status === 401) return handleUnauthorized()
   if (!res.ok) throw new BffError(String(data.code ?? 'UNKNOWN'), String(data.message ?? 'Erro'), res.status)
   return data as T
 }

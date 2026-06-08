@@ -54,16 +54,53 @@ Deno.serve(async (req: Request) => {
 
   let asaasBalance = 0
   let asaasError   = false
+  let subApiKey:  string | null = null
 
   if (userData.asaas_api_key_enc) {
     try {
-      const encSecret  = Deno.env.get('ASAAS_API_KEY')!
-      const subApiKey  = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
-      asaasBalance     = await getSubcontaBalance(subApiKey)
+      const encSecret = Deno.env.get('ASAAS_API_KEY')!
+      subApiKey       = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
+      asaasBalance    = await getSubcontaBalance(subApiKey)
     } catch (e) {
       console.error('Asaas balance fetch failed:', e)
       asaasError = true
       // Continua com saldo 0 — erro não-bloqueante para leitura
+    }
+  }
+
+  // ── Polling de KYC: sincroniza status Asaas → banco se ainda 'pending' ───────
+  // Complementa o webhook — garante que aprovações não percam notificação.
+
+  let kycStatus = userData.kyc_status as string
+
+  if (kycStatus === 'pending' && subApiKey) {
+    try {
+      const asaasBase = Deno.env.get('ASAAS_ENVIRONMENT') === 'production'
+        ? 'https://api.asaas.com/api/v3'
+        : 'https://sandbox.asaas.com/api/v3'
+      const statusRes = await fetch(`${asaasBase}/myAccount/status`, {
+        headers: { 'access_token': subApiKey },
+      })
+      if (statusRes.ok) {
+        const statusData = await statusRes.json() as { general?: string }
+        console.log('[financial-balance] Asaas account status:', statusData.general)
+        if (statusData.general === 'APPROVED') {
+          const { error: updateErr } = await supabaseAdmin
+            .from('users')
+            .update({ kyc_status: 'approved' })
+            .eq('id', userData.id)
+          if (updateErr) {
+            console.error('[financial-balance] kyc_status update failed:', updateErr)
+          } else {
+            kycStatus = 'approved'
+            console.log('[financial-balance] kyc_status atualizado para approved via polling')
+          }
+        }
+      } else {
+        console.warn('[financial-balance] GET /myAccount/status status:', statusRes.status)
+      }
+    } catch (e) {
+      console.warn('[financial-balance] Asaas status check failed (não-crítico):', e)
     }
   }
 
@@ -92,10 +129,9 @@ Deno.serve(async (req: Request) => {
     available,
     blocked,
     total,
-    currency:    'ALB',
-    // Indica ao app que o saldo pode estar desatualizado
-    stale:       asaasError,
-    kyc_status:  userData.kyc_status,
+    currency:       'ALB',
+    stale:          asaasError,
+    kyc_status:     kycStatus,
     account_status: userData.account_status,
   })
 })

@@ -5,7 +5,7 @@
 import { create } from 'zustand'
 import * as SecureStore from 'expo-secure-store'
 import * as financialService from '../services/financial.service'
-import { useAuthStore } from './auth.store'
+import { useAuthStore, KycStatus, AccountStatus } from './auth.store'
 
 const HIDDEN_PREF_KEY = 'balance_hidden_pref'
 
@@ -49,7 +49,17 @@ export const useBalanceStore = create<BalanceState>((set) => ({
 
     set({ status: 'loading' })
     try {
-      const res = await financialService.getBalance(token)
+      const res       = await financialService.getBalance(token)
+      const authStore = useAuthStore.getState()
+
+      // Propaga status de KYC e conta retornados pelo BFF (pode ter sido atualizado via polling Asaas)
+      if (res.kyc_status && res.kyc_status !== authStore.kycStatus) {
+        authStore.setKycStatus(res.kyc_status as KycStatus)
+      }
+      if (res.account_status && res.account_status !== authStore.accountStatus) {
+        authStore.setAccountStatus(res.account_status as AccountStatus)
+      }
+
       set({
         available: res.available,
         blocked:   res.blocked,

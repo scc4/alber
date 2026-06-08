@@ -222,7 +222,7 @@
       "split": "Split"
     },
     "banners": {
-      "kycPending": "Verificação pendente para carregar",
+      "kycPending": "Verificação de identidade pendente",
       "kycSubmitted": "Verificação em análise — até 24h",
       "kycRejected": "Verificação reprovada — reenvie documentos",
       "evaluation": "Conta em avaliação — limite R$ 2.000 restantes",

@@ -48,7 +48,7 @@ function resolveBanner(
       text: t('home.banners.kycRejected'),
       cta: t('home.banners.resendCta'),
       dismissible: false,
-      target: '/(auth)/cadastro/dados',
+      target: '/(app)/perfil/kyc',
     }
   }
   if (dismissed) return null
@@ -58,7 +58,7 @@ function resolveBanner(
       text: t('home.banners.kycPending'),
       cta: t('home.banners.verifyCta'),
       dismissible: true,
-      target: '/(auth)/cadastro/dados',
+      target: '/(app)/perfil/kyc',
     }
   }
   if (kycStatus === 'submitted') {

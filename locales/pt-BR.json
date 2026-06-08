@@ -272,6 +272,7 @@
     "kycBlockedTitle": "Verificação necessária",
     "kycBlockedBody": "Complete a verificação de identidade para carregar e descarregar Albers.",
     "kycBlockedCta": "Verificar agora",
+    "kycWebViewTitle": "Verificação de identidade",
     "pixNote": "Pix processado por Asaas",
     "processing": "Processando…",
     "errorInsufficient": "Saldo insuficiente.",
@@ -852,6 +853,7 @@
     },
     "kyc": {
       "title": "Verificação de identidade",
+      "webViewTitle": "Verificação de identidade",
       "pendingTitle": "Verificação pendente",
       "pendingBody": "Complete sua verificação de identidade para carregar e descarregar Albers.",
       "pendingCta": "Verificar agora",

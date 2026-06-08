@@ -3,10 +3,12 @@
 // Strings hardcoded: novos i18n keys devem ser adicionados a locales/pt-BR.json
 //   auth.kyc.onboarding.eyebrow, title, body, note, ctaVerify, ctaDone
 
-import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { useState } from 'react'
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
+import { WebViewModal } from '../../components/shared/WebViewModal'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
@@ -16,8 +18,10 @@ export default function KycScreen() {
   const { url } = useLocalSearchParams<{ url: string }>()
   const insets  = useSafeAreaInsets()
 
-  const handleVerify = async () => {
-    if (url) await Linking.openURL(url)
+  const [webViewVisible, setWebViewVisible] = useState(false)
+
+  const handleVerify = () => {
+    if (url) setWebViewVisible(true)
   }
 
   const handleDone = () => {
@@ -26,6 +30,12 @@ export default function KycScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top, paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+      <WebViewModal
+        visible={webViewVisible}
+        url={url ?? ''}
+        title="Verificação de identidade"
+        onClose={() => setWebViewVisible(false)}
+      />
 
       {/* Conteúdo central */}
       <View style={styles.content}>

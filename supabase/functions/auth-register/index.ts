@@ -180,13 +180,13 @@ Deno.serve(async (req: Request) => {
     if (existingEmail) return err('EMAIL_IN_USE', 'Este e-mail já está em uso', 409)
 
     const { data: existingHandle } = await supabaseAdmin
-      .from('users').select('id').eq('handle', `@${handleNorm}`).maybeSingle()
+      .from('users').select('id').eq('handle', handleNorm).maybeSingle()
     if (existingHandle) return err('HANDLE_TAKEN', 'Handle já em uso', 409)
 
     // ── ETAPA 2: Criar subconta no Asaas ──────────────────────────────────────
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const webhookUrl  = `${supabaseUrl}/functions/v1/webhooks/asaas-pix`
+    const webhookUrl  = `${supabaseUrl}/functions/v1/webhooks-asaas-kyc`
 
     console.log('[auth-register] asaas payload:', JSON.stringify({
       name,
@@ -282,25 +282,31 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── Buscar onboardingUrl (aguarda 15s — obrigatório conforme docs Asaas) ──
-    // A subconta recém-criada precisa de ~15s para ser provisionada antes de
-    // aceitar chamadas em /myAccount. Usar apiKey da SUBCONTA, não da conta pai.
-    try {
-      await new Promise<void>(resolve => setTimeout(resolve, 15_000))
-      const asaasBase = Deno.env.get('ASAAS_ENVIRONMENT') === 'production'
-        ? 'https://api.asaas.com/api/v3'
-        : 'https://sandbox.asaas.com/api/v3'
-      const docsRes = await fetch(`${asaasBase}/myAccount/documents`, {
-        headers: { 'access_token': asaasAccount.apiKey },
-      })
-      if (docsRes.ok) {
-        const docsData = await docsRes.json() as { onboardingUrl?: string }
-        onboardingUrl = docsData.onboardingUrl ?? null
-        console.log('[auth-register] onboardingUrl:', onboardingUrl ? 'obtido' : 'ausente na resposta')
-      } else {
-        console.warn('[auth-register] GET /myAccount/documents status:', docsRes.status)
+    // Usa apiKey da SUBCONTA (asaasAccount.apiKey), nunca da conta pai.
+    // Se apiKey for nulo (White Label não habilitado), pula a chamada.
+    if (asaasAccount.apiKey) {
+      try {
+        await new Promise<void>(resolve => setTimeout(resolve, 15_000))
+        const asaasBase = Deno.env.get('ASAAS_ENVIRONMENT') === 'production'
+          ? 'https://api.asaas.com/api/v3'
+          : 'https://sandbox.asaas.com/api/v3'
+        console.log('[auth-register] GET /myAccount/documents com apiKey da subconta:', asaasAccount.id)
+        const docsRes = await fetch(`${asaasBase}/myAccount/documents`, {
+          headers: { 'access_token': asaasAccount.apiKey },
+        })
+        if (docsRes.ok) {
+          const docsData = await docsRes.json() as { onboardingUrl?: string }
+          onboardingUrl = docsData.onboardingUrl ?? null
+          console.log('[auth-register] onboardingUrl:', onboardingUrl ? 'obtido' : 'ausente na resposta')
+        } else {
+          const docsErr = await docsRes.json().catch(() => ({}))
+          console.warn('[auth-register] GET /myAccount/documents status:', docsRes.status, JSON.stringify(docsErr))
+        }
+      } catch (e) {
+        console.warn('[auth-register] erro ao buscar onboardingUrl (não-crítico):', e)
       }
-    } catch (e) {
-      console.warn('[auth-register] erro ao buscar onboardingUrl (não-crítico):', e)
+    } else {
+      console.warn('[auth-register] apiKey da subconta ausente — onboardingUrl não será buscado')
     }
   }
 
@@ -314,7 +320,7 @@ Deno.serve(async (req: Request) => {
     email,
     email_confirm: true,
     password: pin_hash,   // SHA-256 do PIN — usado como senha para emitir JWT
-    user_metadata: { name, handle: `@${handleNorm}` },
+    user_metadata: { name, handle: handleNorm },
   })
 
   if (authError || !authData.user) {
@@ -325,7 +331,7 @@ Deno.serve(async (req: Request) => {
     })
     await savePending({
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
-      email, cpfHash, handle: `@${handleNorm}`,
+      email, cpfHash, handle: handleNorm,
       safePayload, error: String(authError?.message ?? 'auth_create_failed'),
       pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
     })
@@ -348,7 +354,7 @@ Deno.serve(async (req: Request) => {
       cpf:               cpfHash,
       phone:             phone.replace(/\D/g, ''),
       birth_date,
-      handle:            `@${handleNorm}`,
+      handle:            handleNorm,
       pix_key:           pixKeyEnc,
       pix_key_type:      pix_key_type ?? null,
       kyc_status:        'pending',
@@ -367,7 +373,7 @@ Deno.serve(async (req: Request) => {
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
     await savePending({
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
-      email, cpfHash, handle: `@${handleNorm}`,
+      email, cpfHash, handle: handleNorm,
       safePayload, error: String(userError?.message ?? 'users_insert_failed'),
       pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
     })
@@ -401,7 +407,7 @@ Deno.serve(async (req: Request) => {
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
     await savePending({
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
-      email, cpfHash, handle: `@${handleNorm}`,
+      email, cpfHash, handle: handleNorm,
       safePayload, error: String(qError?.message ?? 'security_questions_insert_failed'),
       pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
     })
@@ -409,16 +415,25 @@ Deno.serve(async (req: Request) => {
   }
 
   // PIN bcrypt em app_metadata (não crítico — auth-login usa pin_hash como senha primária)
-  await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-    app_metadata: { pin_bcrypt: pinBcrypt },
-  }).catch(e => console.error('[auth-register] updateUserById failed (non-critical):', e))
+  try {
+    await supabaseAdmin.auth.admin.updateUserById(authUserId, {
+      app_metadata: { pin_bcrypt: pinBcrypt },
+    })
+  } catch (e) {
+    console.error('[auth-register] updateUserById failed (non-critical):', e)
+  }
 
   // Log de auditoria (não crítico)
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    userId,
-    event_type: 'register',
-    metadata:   { handle: `@${handleNorm}`, asaas_account_id: asaasAccountId },
-  }).catch(e => console.error('[auth-register] audit_log failed (non-critical):', e))
+  try {
+    const { error: auditError } = await supabaseAdmin.from('audit_logs').insert({
+      user_id:    userId,
+      event_type: 'register',
+      metadata:   { handle: handleNorm, asaas_account_id: asaasAccountId },
+    })
+    if (auditError) console.error('[auth-register] audit_log failed (non-critical):', auditError)
+  } catch (e) {
+    console.error('[auth-register] audit_log failed (non-critical):', e)
+  }
 
   // ── ETAPA 6: Login e retorno do JWT ─────────────────────────────────────────
 
@@ -450,11 +465,15 @@ Deno.serve(async (req: Request) => {
   // ── ETAPA 7: Resolver pending se veio de retomada ────────────────────────────
 
   if (pendingReg) {
-    await supabaseAdmin
-      .from('pending_registrations')
-      .update({ status: 'resolved', resolved_at: new Date().toISOString() })
-      .eq('id', pendingReg.id)
-      .catch(e => console.error('[auth-register] resolve pending failed (non-critical):', e))
+    try {
+      const { error: resolveError } = await supabaseAdmin
+        .from('pending_registrations')
+        .update({ status: 'resolved', resolved_at: new Date().toISOString() })
+        .eq('id', pendingReg.id)
+      if (resolveError) console.error('[auth-register] resolve pending failed (non-critical):', resolveError)
+    } catch (e) {
+      console.error('[auth-register] resolve pending failed (non-critical):', e)
+    }
   }
 
   return json(

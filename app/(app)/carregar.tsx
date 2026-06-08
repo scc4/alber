@@ -32,7 +32,8 @@ import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { carregar, CarregarResponse, descarregar, DescarregarResponse } from '../../services/financial.service'
 import { formatAlbers, formatCurrency } from '../../utils/format'
-import { BffError } from '../../services/auth.service'
+import { BffError, fetchUserProfile } from '../../services/auth.service'
+import { WebViewModal } from '../../components/shared/WebViewModal'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -73,7 +74,7 @@ function parseBRL(digits: string): number {
 
 export default function CarregarScreen() {
   const { t } = useTranslation()
-  const { kycStatus, user, token } = useAuthStore()
+  const { kycStatus, user, token, setKycStatus } = useAuthStore()
   const { balance, fetchBalance } = useBalanceStore()
 
   const [tab, setTab]           = useState<Tab>('carregar')
@@ -89,6 +90,8 @@ export default function CarregarScreen() {
   const [carregarLoading, setCarregarLoading]     = useState(false)
   const [cashoutRate, setCashoutRate]             = useState(0.02) // fallback: 2%
   const [securityQuestions, setSecurityQuestions] = useState<SecurityQuestion[]>([])
+  const [kycWebViewVisible, setKycWebViewVisible] = useState(false)
+  const [kycWebViewUrl, setKycWebViewUrl]         = useState('')
   const pinKey = useRef(0)
 
   useEffect(() => {
@@ -222,21 +225,61 @@ export default function CarregarScreen() {
     router.back()
   }
 
+  const handleKycVerify = async () => {
+    if (!token || !user?.id) return
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/users?id=eq.${user.id}&select=onboarding_url`,
+        { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
+      )
+      if (res.ok) {
+        const rows: { onboarding_url: string | null }[] = await res.json()
+        const kycUrl = rows?.[0]?.onboarding_url
+        if (kycUrl) {
+          setKycWebViewUrl(kycUrl)
+          setKycWebViewVisible(true)
+          return
+        }
+      }
+    } catch { /* segue para fallback */ }
+    router.push('/(app)/perfil/kyc' as never)
+  }
+
+  const handleKycWebViewClose = async () => {
+    setKycWebViewVisible(false)
+    if (!token) return
+    try {
+      const profile = await fetchUserProfile(token)
+      if (profile?.kyc_status === 'approved') {
+        setKycStatus('approved')
+        setStep('value')
+      }
+    } catch { /* mantém step kyc_blocked */ }
+  }
+
   // ── KYC bloqueado ──────────────────────────────────────────────────────────
   if (step === 'kyc_blocked') {
     return (
-      <FlowShell
-        title={t('carregar.kycBlockedTitle')}
-        subtitle=""
-        onClose={() => router.back()}
-      >
-        <Text style={s.kycBody}>{t('carregar.kycBlockedBody')}</Text>
-        <View style={s.spacer} />
-        <PrimaryButton
-          label={t('carregar.kycBlockedCta')}
-          onPress={() => router.push('/(auth)/cadastro/dados' as never)}
+      <>
+        <WebViewModal
+          visible={kycWebViewVisible}
+          url={kycWebViewUrl}
+          title={t('carregar.kycWebViewTitle')}
+          onClose={handleKycWebViewClose}
         />
-      </FlowShell>
+        <FlowShell
+          title={t('carregar.kycBlockedTitle')}
+          subtitle=""
+          onClose={() => router.back()}
+        >
+          <Text style={s.kycBody}>{t('carregar.kycBlockedBody')}</Text>
+          <View style={s.spacer} />
+          <PrimaryButton
+            label={t('carregar.kycBlockedCta')}
+            onPress={handleKycVerify}
+          />
+        </FlowShell>
+      </>
     )
   }
 

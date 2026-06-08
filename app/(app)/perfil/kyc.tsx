@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -13,12 +13,15 @@ import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import * as ImagePicker from 'expo-image-picker'
 import { useAuthStore } from '../../../store/auth.store'
+import * as authService from '../../../services/auth.service'
+import { WebViewModal } from '../../../components/shared/WebViewModal'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 
-const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
-const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
+const BFF          = SUPABASE_URL + '/functions/v1'
+const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 type Step    = 'status' | 'choose_doc' | 'capture_front' | 'capture_back' | 'capture_selfie' | 'review' | 'sent'
 type DocType = 'rg' | 'cnh'
@@ -300,9 +303,12 @@ function Sent() {
 export default function KycScreen() {
   const { t }        = useTranslation()
   const token        = useAuthStore(s => s.token)
+  const user         = useAuthStore(s => s.user)
   const setKycStatus = useAuthStore(s => s.setKycStatus)
 
-  const [step, setStep]           = useState<Step>('status')
+  const [step, setStep]               = useState<Step>('status')
+  const [onboardingUrl, setOnboardingUrl] = useState<string | null>(null)
+  const [webViewVisible, setWebViewVisible] = useState(false)
   const [docType, setDocType]     = useState<DocType | null>(null)
   const [photoFront, setFront]    = useState<string | null>(null)
   const [photoBack, setBack]      = useState<string | null>(null)
@@ -311,6 +317,32 @@ export default function KycScreen() {
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const headerLabel = t('perfil.kyc.title')
+
+  useEffect(() => {
+    if (!token || !user?.id) return
+    ;(async () => {
+      try {
+        const res = await fetch(
+          `${SUPABASE_URL}/rest/v1/users?id=eq.${user.id}&select=onboarding_url`,
+          { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
+        )
+        if (!res.ok) return
+        const rows: { onboarding_url: string | null }[] = await res.json()
+        setOnboardingUrl(rows?.[0]?.onboarding_url ?? null)
+      } catch { /* silencioso — fluxo de câmera como fallback */ }
+    })()
+  }, [token, user?.id])
+
+  const handleWebViewClose = async () => {
+    setWebViewVisible(false)
+    if (!token) return
+    try {
+      const profile = await authService.fetchUserProfile(token)
+      if (profile?.kyc_status && profile.kyc_status !== 'pending') {
+        setKycStatus(profile.kyc_status as Parameters<typeof setKycStatus>[0])
+      }
+    } catch { /* mantém status atual */ }
+  }
 
   const handleBack = () => {
     switch (step) {
@@ -376,12 +408,27 @@ export default function KycScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
+      <WebViewModal
+        visible={webViewVisible}
+        url={onboardingUrl ?? ''}
+        title={t('perfil.kyc.webViewTitle')}
+        onClose={handleWebViewClose}
+      />
+
       {step !== 'sent' && (
         <Header label={headerLabel} onBack={handleBack} />
       )}
 
       {step === 'status' && (
-        <StatusCard onStartFlow={() => setStep('choose_doc')} />
+        <StatusCard
+          onStartFlow={() => {
+            if (onboardingUrl) {
+              setWebViewVisible(true)
+            } else {
+              setStep('choose_doc')
+            }
+          }}
+        />
       )}
 
       {step === 'choose_doc' && (

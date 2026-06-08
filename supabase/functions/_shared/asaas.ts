@@ -92,8 +92,10 @@ export async function createAsaasAccount(
     throw new Error(`ASAAS_ACCOUNT_CREATE_FAILED: ${JSON.stringify(res.data)}`)
   }
 
-  const d = res.data as { id: string; apiKey: string; walletId: string }
-  return { id: d.id, apiKey: d.apiKey, walletId: d.walletId }
+  console.log('[asaas] full account response:', JSON.stringify(res.data))
+  const d = res.data as Record<string, unknown>
+  const apiKey = (d.apiKey ?? d.accessToken ?? d.walletKey ?? null) as string | null
+  return { id: d.id as string, apiKey: apiKey as string, walletId: d.walletId as string }
 }
 
 // ── Recuperar subconta existente por CPF (idempotência) ──────────────────────
@@ -107,8 +109,12 @@ export async function getAsaasAccountByCpf(
     console.error('[asaas] getAsaasAccountByCpf failed:', res.status, JSON.stringify(res.data))
     return null
   }
-  const list = (res.data as { data?: { id: string; apiKey: string; walletId: string }[] }).data
-  return list?.[0] ?? null
+  console.log('[asaas] full getAsaasAccountByCpf response:', JSON.stringify(res.data))
+  const list = (res.data as { data?: Record<string, unknown>[] }).data
+  if (!list?.[0]) return null
+  const d = list[0]
+  const apiKey = (d.apiKey ?? d.accessToken ?? d.walletKey ?? null) as string | null
+  return { id: d.id as string, apiKey: apiKey as string, walletId: d.walletId as string }
 }
 
 // ── PIX QR Code (spec 04_api §4.2) ───────────────────────────────────────────

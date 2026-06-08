@@ -48,7 +48,8 @@ export interface CreateAccountInput {
   complement?: string
   province: string  // bairro
   postalCode: string
-  webhookUrl: string
+  webhookUrl: string      // URL do webhook de KYC
+  pixWebhookUrl: string   // URL do webhook de pagamentos Pix
   webhookSecret: string
   incomeValue?: number
 }
@@ -71,21 +72,37 @@ export async function createAsaasAccount(
     province:      input.province,
     postalCode:    input.postalCode,
     incomeValue:   input.incomeValue,
-    webhooks: [{
-      name:        'Alber Webhook',
-      url:         input.webhookUrl,
-      email:       'webhook@usealber.com',
-      sendType:    'SEQUENTIALLY',
-      apiVersion:  '3',
-      enabled:     true,
-      interrupted: false,
-      authToken:   input.webhookSecret,
-      events: [
-        'PAYMENT_CONFIRMED',
-        'PAYMENT_RECEIVED',
-        'PAYMENT_REFUNDED',
-      ],
-    }],
+    webhooks: [
+      {
+        name:        'Alber KYC Webhook',
+        url:         input.webhookUrl,
+        email:       'webhook@usealber.com',
+        sendType:    'SEQUENTIALLY',
+        apiVersion:  3,
+        enabled:     true,
+        interrupted: false,
+        authToken:   input.webhookSecret,
+        events: [
+          'ACCOUNT_STATUS_DOCUMENT_APPROVED',
+          'ACCOUNT_STATUS_COMMERCIAL_INFO_APPROVED',
+        ],
+      },
+      {
+        name:        'Alber Pix Webhook',
+        url:         input.pixWebhookUrl,
+        email:       'webhook@usealber.com',
+        sendType:    'SEQUENTIALLY',
+        apiVersion:  3,
+        enabled:     true,
+        interrupted: false,
+        authToken:   input.webhookSecret,
+        events: [
+          'PAYMENT_CONFIRMED',
+          'PAYMENT_RECEIVED',
+          'PAYMENT_REFUNDED',
+        ],
+      },
+    ],
   })
 
   if (!res.ok) {

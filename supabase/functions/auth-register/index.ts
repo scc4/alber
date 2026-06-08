@@ -185,8 +185,9 @@ Deno.serve(async (req: Request) => {
 
     // ── ETAPA 2: Criar subconta no Asaas ──────────────────────────────────────
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const webhookUrl  = `${supabaseUrl}/functions/v1/webhooks-asaas-kyc`
+    const supabaseUrl  = Deno.env.get('SUPABASE_URL')!
+    const webhookUrl   = `${supabaseUrl}/functions/v1/webhooks-asaas-kyc`
+    const pixWebhookUrl = `${supabaseUrl}/functions/v1/webhooks-asaas-pix`
 
     console.log('[auth-register] asaas payload:', JSON.stringify({
       name,
@@ -199,6 +200,7 @@ Deno.serve(async (req: Request) => {
       province:      address?.neighborhood ?? '',
       postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
       webhookUrl,
+      pixWebhookUrl,
     }))
 
     let asaasAccount: { id: string; apiKey: string; walletId: string }
@@ -218,6 +220,7 @@ Deno.serve(async (req: Request) => {
           postalCode:    (address?.zip_code ?? '').replace(/\D/g, ''),
           incomeValue:   1000,
           webhookUrl,
+          pixWebhookUrl,
           webhookSecret: Deno.env.get('ASAAS_WEBHOOK_SECRET')!,
         },
         encSecret,

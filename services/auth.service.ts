@@ -30,9 +30,6 @@ export class BffError extends Error {
 // ── HTTP helper ───────────────────────────────────────────────────────────────
 
 async function post<T>(path: string, body: unknown, token?: string): Promise<T> {
-  console.log('[env] SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL)
-  console.log('[env] BFF_URL:', process.env.EXPO_PUBLIC_BFF_URL)
-  console.log('[bff] url:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/auth-register`)
   const res = await fetch(`${BFF}/${path}`, {
     method: 'POST',
     headers: {

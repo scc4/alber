@@ -129,11 +129,11 @@ export async function login(
 // ── Logout ────────────────────────────────────────────────────────────────────
 
 export async function logout(): Promise<void> {
+  // SEC_QUESTIONS_KEY e SEC_ANSWERS_KEY são dados de enrollment do dispositivo
+  // necessários para o fluxo de múltipla-escolha no login — não apagar no logout
   await Promise.allSettled([
     SecureStore.deleteItemAsync(TOKEN_KEY),
     SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
-    SecureStore.deleteItemAsync(SEC_QUESTIONS_KEY),
-    SecureStore.deleteItemAsync(SEC_ANSWERS_KEY),
     SecureStore.deleteItemAsync(USER_KEY),
   ])
 }

@@ -28,7 +28,7 @@ interface RegisterRequest {
   address: AddressDTO
   handle: string
   pin_hash: string
-  security_questions: { question: string; answer_hash: string }[]
+  security_questions: { question: string; answer_hash: string; answer_text?: string }[]
   pix_key: string
   pix_key_type: 'cpf' | 'phone' | 'email' | 'random'
   terms_accepted: boolean
@@ -390,10 +390,11 @@ Deno.serve(async (req: Request) => {
 
   const questionsToInsert = await Promise.all(
     security_questions.map(async (q, i) => ({
-      user_id:     userId,
-      question:    q.question,
-      answer_hash: await bcryptHash(q.answer_hash, 6), // cost 6 — 2º fator, não senha principal
-      position:    i + 1,
+      user_id:           userId,
+      question:          q.question,
+      answer_hash:       await bcryptHash(q.answer_hash, 6), // cost 6 — 2º fator, não senha principal
+      answer_normalized: q.answer_text ?? null,              // texto puro para múltipla escolha
+      position:          i + 1,
     }))
   )
 

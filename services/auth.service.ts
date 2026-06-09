@@ -72,7 +72,7 @@ export interface RegisterInput {
   }
   handle:             string
   pin_hash:           string       // SHA-256 do PIN de 6 dígitos
-  security_questions: { question: string; answer_hash: string }[]
+  security_questions: { question: string; answer_hash: string; answer_text?: string }[]
   pix_key:            string
   pix_key_type:       'cpf' | 'phone' | 'email' | 'random'
   terms_accepted:     boolean
@@ -112,7 +112,6 @@ export interface LoginResponse {
     kyc_status:     string
     account_status: string
   }
-  security_questions?: { position: number; question: string }[]
 }
 
 export async function login(
@@ -173,11 +172,17 @@ export async function fetchUserProfile(token: string): Promise<UserProfileRespon
   } catch { return null }
 }
 
-// ── Busca textos das perguntas de segurança (sem auth) ───────────────────────
+// ── Challenge de pergunta de segurança (requer PIN correto) ──────────────────
 
-export async function fetchSecurityQuestions(
+export interface SecurityChallenge {
+  question: string
+  options:  { hash: string; display: string }[]
+}
+
+export async function fetchSecurityChallenge(
   identifier: string,
-): Promise<{ position: number; question: string }[]> {
+  pinHash: string,
+): Promise<SecurityChallenge | null> {
   try {
     const res = await fetch(`${BFF}/auth-question`, {
       method: 'POST',
@@ -186,12 +191,13 @@ export async function fetchSecurityQuestions(
         'apikey': ANON_KEY,
         'Authorization': `Bearer ${ANON_KEY}`,
       },
-      body: JSON.stringify({ identifier }),
+      body: JSON.stringify({ identifier, pin_hash: pinHash }),
     })
-    if (!res.ok) return []
-    const data = await res.json() as { questions?: { position: number; question: string }[] }
-    return data.questions ?? []
-  } catch { return [] }
+    if (!res.ok) return null
+    const data = await res.json() as { question: string; options: { hash: string; display: string }[] }
+    if (!data.question && !data.options?.length) return null
+    return { question: data.question, options: data.options ?? [] }
+  } catch { return null }
 }
 
 // ── Helpers de sessão ─────────────────────────────────────────────────────────

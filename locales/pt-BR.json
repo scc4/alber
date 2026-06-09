@@ -142,6 +142,8 @@
       "securityQuestionLabel": "PERGUNTA DE SEGURANÇA",
       "securityChooseHint": "Toque na resposta que você cadastrou.",
       "securityWrongChoice": "Essa não é a sua resposta. Tente outra.",
+      "securityLoadError": "Não foi possível carregar as opções. Verifique sua conexão.",
+      "securityRetry": "Tentar novamente",
       "securityAnswerPlaceholder": "Sua resposta",
       "securityConfirm": "Confirmar",
       "securityHint": "Use exatamente a resposta que você cadastrou.",

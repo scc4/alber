@@ -174,6 +174,7 @@ export default function PixScreen() {
         security_questions: d.security.map(q => ({
           question:    q.question,
           answer_hash: q.answerHash,
+          answer_text: q.answerText,
         })),
         pix_key:      pixType === 'cpf' ? pixKey.replace(/\D/g, '') : pixKey,
         pix_key_type: pixType,

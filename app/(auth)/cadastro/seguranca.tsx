@@ -67,8 +67,9 @@ export default function SegurancaScreen() {
     const normalized = items.map(it => normalizeSecurityAnswer(it.answer))
     const security = await Promise.all(
       normalized.map(async (ans, i) => ({
-        question: items[i].question,
+        question:   items[i].question,
         answerHash: await sha256Hex(ans),
+        answerText: ans,  // texto normalizado — armazenado no backend para múltipla escolha
       }))
     )
     updateDraft({ security, securityAnswers: normalized })

@@ -1,73 +1,149 @@
-// Retorna textos das perguntas de segurança para um identificador (cpf ou handle)
-// Não requer autenticação — textos das perguntas não são informação sensível
-// Usado no fluxo de login para mostrar a pergunta real antes da validação
+// Fase 2 do login: verifica PIN e retorna opções de múltipla escolha mascaradas.
+// Não retorna a resposta em texto — apenas sha256 hash + exibição mascarada de cada opção.
+// O hash da opção selecionada é enviado diretamente ao auth-login para validação bcrypt.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
-import { sha256hex } from '../_shared/crypto.ts'
+import { sha256hex, tryParsePairsPayload, verifyPinWithPairs, bcryptVerify } from '../_shared/crypto.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
 
+// ── Mascaramento e geração de decoys (espelhado de utils/crypto.ts) ──────────
+
+function maskAnswer(answer: string): string {
+  const n = answer.length
+  if (n <= 4)  return answer[0] + '*'.repeat(Math.max(0, n - 2)) + answer[n - 1]
+  if (n <= 8)  return answer.slice(0, 2) + '*'.repeat(n - 4) + answer.slice(n - 2)
+  return answer.slice(0, 3) + '*'.repeat(n - 6) + answer.slice(n - 3)
+}
+
+const DECOY_POOL = [
+  'rex', 'nina', 'mel', 'luna', 'bob', 'lola', 'toto', 'bidu', 'fofo', 'pingo',
+  'maria', 'ana', 'clara', 'luisa', 'sofia', 'julia', 'camila', 'rita', 'rosa', 'bianca',
+  'pedro', 'paulo', 'joao', 'jose', 'carlos', 'lucas', 'mateus', 'rafael', 'thiago', 'igor',
+  'campinas', 'santos', 'bauru', 'jundiai', 'osasco', 'taubate', 'piracicaba',
+  'brasilia', 'salvador', 'fortaleza', 'recife', 'curitiba', 'manaus',
+  'palmeiras', 'girassol', 'acacia', 'lirio', 'orquidea',
+]
+
+function generateDecoys(realAnswer: string, count: number): string[] {
+  const real = realAnswer.toLowerCase()
+  const targetLen = real.length
+  const pool = DECOY_POOL.filter(d => d !== real)
+  const nearby = pool.filter(d => Math.abs(d.length - targetLen) <= 3)
+  const source = nearby.length >= count ? nearby : pool
+  return [...source].sort(() => Math.random() - 0.5).slice(0, count)
+}
+
+// ── Handler ───────────────────────────────────────────────────────────────────
+
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
 
-  if (req.method !== 'POST') return json({ questions: [] })
+  if (req.method !== 'POST') return json({ question: '', options: [] })
 
-  let body: { identifier: string }
+  let body: { identifier: string; pin_hash: string }
   try {
     body = await req.json()
   } catch {
-    return json({ questions: [] })
+    return json({ question: '', options: [] })
   }
 
-  const { identifier } = body
-  if (!identifier || typeof identifier !== 'string') return json({ questions: [] })
+  const { identifier, pin_hash } = body
+  if (!identifier || !pin_hash) return json({ question: '', options: [] })
 
-  // Detectar tipo de identificador
+  // ── Localizar usuário ────────────────────────────────────────────────────────
+
   const cpfClean    = normalizeCpf(identifier)
   const handleClean = identifier.replace(/^@/, '').toLowerCase()
   const isHandleId  = !validateCpf(cpfClean) && /^[a-z][a-z0-9_]{2,}$/.test(handleClean)
 
-  if (!validateCpf(cpfClean) && !isHandleId) return json({ questions: [] })
+  if (!validateCpf(cpfClean) && !isHandleId) return json({ question: '', options: [] })
 
-  // Localizar user_id
   let userId: string | null = null
+  let authId: string | null = null
 
   if (isHandleId) {
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id')
+      .select('id, auth_id')
       .eq('handle', handleClean)
       .maybeSingle()
     userId = data?.id ?? null
+    authId = data?.auth_id ?? null
   } else {
     const cpfHash = await sha256hex(cpfClean)
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id')
+      .select('id, auth_id')
       .eq('cpf', cpfHash)
       .maybeSingle()
     userId = data?.id ?? null
+    authId = data?.auth_id ?? null
   }
 
-  if (!userId) return json({ questions: [] })
+  if (!userId || !authId) return json({ question: '', options: [] })
 
-  // Buscar textos das perguntas (sem answer_hash)
-  const { data: rows } = await supabaseAdmin
+  // ── Verificar PIN (sem logar falha — rate limit está no auth-login) ──────────
+
+  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(authId)
+  const pinBcrypt: string | undefined = authUser?.user?.app_metadata?.pin_bcrypt
+  const pinSha256: string | undefined = authUser?.user?.app_metadata?.pin_sha256
+
+  if (!pinBcrypt) return json({ question: '', options: [] })
+
+  let pinOk = false
+  const pairs = tryParsePairsPayload(pin_hash)
+
+  if (pairs) {
+    if (pinSha256?.length === 64) {
+      const result = await verifyPinWithPairs(pinSha256, pairs)
+      pinOk = result.ok
+    }
+  } else {
+    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  }
+
+  if (!pinOk) return json({ question: '', options: [] })
+
+  // ── Buscar pergunta e answer_normalized ──────────────────────────────────────
+
+  const { data: questions } = await supabaseAdmin
     .from('security_questions')
-    .select('position, question')
+    .select('id, position, question, answer_normalized')
     .eq('user_id', userId)
     .order('position')
 
+  if (!questions || questions.length === 0) return json({ question: '', options: [] })
+
+  // Escolhe a primeira pergunta com answer_normalized disponível
+  const row = questions.find(q => q.answer_normalized) ?? null
+  if (!row || !row.answer_normalized) return json({ question: row?.question ?? '', options: [] })
+
+  const answerNorm = (row.answer_normalized as string).toLowerCase()
+
+  // ── Gerar opções: hash + display mascarado ───────────────────────────────────
+
+  const decoys = generateDecoys(answerNorm, 4)
+  const allTexts = [answerNorm, ...decoys]
+
+  const options = await Promise.all(
+    allTexts.map(async text => ({
+      hash:    await sha256hex(text),
+      display: maskAnswer(text),
+    }))
+  )
+
+  // Embaralha para que a opção real não fique sempre na posição 0
+  const shuffled = [...options].sort(() => Math.random() - 0.5)
+
   return json({
-    questions: (rows ?? []).map(r => ({
-      position: r.position as number,
-      question: r.question as string,
-    })),
+    question: row.question as string,
+    options:  shuffled,
   })
 })

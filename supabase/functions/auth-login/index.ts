@@ -226,7 +226,7 @@ Deno.serve(async (req: Request) => {
   if (!answerOk) {
     console.error('[auth-login] FAIL:security_answer_wrong user=', user.id)
     await logAudit(user.id, 'security_question_failed', {})
-    return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    return err('WRONG_SECURITY_ANSWER', 'Resposta incorreta', 401)
   }
 
   // ── Migração legada: atualizar credenciais com hash real ─────────────────────
@@ -296,9 +296,5 @@ Deno.serve(async (req: Request) => {
       kyc_status:     user.kyc_status,
       account_status: user.account_status,
     },
-    security_questions: (questions ?? []).map(q => ({
-      position: q.position as number,
-      question: q.question as string,
-    })),
   })
 })

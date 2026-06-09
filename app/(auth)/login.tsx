@@ -25,18 +25,12 @@ import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Field } from '../../components/core/Field'
 import { useAuthStore } from '../../store/auth.store'
 import * as authService from '../../services/auth.service'
-import { sha256Hex, normalizeSecurityAnswer, legacyDevHash, maskAnswer, generateDecoys } from '../../utils/crypto'
+import { sha256Hex, normalizeSecurityAnswer, legacyDevHash } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
 
 type Phase = 'id' | 'pin' | 'security'
-
-interface SecurityOption {
-  text:   string
-  masked: string
-  isReal: boolean
-}
 
 function maskCPF(v: string) {
   v = v.replace(/\D/g, '').slice(0, 11)
@@ -55,13 +49,13 @@ export default function LoginScreen() {
   const [identifier, setIdentifier] = useState('')
   const [pinHash, setPinHash]       = useState('')
   const [pinMode, setPinMode]       = useState<'secure' | 'setup'>('secure')
-  const [question, setQuestion]     = useState('')
-  const [answer, setAnswer]           = useState('')
-  const [secOptions, setSecOptions]   = useState<SecurityOption[]>([])
-  const [secLoading, setSecLoading]   = useState(false)
+  const [challenge, setChallenge]     = useState<authService.SecurityChallenge | null>(null)
+  const [challengeLoading, setChallengeLoading] = useState(false)
+  const [challengeError, setChallengeError]     = useState(false)
   const [wrongChoice, setWrongChoice] = useState(false)
+  const [answer, setAnswer]           = useState('')  // fallback para contas sem answer_normalized
   const [isLoggingIn, setIsLoggingIn] = useState(false)
-  const [pinError, setPinError]     = useState<string | null>(null)
+  const [pinError, setPinError]       = useState<string | null>(null)
   const pinErrKey = useRef(0)
 
   const isHandle = identifier.startsWith('@')
@@ -69,33 +63,22 @@ export default function LoginScreen() {
     ? identifier.replace(/^@/, '').length >= 3
     : identifier.replace(/\D/g, '').length === 11
 
-  // Carrega pergunta do backend + respostas do SecureStore em paralelo
+  // Busca challenge do backend ao entrar na fase security
   useEffect(() => {
     if (phase !== 'security') return
-    setSecOptions([])
+    setChallenge(null)
     setWrongChoice(false)
     setAnswer('')
-    setSecLoading(true)
-    const cpfOrHandle = identifier.startsWith('@')
-      ? identifier
-      : identifier.replace(/\D/g, '')
-    Promise.all([
-      authService.fetchSecurityQuestions(cpfOrHandle),  // backend — sempre atualizado
-      authService.getSecurityAnswers(),                  // SecureStore — para múltipla escolha
-    ]).then(([backendQs, localAnswers]) => {
-      // Usa primeira pergunta do backend (mais confiável que SecureStore)
-      const q = backendQs[0]?.question ?? ''
-      setQuestion(q)
-      if (localAnswers.length > 0) {
-        const real   = localAnswers[0]
-        const decoys = generateDecoys(real, 4)
-        const all: SecurityOption[] = [
-          { text: real, masked: maskAnswer(real), isReal: true },
-          ...decoys.map(d => ({ text: d, masked: maskAnswer(d), isReal: false })),
-        ]
-        setSecOptions(all.sort(() => Math.random() - 0.5))
-      }
-    }).finally(() => setSecLoading(false))
+    setChallengeError(false)
+    setChallengeLoading(true)
+    const cpfOrHandle = identifier.startsWith('@') ? identifier : identifier.replace(/\D/g, '')
+    authService.fetchSecurityChallenge(cpfOrHandle, pinHash)
+      .then(result => {
+        if (result) setChallenge(result)
+        else setChallengeError(true)
+      })
+      .catch(() => setChallengeError(true))
+      .finally(() => setChallengeLoading(false))
   }, [phase])
 
   const handleIdentifierChange = (v: string) => {
@@ -114,24 +97,22 @@ export default function LoginScreen() {
     setTimeout(() => setPhase('security'), 200)
   }
 
-  const submitSecurityAnswer = async (normalizedAnswer: string) => {
+  // Envia o hash da opção selecionada (fornecido pelo backend no challenge)
+  const submitOptionHash = async (optionHash: string) => {
     if (isLoggingIn) return
     setIsLoggingIn(true)
+    const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
     try {
-      const answerHash       = await sha256Hex(normalizedAnswer)
-      const legacyAnswerHash = legacyDevHash(normalizedAnswer)
-      const cpfOrHandle      = isHandle ? identifier : identifier.replace(/\D/g, '')
-      await login(cpfOrHandle, pinHash, answerHash, legacyAnswerHash)
-      // Re-enroll: salva resposta digitada para que próximo login use múltipla escolha
-      // (perguntas são salvas pelo store a partir do response do auth-login)
-      if (secOptions.length === 0) {
-        authService.saveSecurityAnswers([normalizedAnswer]).catch(() => {})
-      }
+      await login(cpfOrHandle, pinHash, optionHash)
       router.replace('/(app)/')
     } catch (e: unknown) {
       setIsLoggingIn(false)
       const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
-      if (code === 'TOO_MANY_ATTEMPTS') {
+      if (code === 'WRONG_SECURITY_ANSWER') {
+        // Resposta errada — fica na tela de segurança, mostra feedback
+        setWrongChoice(true)
+        setTimeout(() => setWrongChoice(false), 1800)
+      } else if (code === 'TOO_MANY_ATTEMPTS') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
         setPhase('id')
       } else if (code === 'PIN_SETUP_REQUIRED') {
@@ -158,20 +139,29 @@ export default function LoginScreen() {
     }
   }
 
-  // Seleção de opção no novo fluxo de múltipla escolha
-  const handleOptionPress = (opt: SecurityOption) => {
-    if (isLoggingIn) return
-    if (!opt.isReal) {
-      setWrongChoice(true)
-      setTimeout(() => setWrongChoice(false), 1800)
-      return
+  // Fallback: campo de texto para contas sem answer_normalized no backend
+  const submitFromTextInput = async () => {
+    if (answer.trim().length < 2 || isLoggingIn) return
+    setIsLoggingIn(true)
+    const normalized = normalizeSecurityAnswer(answer)
+    const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
+    try {
+      const answerHash = await sha256Hex(normalized)
+      const legacyHash = legacyDevHash(normalized)
+      await login(cpfOrHandle, pinHash, answerHash, legacyHash)
+      router.replace('/(app)/')
+    } catch (e: unknown) {
+      setIsLoggingIn(false)
+      const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
+      if (code === 'WRONG_SECURITY_ANSWER' || code === 'INVALID_CREDENTIALS') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorInvalid'))
+      } else if (code === 'TOO_MANY_ATTEMPTS') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
+        setPhase('id')
+      } else {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))
+      }
     }
-    submitSecurityAnswer(opt.text)
-  }
-
-  const handleSecurityConfirm = () => {
-    if (answer.trim().length < 2) return
-    submitSecurityAnswer(normalizeSecurityAnswer(answer))
   }
 
   // ─── Fase: identifier ────────────────────────────────────────────────────
@@ -275,23 +265,35 @@ export default function LoginScreen() {
 
         <Text style={styles.secEyebrow}>{t('auth.login.securityQuestionLabel')}</Text>
 
-        {secLoading ? (
+        {challengeLoading ? (
           <ActivityIndicator color="rgba(255,255,255,0.4)" style={{ marginTop: spacing.xl * 2 }} />
-        ) : secOptions.length > 0 ? (
-          /* Múltipla escolha: SecureStore tem respostas cadastradas */
+
+        ) : challengeError ? (
+          /* Erro de rede ao buscar challenge — permite retry */
           <>
-            <Text style={styles.secQuestion}>{question}</Text>
+            <Text style={styles.secQuestion}>{t('auth.login.securityLoadError')}</Text>
+            <View style={styles.spacer} />
+            <PrimaryButton
+              label={t('auth.login.securityRetry')}
+              onPress={() => setPhase('security')}
+            />
+          </>
+
+        ) : challenge && challenge.options.length > 0 ? (
+          /* Múltipla escolha gerada pelo backend */
+          <>
+            <Text style={styles.secQuestion}>{challenge.question}</Text>
             <Text style={styles.secHint}>{t('auth.login.securityChooseHint')}</Text>
             <View style={styles.optionsList}>
-              {secOptions.map((opt, i) => (
+              {challenge.options.map((opt, i) => (
                 <TouchableOpacity
                   key={i}
                   style={[styles.optionItem, isLoggingIn && styles.optionDisabled]}
-                  onPress={() => handleOptionPress(opt)}
+                  onPress={() => submitOptionHash(opt.hash)}
                   activeOpacity={0.65}
                   disabled={isLoggingIn}
                 >
-                  <Text style={styles.optionText}>{opt.masked}</Text>
+                  <Text style={styles.optionText}>{opt.display}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -302,10 +304,11 @@ export default function LoginScreen() {
               <Text style={styles.secHint}>{t('common.verifying')}</Text>
             )}
           </>
+
         ) : (
-          /* Fallback texto: SecureStore sem dados locais (ex: novo dispositivo) */
+          /* Fallback texto: conta sem answer_normalized (registrada antes da v2) */
           <>
-            {!!question && <Text style={styles.secQuestion}>{question}</Text>}
+            {!!challenge?.question && <Text style={styles.secQuestion}>{challenge.question}</Text>}
             <TextInput
               style={styles.secInput}
               value={answer}
@@ -320,7 +323,7 @@ export default function LoginScreen() {
             <View style={styles.spacer} />
             <PrimaryButton
               label={t('auth.login.securityConfirm')}
-              onPress={handleSecurityConfirm}
+              onPress={submitFromTextInput}
               state={
                 isLoggingIn              ? 'loading'  :
                 answer.trim().length < 2 ? 'disabled' : 'default'

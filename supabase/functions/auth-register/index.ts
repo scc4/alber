@@ -393,7 +393,7 @@ Deno.serve(async (req: Request) => {
       user_id:           userId,
       question:          q.question,
       answer_hash:       await bcryptHash(q.answer_hash, 6), // cost 6 — 2º fator, não senha principal
-      answer_normalized: q.answer_text ?? null,              // texto puro para múltipla escolha
+      answer_normalized: q.answer_text ? q.answer_text.toLowerCase().trim() : null,
       position:          i + 1,
     }))
   )

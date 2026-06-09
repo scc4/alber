@@ -125,7 +125,7 @@ Deno.serve(async (req: Request) => {
   const row = questions.find(q => q.answer_normalized) ?? null
   if (!row || !row.answer_normalized) return json({ question: row?.question ?? '', options: [] })
 
-  const answerNorm = (row.answer_normalized as string).toLowerCase()
+  const answerNorm = row.answer_normalized as string
 
   // ── Gerar opções: hash + display mascarado ───────────────────────────────────
 

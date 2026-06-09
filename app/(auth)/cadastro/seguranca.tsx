@@ -64,14 +64,14 @@ export default function SegurancaScreen() {
 
   const handleNext = async () => {
     setSaving(true)
+    const normalized = items.map(it => normalizeSecurityAnswer(it.answer))
     const security = await Promise.all(
-      items.map(async it => ({
-        question: it.question,
-        // Normaliza (lowercase + sem acentos) antes do hash — spec seção 10
-        answerHash: await sha256Hex(normalizeSecurityAnswer(it.answer)),
+      normalized.map(async (ans, i) => ({
+        question: items[i].question,
+        answerHash: await sha256Hex(ans),
       }))
     )
-    updateDraft({ security })
+    updateDraft({ security, securityAnswers: normalized })
     router.push('/(auth)/cadastro/pix')
   }
 

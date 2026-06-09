@@ -85,18 +85,19 @@
         "answerPlaceholder": "Sua resposta"
       },
       "pix": {
-        "title": "Chave Pix",
-        "subtitle": "Esta é a conta que receberá seus saques do Alber. Deve estar no seu CPF.",
+        "title": "Sua chave Pix para saques",
+        "subtitle": "Esta chave será usada para transferir seus Albers de volta para sua conta bancária quando quiser sacar.",
         "cpf": "CPF",
         "phone": "Telefone",
         "email": "E-mail",
         "random": "Aleatória",
         "cpfHint": "Preenchida automaticamente. Não pode ser alterada.",
         "randomHint": "Gerada automaticamente. Você pode usar essa chave em outros bancos.",
-        "cpfLabel": "Chave (CPF)",
-        "phoneLabel": "Chave (telefone)",
-        "emailLabel": "Chave (e-mail)",
-        "randomLabel": "Chave aleatória",
+        "cpfLabel": "Chave Pix (CPF) para receber saques",
+        "phoneLabel": "Chave Pix (telefone) para receber saques",
+        "emailLabel": "Chave Pix (e-mail) para receber saques",
+        "randomLabel": "Chave Pix aleatória para receber saques",
+        "withdrawalHint": "Para carregar Albers, você vai pagar um Pix gerado pelo app. Esta chave é só para quando você quiser sacar.",
         "errorTitle": "Erro no cadastro",
         "errorCpfDuplicate": "Este CPF já possui uma conta Alber.",
         "errorHandleTaken": "Este @handle já está em uso. Volte e escolha outro.",
@@ -143,6 +144,8 @@
       "securityAnswerPlaceholder": "Sua resposta",
       "securityConfirm": "Confirmar",
       "securityHint": "Use exatamente a resposta que você cadastrou.",
+      "securityChooseHint": "Toque na resposta que você cadastrou.",
+      "securityWrongChoice": "Essa não é a sua resposta. Tente outra.",
       "errorTitle": "Erro ao entrar",
       "errorInvalid": "Credenciais inválidas. Verifique e tente novamente.",
       "errorRateLimit": "Muitas tentativas. Tente novamente em 15 minutos.",
@@ -840,11 +843,12 @@
       "questionLabel": "Pergunta {{n}}",
       "questionStatus": "✓ Cadastrada",
       "updateQuestions": "Atualizar perguntas",
-      "sectionPix": "CHAVE PIX",
+      "sectionPix": "CHAVE PIX PARA SAQUES",
+      "pixWithdrawalNote": "Esta chave é usada para transferir seus Albers de volta à sua conta bancária quando você quiser sacar.",
       "pixCurrent": "Chave atual",
       "pixChange": "Trocar chave Pix",
       "pixChanged": "Chave Pix atualizada com sucesso.",
-      "pixNewTitle": "Nova chave Pix",
+      "pixNewTitle": "Nova chave Pix para saques",
       "pixKeyType": "Tipo de chave",
       "pixKeyValue": "Chave",
       "pixKeyPlaceholder": "Digite sua chave Pix",
@@ -915,6 +919,7 @@
     "asaasBadge": "Serviços financeiros Asaas"
   },
   "common": {
-    "genericError": "Ocorreu um erro. Tente novamente."
+    "genericError": "Ocorreu um erro. Tente novamente.",
+    "verifying": "Verificando…"
   }
 }

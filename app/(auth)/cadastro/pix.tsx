@@ -13,11 +13,20 @@ import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { getDraft, clearDraft } from '../../../store/signup-draft'
 import { useAuthStore } from '../../../store/auth.store'
 import * as authService from '../../../services/auth.service'
+import { validateCPF } from '../../../utils/cpf'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 
 type PixType = 'cpf' | 'phone' | 'email' | 'random'
+
+function maskCPF(v: string) {
+  v = v.replace(/\D/g, '').slice(0, 11)
+  if (v.length > 9) return `${v.slice(0,3)}.${v.slice(3,6)}.${v.slice(6,9)}-${v.slice(9)}`
+  if (v.length > 6) return `${v.slice(0,3)}.${v.slice(3,6)}.${v.slice(6)}`
+  if (v.length > 3) return `${v.slice(0,3)}.${v.slice(3)}`
+  return v
+}
 
 function maskPhone(v: string) {
   v = v.replace(/\D/g, '').slice(0, 11)
@@ -94,7 +103,7 @@ export default function PixScreen() {
   const draft        = getDraft()
 
   const [pixType, setPixType]             = useState<PixType>('cpf')
-  const [pixKey, setPixKey]               = useState<string>(draft.cpf ?? '')
+  const [pixKey, setPixKey]               = useState<string>(maskCPF(draft.cpf ?? ''))
   const [isCreating, setIsCreating]       = useState(false)
   const [creatingStep, setCreatingStep]   = useState(0)
   const [asaasDisclosed, setAsaasDisclosed] = useState(false)
@@ -105,7 +114,7 @@ export default function PixScreen() {
   const switchType = (type: PixType) => {
     setPixType(type)
     switch (type) {
-      case 'cpf':    setPixKey(draft.cpf ?? ''); break
+      case 'cpf':    setPixKey(maskCPF(draft.cpf ?? '')); break
       case 'phone':  setPixKey(draft.phone ?? ''); break
       case 'email':  setPixKey(draft.email ?? ''); break
       case 'random': setPixKey(generateUUID()); break
@@ -128,7 +137,8 @@ export default function PixScreen() {
     return () => { if (stepTimer.current) clearInterval(stepTimer.current) }
   }, [isCreating])
 
-  const isReady = pixKey.trim().length > 0 && asaasDisclosed
+  const cpfPixValid = pixType !== 'cpf' || validateCPF(pixKey)
+  const isReady = pixKey.trim().length > 0 && asaasDisclosed && cpfPixValid
 
   const handleNext = async () => {
     if (!isReady || isCreating) return
@@ -165,7 +175,7 @@ export default function PixScreen() {
           question:    q.question,
           answer_hash: q.answerHash,
         })),
-        pix_key:      pixKey,
+        pix_key:      pixType === 'cpf' ? pixKey.replace(/\D/g, '') : pixKey,
         pix_key_type: pixType,
         terms_accepted: true,
       }
@@ -173,8 +183,8 @@ export default function PixScreen() {
       type RegisterWithKyc = authService.RegisterResponse & { onboarding_url?: string | null }
       const res = await authService.register(input) as RegisterWithKyc
 
-      // Persiste textos das perguntas para a tela de login
       await authService.saveSecurityQuestions(d.security.map(q => q.question))
+      await authService.saveSecurityAnswers(d.securityAnswers ?? [])
 
       await setSession(
         res.token,
@@ -303,6 +313,8 @@ export default function PixScreen() {
         />
       )}
 
+      <Text style={styles.withdrawalHint}>{t('auth.onboarding.pix.withdrawalHint')}</Text>
+
       {/* Declaração obrigatória Asaas — Playbook BaaS */}
       <TouchableOpacity
         style={styles.disclosureRow}
@@ -368,6 +380,14 @@ export default function PixScreen() {
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  withdrawalHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: 17,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+  },
   // Disclosure checkbox
   disclosureRow: {
     flexDirection: 'row',

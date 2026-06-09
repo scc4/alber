@@ -68,26 +68,42 @@ Deno.serve(async (req: Request) => {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
   }
 
-  // ── Validar e normalizar CPF ─────────────────────────────────────────────────
+  // ── Detectar tipo de identificador (CPF ou @handle) ─────────────────────────
 
-  const cpfClean = normalizeCpf(cpf)
-  if (!validateCpf(cpfClean)) {
-    console.error('[auth-login] FAIL:cpf_invalid raw=', cpf)
+  const cpfClean    = normalizeCpf(cpf)
+  const handleClean = cpf.replace(/^@/, '').toLowerCase()
+  const isHandleId  = !validateCpf(cpfClean) && /^[a-z][a-z0-9_]{2,}$/.test(handleClean)
+
+  if (!validateCpf(cpfClean) && !isHandleId) {
+    console.error('[auth-login] FAIL:invalid_identifier raw=', cpf)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
-  const cpfHash = await sha256hex(cpfClean)
-
   // ── Localizar usuário ────────────────────────────────────────────────────────
 
-  const { data: user } = await supabaseAdmin
-    .from('users')
-    .select('id, auth_id, name, email, handle, kyc_status, account_status')
-    .eq('cpf', cpfHash)
-    .maybeSingle()
+  let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string } | null = null
+
+  if (isHandleId) {
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status')
+      .eq('handle', handleClean)
+      .maybeSingle()
+    user = data
+    console.log('[auth-login] lookup by handle=', handleClean, 'found=', !!user)
+  } else {
+    const cpfHash = await sha256hex(cpfClean)
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status')
+      .eq('cpf', cpfHash)
+      .maybeSingle()
+    user = data
+    console.log('[auth-login] lookup by cpf found=', !!user)
+  }
 
   if (!user) {
-    console.error('[auth-login] FAIL:user_not_found cpf_len=', cpfClean.length)
+    console.error('[auth-login] FAIL:user_not_found identifier=', isHandleId ? `@${handleClean}` : `cpf[${cpfClean.length}]`)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 

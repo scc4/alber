@@ -20,6 +20,26 @@ export function legacyDevHash(input: string): string {
   return `dev_${input.split('').reduce((a, c) => a + c.charCodeAt(0), 0).toString(16)}`
 }
 
+// Pool de palavras para geração de opções-isca no fluxo de seleção de resposta
+const DECOY_POOL = [
+  'rex', 'nina', 'mel', 'luna', 'bob', 'lola', 'toto', 'bidu', 'fofo', 'pingo',
+  'maria', 'ana', 'clara', 'luisa', 'sofia', 'julia', 'camila', 'rita', 'rosa', 'bianca',
+  'pedro', 'paulo', 'joao', 'jose', 'carlos', 'lucas', 'mateus', 'rafael', 'thiago', 'igor',
+  'campinas', 'santos', 'bauru', 'jundiai', 'osasco', 'taubate', 'piracicaba',
+  'brasilia', 'salvador', 'fortaleza', 'recife', 'curitiba', 'manaus',
+  'palmeiras', 'girassol', 'acacia', 'lirio', 'orquidea',
+]
+
+// Gera `count` palavras-isca distintas da resposta real, preferindo comprimentos similares
+export function generateDecoys(realAnswer: string, count: number = 4): string[] {
+  const real = realAnswer.toLowerCase()
+  const targetLen = real.length
+  const pool = DECOY_POOL.filter(d => d !== real)
+  const nearby = pool.filter(d => Math.abs(d.length - targetLen) <= 3)
+  const source = nearby.length >= count ? nearby : pool
+  return [...source].sort(() => Math.random() - 0.5).slice(0, count)
+}
+
 // Mascara uma resposta para exibição (spec 05_security.md seção 3)
 export function maskAnswer(answer: string): string {
   const n = answer.length

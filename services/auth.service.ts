@@ -12,6 +12,7 @@ const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 export const TOKEN_KEY          = 'auth_access_token'
 export const REFRESH_TOKEN_KEY  = 'auth_refresh_token'
 export const SEC_QUESTIONS_KEY  = 'auth_sec_questions'
+export const SEC_ANSWERS_KEY    = 'auth_sec_answers'
 export const USER_KEY           = 'auth_user'
 
 // ── Erro tipado do BFF ────────────────────────────────────────────────────────
@@ -132,6 +133,7 @@ export async function logout(): Promise<void> {
     SecureStore.deleteItemAsync(TOKEN_KEY),
     SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
     SecureStore.deleteItemAsync(SEC_QUESTIONS_KEY),
+    SecureStore.deleteItemAsync(SEC_ANSWERS_KEY),
     SecureStore.deleteItemAsync(USER_KEY),
   ])
 }
@@ -191,6 +193,18 @@ export async function saveSecurityQuestions(questions: string[]): Promise<void> 
 export async function getSecurityQuestions(): Promise<string[]> {
   try {
     const raw = await SecureStore.getItemAsync(SEC_QUESTIONS_KEY)
+    return raw ? (JSON.parse(raw) as string[]) : []
+  } catch { return [] }
+}
+
+export async function saveSecurityAnswers(answers: string[]): Promise<void> {
+  try   { await SecureStore.setItemAsync(SEC_ANSWERS_KEY, JSON.stringify(answers)) }
+  catch { /* não-crítico */ }
+}
+
+export async function getSecurityAnswers(): Promise<string[]> {
+  try {
+    const raw = await SecureStore.getItemAsync(SEC_ANSWERS_KEY)
     return raw ? (JSON.parse(raw) as string[]) : []
   } catch { return [] }
 }

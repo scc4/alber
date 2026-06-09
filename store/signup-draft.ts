@@ -22,6 +22,7 @@ export interface SignupDraft {
   pinHash: string
   // Etapa 5
   security: Array<{ question: string; answerHash: string }>
+  securityAnswers: string[]   // respostas normalizadas — salvas localmente para o fluxo de seleção no login
   // Etapa 6
   pixType: 'cpf' | 'phone' | 'email' | 'random'
   pixKey: string

@@ -19,9 +19,18 @@ import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 import { sha256Hex, normalizeSecurityAnswer } from '../../../utils/crypto'
+import { validateCPF } from '../../../utils/cpf'
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
+function maskCPF(v: string) {
+  v = v.replace(/\D/g, '').slice(0, 11)
+  if (v.length > 9) return `${v.slice(0,3)}.${v.slice(3,6)}.${v.slice(6,9)}-${v.slice(9)}`
+  if (v.length > 6) return `${v.slice(0,3)}.${v.slice(3,6)}.${v.slice(6)}`
+  if (v.length > 3) return `${v.slice(0,3)}.${v.slice(3)}`
+  return v
+}
 
 type Mode =
   | 'main'
@@ -49,18 +58,19 @@ function Header({ label, onBack }: HeaderProps) {
 // ── PinStep ───────────────────────────────────────────────────────────────────
 
 interface PinStepProps {
-  eyebrow: string
-  title: string
-  error?: string | null
+  eyebrow:    string
+  title:      string
+  mode?:      'secure' | 'setup'
+  error?:     string | null
   onComplete: (hash: string) => void
 }
 
-function PinStep({ eyebrow, title, error, onComplete }: PinStepProps) {
+function PinStep({ eyebrow, title, mode = 'secure', error, onComplete }: PinStepProps) {
   return (
     <View style={styles.pinWrap}>
       <Text style={styles.stepEyebrow}>{eyebrow}</Text>
       <Text style={styles.stepTitle}>{title}</Text>
-      <PINInput mode="setup" onComplete={onComplete} error={error} checkObvious={false} />
+      <PINInput mode={mode} onComplete={onComplete} error={error} checkObvious={false} />
     </View>
   )
 }
@@ -136,13 +146,34 @@ function PixInputStep({ onConfirm }: PixInputStepProps) {
   const { t }                    = useTranslation()
   const [pixKey, setPixKey]      = useState('')
   const [pixType, setPixType]    = useState<PixKeyType>('cpf')
-  const canSubmit                = pixKey.trim().length >= 5
+
+  const canSubmit = pixType === 'cpf'
+    ? validateCPF(pixKey) && pixKey.replace(/\D/g, '').length === 11
+    : pixKey.trim().length >= 5
+
+  const handleTypeChange = (type: PixKeyType) => {
+    setPixType(type)
+    setPixKey('')
+  }
+
+  const handleKeyChange = (v: string) => {
+    if (pixType === 'cpf')   setPixKey(maskCPF(v))
+    else if (pixType === 'phone') setPixKey(v.replace(/\D/g, '').slice(0, 15))
+    else                     setPixKey(v)
+  }
+
+  const handleConfirm = () => {
+    if (!canSubmit) return
+    const key = pixType === 'cpf' ? pixKey.replace(/\D/g, '') : pixKey.trim()
+    onConfirm(key, pixType)
+  }
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={styles.flex} contentContainerStyle={styles.inputContent} keyboardShouldPersistTaps="handled">
         <Text style={styles.stepEyebrow}>{t('perfil.seguranca.sectionPix')}</Text>
         <Text style={styles.stepTitle}>{t('perfil.seguranca.pixNewTitle')}</Text>
+        <Text style={styles.pixWithdrawalNote}>{t('perfil.seguranca.pixWithdrawalNote')}</Text>
 
         <Text style={styles.fieldLabel}>{t('perfil.seguranca.pixKeyType')}</Text>
         <View style={styles.pixTypeRow}>
@@ -150,7 +181,7 @@ function PixInputStep({ onConfirm }: PixInputStepProps) {
             <TouchableOpacity
               key={type}
               style={[styles.pixTypeBtn, pixType === type && styles.pixTypeBtnActive]}
-              onPress={() => setPixType(type)}
+              onPress={() => handleTypeChange(type)}
               activeOpacity={0.75}
             >
               <Text style={[styles.pixTypeBtnText, pixType === type && styles.pixTypeBtnTextActive]}>
@@ -164,7 +195,7 @@ function PixInputStep({ onConfirm }: PixInputStepProps) {
         <TextInput
           style={styles.securityInput}
           value={pixKey}
-          onChangeText={setPixKey}
+          onChangeText={handleKeyChange}
           placeholder={t('perfil.seguranca.pixKeyPlaceholder')}
           placeholderTextColor="rgba(255,255,255,0.25)"
           autoCapitalize="none"
@@ -174,7 +205,7 @@ function PixInputStep({ onConfirm }: PixInputStepProps) {
 
         <TouchableOpacity
           style={[styles.cta, !canSubmit && styles.ctaDisabled]}
-          onPress={() => canSubmit && onConfirm(pixKey.trim(), pixType)}
+          onPress={handleConfirm}
           disabled={!canSubmit}
           activeOpacity={0.75}
         >
@@ -301,6 +332,7 @@ function MainView({ pixKey, onStartPin, onStartPix }: MainViewProps) {
 
       <View style={styles.section}>
         <Text style={styles.eyebrow}>{t('perfil.seguranca.sectionPix')}</Text>
+        <Text style={styles.pixWithdrawalNote}>{t('perfil.seguranca.pixWithdrawalNote')}</Text>
         <View style={styles.pixRow}>
           <Text style={styles.pixLabel}>{t('perfil.seguranca.pixCurrent')}</Text>
           <Text style={styles.pixValue}>{pixKey}</Text>
@@ -516,6 +548,7 @@ export default function SegurancaScreen() {
         <PinStep
           eyebrow={t('perfil.seguranca.currentPin')}
           title={t('perfil.seguranca.currentPinSub')}
+          mode="secure"
           error={pinError}
           onComplete={handleCurrentPin}
         />
@@ -525,6 +558,7 @@ export default function SegurancaScreen() {
         <PinStep
           eyebrow={t('perfil.seguranca.newPin')}
           title={t('perfil.seguranca.newPinSub')}
+          mode="setup"
           onComplete={handleNewPin}
         />
       )}
@@ -533,6 +567,7 @@ export default function SegurancaScreen() {
         <PinStep
           eyebrow={t('perfil.seguranca.confirmPin')}
           title={t('perfil.seguranca.confirmPinSub')}
+          mode="setup"
           error={confirmError}
           onComplete={handleConfirmPin}
         />
@@ -573,6 +608,7 @@ export default function SegurancaScreen() {
         <PinStep
           eyebrow={t('perfil.seguranca.sectionPix')}
           title={t('perfil.seguranca.currentPinSub')}
+          mode="secure"
           onComplete={handlePixPin}
         />
       )}
@@ -681,6 +717,12 @@ const styles = StyleSheet.create({
     ...typography.size.label,
     fontWeight: typography.weight.medium,
     color: colors.white[100],
+  },
+  pixWithdrawalNote: {
+    ...typography.size.caption,
+    color: 'rgba(255,255,255,0.4)',
+    lineHeight: 17,
+    marginBottom: spacing.md,
   },
   pixRow: {
     paddingVertical: 14,

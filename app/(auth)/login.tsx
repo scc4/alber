@@ -24,12 +24,18 @@ import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Field } from '../../components/core/Field'
 import { useAuthStore } from '../../store/auth.store'
 import * as authService from '../../services/auth.service'
-import { sha256Hex, normalizeSecurityAnswer, legacyDevHash } from '../../utils/crypto'
+import { sha256Hex, normalizeSecurityAnswer, legacyDevHash, maskAnswer, generateDecoys } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
 
 type Phase = 'id' | 'pin' | 'security'
+
+interface SecurityOption {
+  text:   string
+  masked: string
+  isReal: boolean
+}
 
 function maskCPF(v: string) {
   v = v.replace(/\D/g, '').slice(0, 11)
@@ -50,31 +56,46 @@ export default function LoginScreen() {
   const [pinMode, setPinMode]       = useState<'secure' | 'setup'>('secure')
   const [answer, setAnswer]         = useState('')
   const [question, setQuestion]     = useState('')
+  const [secOptions, setSecOptions] = useState<SecurityOption[]>([])
+  const [wrongChoice, setWrongChoice] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [pinError, setPinError]     = useState<string | null>(null)
   const pinErrKey = useRef(0)
 
-  const isHandle = identifier.startsWith('@') || /^[a-z_]/i.test(identifier)
+  const isHandle = identifier.startsWith('@')
   const isValid  = isHandle
     ? identifier.replace(/^@/, '').length >= 3
     : identifier.replace(/\D/g, '').length === 11
 
-  // Carrega pergunta de segurança do SecureStore (salva no registro)
+  // Carrega pergunta + respostas do SecureStore e monta opções de seleção
   useEffect(() => {
-    if (phase === 'security') {
-      authService.getSecurityQuestions().then(qs => {
-        setQuestion(qs[0] ?? '')
-      })
-    }
+    if (phase !== 'security') return
+    setSecOptions([])
+    setWrongChoice(false)
+    Promise.all([
+      authService.getSecurityQuestions(),
+      authService.getSecurityAnswers(),
+    ]).then(([qs, answers]) => {
+      setQuestion(qs[0] ?? '')
+      if (answers.length > 0) {
+        const real   = answers[0]
+        const decoys = generateDecoys(real, 4)
+        const all: SecurityOption[] = [
+          { text: real, masked: maskAnswer(real), isReal: true },
+          ...decoys.map(d => ({ text: d, masked: maskAnswer(d), isReal: false })),
+        ]
+        setSecOptions(all.sort(() => Math.random() - 0.5))
+      }
+    })
   }, [phase])
 
   const handleIdentifierChange = (v: string) => {
-    if (v.startsWith('@') || /^[a-z_]/i.test(v)) {
-      setIdentifier(v.toLowerCase().replace(/[^a-z0-9_@]/g, ''))
-    } else if (/^\d/.test(v)) {
-      setIdentifier(maskCPF(v))
+    if (v === '' || v === '@') { setIdentifier(v); return }
+    const bare = v.startsWith('@') ? v.slice(1) : v
+    if (/^\d/.test(bare)) {
+      setIdentifier(maskCPF(bare))
     } else {
-      setIdentifier(v)
+      setIdentifier('@' + bare.toLowerCase().replace(/[^a-z0-9_]/g, ''))
     }
   }
 
@@ -84,14 +105,13 @@ export default function LoginScreen() {
     setTimeout(() => setPhase('security'), 200)
   }
 
-  const handleSecurityConfirm = async () => {
-    if (answer.trim().length < 2 || isLoggingIn) return
+  const submitSecurityAnswer = async (normalizedAnswer: string) => {
+    if (isLoggingIn) return
     setIsLoggingIn(true)
     try {
-      const normalized = normalizeSecurityAnswer(answer)
-      const answerHash = await sha256Hex(normalized)
-      const legacyAnswerHash = legacyDevHash(normalized)
-      const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
+      const answerHash       = await sha256Hex(normalizedAnswer)
+      const legacyAnswerHash = legacyDevHash(normalizedAnswer)
+      const cpfOrHandle      = isHandle ? identifier : identifier.replace(/\D/g, '')
       await login(cpfOrHandle, pinHash, answerHash, legacyAnswerHash)
       router.replace('/(app)/')
     } catch (e: unknown) {
@@ -101,7 +121,6 @@ export default function LoginScreen() {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
         setPhase('id')
       } else if (code === 'PIN_SETUP_REQUIRED') {
-        // Conta sem pin_sha256 — migração única: re-entra com modo setup (SHA-256 direto)
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.pinSetupRequired'), [
           {
             text: 'OK',
@@ -125,6 +144,23 @@ export default function LoginScreen() {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))
       }
     }
+  }
+
+  // Seleção de opção no novo fluxo de múltipla escolha
+  const handleOptionPress = (opt: SecurityOption) => {
+    if (isLoggingIn) return
+    if (!opt.isReal) {
+      setWrongChoice(true)
+      setTimeout(() => setWrongChoice(false), 1800)
+      return
+    }
+    submitSecurityAnswer(opt.text)
+  }
+
+  // Fallback para contas sem respostas no SecureStore (cadastros anteriores)
+  const handleSecurityConfirm = () => {
+    if (answer.trim().length < 2) return
+    submitSecurityAnswer(normalizeSecurityAnswer(answer))
   }
 
   // ─── Fase: identifier ────────────────────────────────────────────────────
@@ -231,29 +267,55 @@ export default function LoginScreen() {
           {question || t('auth.login.securityQuestionGeneric')}
         </Text>
 
-        <TextInput
-          style={styles.secInput}
-          value={answer}
-          onChangeText={setAnswer}
-          placeholder={t('auth.login.securityAnswerPlaceholder')}
-          placeholderTextColor="rgba(255,255,255,0.3)"
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoFocus
-        />
-
-        <Text style={styles.secHint}>{t('auth.login.securityHint')}</Text>
-
-        <View style={styles.spacer} />
-
-        <PrimaryButton
-          label={t('auth.login.securityConfirm')}
-          onPress={handleSecurityConfirm}
-          state={
-            isLoggingIn              ? 'loading'   :
-            answer.trim().length < 2 ? 'disabled'  : 'default'
-          }
-        />
+        {secOptions.length > 0 ? (
+          /* Novo fluxo: múltipla escolha com respostas mascaradas */
+          <>
+            <Text style={styles.secHint}>{t('auth.login.securityChooseHint')}</Text>
+            <View style={styles.optionsList}>
+              {secOptions.map((opt, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={[styles.optionItem, isLoggingIn && styles.optionDisabled]}
+                  onPress={() => handleOptionPress(opt)}
+                  activeOpacity={0.65}
+                  disabled={isLoggingIn}
+                >
+                  <Text style={styles.optionText}>{opt.masked}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            {wrongChoice && (
+              <Text style={styles.wrongChoiceText}>{t('auth.login.securityWrongChoice')}</Text>
+            )}
+            {isLoggingIn && (
+              <Text style={styles.secHint}>{t('common.verifying')}</Text>
+            )}
+          </>
+        ) : (
+          /* Fallback: campo de texto (contas sem respostas no SecureStore) */
+          <>
+            <TextInput
+              style={styles.secInput}
+              value={answer}
+              onChangeText={setAnswer}
+              placeholder={t('auth.login.securityAnswerPlaceholder')}
+              placeholderTextColor="rgba(255,255,255,0.3)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+            />
+            <Text style={styles.secHint}>{t('auth.login.securityHint')}</Text>
+            <View style={styles.spacer} />
+            <PrimaryButton
+              label={t('auth.login.securityConfirm')}
+              onPress={handleSecurityConfirm}
+              state={
+                isLoggingIn              ? 'loading'  :
+                answer.trim().length < 2 ? 'disabled' : 'default'
+              }
+            />
+          </>
+        )}
       </ScrollView>
     </KeyboardAvoidingView>
   )
@@ -422,5 +484,37 @@ const styles = StyleSheet.create({
     fontSize: 28,
     color: 'rgba(255,255,255,0.85)',
     lineHeight: 30,
+  },
+  // security — multiple choice
+  optionsList: {
+    gap: 10,
+    marginTop: 4,
+  },
+  optionItem: {
+    height: 54,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: spacing.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  optionDisabled: {
+    opacity: 0.45,
+  },
+  optionText: {
+    fontSize: 17,
+    fontWeight: '500',
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+    letterSpacing: 1.5,
+  },
+  wrongChoiceText: {
+    fontSize: 13,
+    color: colors.state.error,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    fontFamily: typography.fontFamily.primary,
   },
 })

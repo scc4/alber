@@ -87,14 +87,6 @@ export default function SplitFecharScreen() {
   const returnAmount  = Math.max(0, teto - totalUsed)
   const canConfirm    = !exceeds && finalAllocTotal > 0
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
-
-  async function sha256hex(text: string): Promise<string> {
-    const data = new TextEncoder().encode(text)
-    const buf  = await crypto.subtle.digest('SHA-256', data)
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
-  }
-
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
   async function handlePinComplete(pin: string) {
@@ -102,12 +94,11 @@ export default function SplitFecharScreen() {
     setPinError(null)
     setSubmitting(true)
     try {
-      const pinHash = await sha256hex(pin)
       const allocMap: Record<string, number> = {}
       accepted.forEach(p => {
         allocMap[p.id] = parseInt(allocations[p.id] ?? '0', 10) || 0
       })
-      await closeSplit(split.id, allocMap, pinHash, token)
+      await closeSplit(split.id, allocMap, pin, token)
       router.replace('/(app)/split/')
     } catch (e) {
       setPinError(e instanceof Error ? e.message : 'Erro ao fechar split')

@@ -36,7 +36,7 @@ interface AuthState {
   isLoadingSession: boolean
 
   // Actions
-  login:            (cpf: string, pinHash: string, securityAnswerHash: string) => Promise<void>
+  login:            (cpf: string, pinHash: string, securityAnswerHash: string, securityAnswerHashLegacy?: string) => Promise<void>
   setSession:       (token: string, refreshToken: string, user: AuthUser, kycStatus: KycStatus, accountStatus: AccountStatus) => Promise<void>
   loadSession:      () => Promise<void>
   logout:           () => Promise<void>
@@ -105,8 +105,8 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   // ── Login real com PIN + resposta de segurança ─────────────────────────────
-  login: async (cpf, pinHash, securityAnswerHash) => {
-    const res = await authService.login(cpf, pinHash, securityAnswerHash)
+  login: async (cpf, pinHash, securityAnswerHash, securityAnswerHashLegacy?) => {
+    const res = await authService.login(cpf, pinHash, securityAnswerHash, securityAnswerHashLegacy)
 
     const user: AuthUser = {
       id:           res.user.id,

@@ -6,12 +6,12 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
@@ -24,7 +24,7 @@ import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Field } from '../../components/core/Field'
 import { useAuthStore } from '../../store/auth.store'
 import * as authService from '../../services/auth.service'
-import { sha256Hex, normalizeSecurityAnswer, legacyDevHash, maskAnswer, generateDecoys } from '../../utils/crypto'
+import { sha256Hex, legacyDevHash, maskAnswer, generateDecoys } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
@@ -54,9 +54,9 @@ export default function LoginScreen() {
   const [identifier, setIdentifier] = useState('')
   const [pinHash, setPinHash]       = useState('')
   const [pinMode, setPinMode]       = useState<'secure' | 'setup'>('secure')
-  const [answer, setAnswer]         = useState('')
   const [question, setQuestion]     = useState('')
   const [secOptions, setSecOptions] = useState<SecurityOption[]>([])
+  const [secLoading, setSecLoading] = useState(false)
   const [wrongChoice, setWrongChoice] = useState(false)
   const [isLoggingIn, setIsLoggingIn] = useState(false)
   const [pinError, setPinError]     = useState<string | null>(null)
@@ -72,6 +72,7 @@ export default function LoginScreen() {
     if (phase !== 'security') return
     setSecOptions([])
     setWrongChoice(false)
+    setSecLoading(true)
     Promise.all([
       authService.getSecurityQuestions(),
       authService.getSecurityAnswers(),
@@ -86,7 +87,7 @@ export default function LoginScreen() {
         ]
         setSecOptions(all.sort(() => Math.random() - 0.5))
       }
-    })
+    }).finally(() => setSecLoading(false))
   }, [phase])
 
   const handleIdentifierChange = (v: string) => {
@@ -129,7 +130,6 @@ export default function LoginScreen() {
               setPinHash('')
               setPinError(null)
               setPinMode('setup')
-              setAnswer('')
               setPhase('pin')
             },
           },
@@ -138,7 +138,6 @@ export default function LoginScreen() {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorInvalid'))
         pinErrKey.current++
         setPinError(t('auth.login.errorInvalid'))
-        setAnswer('')
         setPhase('pin')
       } else {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))
@@ -155,12 +154,6 @@ export default function LoginScreen() {
       return
     }
     submitSecurityAnswer(opt.text)
-  }
-
-  // Fallback para contas sem respostas no SecureStore (cadastros anteriores)
-  const handleSecurityConfirm = () => {
-    if (answer.trim().length < 2) return
-    submitSecurityAnswer(normalizeSecurityAnswer(answer))
   }
 
   // ─── Fase: identifier ────────────────────────────────────────────────────
@@ -258,18 +251,16 @@ export default function LoginScreen() {
         contentContainerStyle={[styles.secContent, { paddingBottom: insets.bottom + spacing.xl }]}
         keyboardShouldPersistTaps="handled"
       >
-        <TouchableOpacity style={styles.backBtnAbs} onPress={() => { setAnswer(''); setPhase('pin') }}>
+        <TouchableOpacity style={styles.backBtnAbs} onPress={() => setPhase('pin')}>
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
 
-        <Text style={styles.secEyebrow}>{t('auth.login.securityQuestionLabel')}</Text>
-        <Text style={styles.secQuestion}>
-          {question || t('auth.login.securityQuestionGeneric')}
-        </Text>
-
-        {secOptions.length > 0 ? (
-          /* Novo fluxo: múltipla escolha com respostas mascaradas */
+        {secLoading ? (
+          <ActivityIndicator color="rgba(255,255,255,0.4)" style={{ marginTop: spacing.xl * 3 }} />
+        ) : secOptions.length > 0 ? (
           <>
+            <Text style={styles.secEyebrow}>{t('auth.login.securityQuestionLabel')}</Text>
+            <Text style={styles.secQuestion}>{question}</Text>
             <Text style={styles.secHint}>{t('auth.login.securityChooseHint')}</Text>
             <View style={styles.optionsList}>
               {secOptions.map((opt, i) => (
@@ -292,27 +283,13 @@ export default function LoginScreen() {
             )}
           </>
         ) : (
-          /* Fallback: campo de texto (contas sem respostas no SecureStore) */
           <>
-            <TextInput
-              style={styles.secInput}
-              value={answer}
-              onChangeText={setAnswer}
-              placeholder={t('auth.login.securityAnswerPlaceholder')}
-              placeholderTextColor="rgba(255,255,255,0.3)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-            />
-            <Text style={styles.secHint}>{t('auth.login.securityHint')}</Text>
+            <Text style={styles.secNoDataTitle}>{t('auth.login.securityNoDataTitle')}</Text>
+            <Text style={styles.secNoDataHint}>{t('auth.login.securityNoDataHint')}</Text>
             <View style={styles.spacer} />
             <PrimaryButton
-              label={t('auth.login.securityConfirm')}
-              onPress={handleSecurityConfirm}
-              state={
-                isLoggingIn              ? 'loading'  :
-                answer.trim().length < 2 ? 'disabled' : 'default'
-              }
+              label={t('auth.login.securityNoDataRecover')}
+              onPress={() => router.replace('/(auth)/recuperar/seguranca')}
             />
           </>
         )}
@@ -462,17 +439,18 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xl,
     lineHeight: 26,
   },
-  secInput: {
-    height: 54,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: spacing.radius.md,
-    paddingHorizontal: spacing.md,
+  secNoDataTitle: {
+    fontSize: 17,
+    fontWeight: '600',
     color: colors.white[100],
-    fontSize: 16,
     fontFamily: typography.fontFamily.primary,
     marginBottom: spacing.sm,
+  },
+  secNoDataHint: {
+    fontSize: 13.5,
+    color: 'rgba(255,255,255,0.5)',
+    lineHeight: 20,
+    fontFamily: typography.fontFamily.primary,
   },
   secHint: {
     fontSize: 12,

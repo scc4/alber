@@ -112,6 +112,7 @@ export interface LoginResponse {
     kyc_status:     string
     account_status: string
   }
+  security_questions?: { position: number; question: string }[]
 }
 
 export async function login(
@@ -170,6 +171,27 @@ export async function fetchUserProfile(token: string): Promise<UserProfileRespon
     if (!res.ok) return null
     return (await res.json()) as UserProfileResponse
   } catch { return null }
+}
+
+// ── Busca textos das perguntas de segurança (sem auth) ───────────────────────
+
+export async function fetchSecurityQuestions(
+  identifier: string,
+): Promise<{ position: number; question: string }[]> {
+  try {
+    const res = await fetch(`${BFF}/auth-question`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': ANON_KEY,
+        'Authorization': `Bearer ${ANON_KEY}`,
+      },
+      body: JSON.stringify({ identifier }),
+    })
+    if (!res.ok) return []
+    const data = await res.json() as { questions?: { position: number; question: string }[] }
+    return data.questions ?? []
+  } catch { return [] }
 }
 
 // ── Helpers de sessão ─────────────────────────────────────────────────────────

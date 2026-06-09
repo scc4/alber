@@ -113,7 +113,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       name:         res.user.name,
       handle:       res.user.handle,
       email:        res.user.email,
-      cpfMasked:    '',   // TODO: carregar via endpoint de perfil
+      cpfMasked:    '',
       pixKey:       '',
       pixKeyType:   'cpf',
     }
@@ -121,10 +121,20 @@ export const useAuthStore = create<AuthState>((set) => ({
     await authService.saveTokens(res.token, res.refresh_token)
     await authService.saveUser(user as unknown as Record<string, unknown>)
 
+    // Re-enroll: se o backend retornou textos das perguntas, salva localmente
+    // para que próximos logins usem o fluxo de múltipla escolha
+    if (res.security_questions && res.security_questions.length > 0) {
+      const existing = await authService.getSecurityQuestions()
+      if (existing.length === 0) {
+        const ordered = [...res.security_questions].sort((a, b) => a.position - b.position)
+        await authService.saveSecurityQuestions(ordered.map(q => q.question))
+      }
+    }
+
     set({
       user,
       token:           res.token,
-      kycStatus:       res.user.kyc_status  as KycStatus,
+      kycStatus:       res.user.kyc_status    as KycStatus,
       accountStatus:   res.user.account_status as AccountStatus,
       isAuthenticated: true,
     })

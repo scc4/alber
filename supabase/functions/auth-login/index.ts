@@ -196,7 +196,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: questions } = await supabaseAdmin
     .from('security_questions')
-    .select('id, position, answer_hash')
+    .select('id, position, question, answer_hash')
     .eq('user_id', user.id)
     .order('position')
 
@@ -296,5 +296,9 @@ Deno.serve(async (req: Request) => {
       kyc_status:     user.kyc_status,
       account_status: user.account_status,
     },
+    security_questions: (questions ?? []).map(q => ({
+      position: q.position as number,
+      question: q.question as string,
+    })),
   })
 })

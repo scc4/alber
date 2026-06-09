@@ -47,6 +47,7 @@ export default function LoginScreen() {
   const [phase, setPhase]           = useState<Phase>('id')
   const [identifier, setIdentifier] = useState('')
   const [pinHash, setPinHash]       = useState('')
+  const [pinMode, setPinMode]       = useState<'secure' | 'setup'>('secure')
   const [answer, setAnswer]         = useState('')
   const [question, setQuestion]     = useState('')
   const [isLoggingIn, setIsLoggingIn] = useState(false)
@@ -99,6 +100,21 @@ export default function LoginScreen() {
       if (code === 'TOO_MANY_ATTEMPTS') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
         setPhase('id')
+      } else if (code === 'PIN_SETUP_REQUIRED') {
+        // Conta sem pin_sha256 — migração única: re-entra com modo setup (SHA-256 direto)
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.pinSetupRequired'), [
+          {
+            text: 'OK',
+            onPress: () => {
+              pinErrKey.current++
+              setPinHash('')
+              setPinError(null)
+              setPinMode('setup')
+              setAnswer('')
+              setPhase('pin')
+            },
+          },
+        ])
       } else if (code === 'INVALID_CREDENTIALS') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorInvalid'))
         pinErrKey.current++
@@ -168,7 +184,7 @@ export default function LoginScreen() {
   if (phase === 'pin') {
     return (
       <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <TouchableOpacity style={styles.backBtnAbs} onPress={() => setPhase('id')}>
+        <TouchableOpacity style={styles.backBtnAbs} onPress={() => { setPinMode('secure'); setPhase('id') }}>
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
 
@@ -180,6 +196,7 @@ export default function LoginScreen() {
           <PINInput
             key={`login-pin-${pinErrKey.current}`}
             onComplete={handlePINComplete}
+            mode={pinMode}
             error={pinError}
           />
 

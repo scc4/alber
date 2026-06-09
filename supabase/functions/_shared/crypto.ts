@@ -70,6 +70,24 @@ function generateCombinations(pairs: number[][]): number[][] {
 }
 
 /**
+ * Fallback para contas sem pin_sha256: testa os 64 combos contra o bcrypt armazenado.
+ * Lento (~300ms × 64), mas auto-cura na primeira autenticação bem-sucedida.
+ */
+export async function verifyPinWithPairsBcryptFallback(
+  pinBcrypt: string,
+  pairs: number[][],
+): Promise<{ ok: boolean; sha256: string | null }> {
+  const combinations = generateCombinations(pairs)
+  for (const combo of combinations) {
+    const hash = await sha256hex(combo.join(''))
+    if (await bcryptVerify(hash, pinBcrypt)) {
+      return { ok: true, sha256: hash }
+    }
+  }
+  return { ok: false, sha256: null }
+}
+
+/**
  * Verifica se alguma combinação dos pares produz o SHA-256 armazenado.
  * Retorna ok=true e o sha256 correspondente (usado para criar sessão Supabase).
  */

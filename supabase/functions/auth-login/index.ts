@@ -4,7 +4,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
-import { sha256hex, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { sha256hex, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, verifyPinWithPairsBcryptFallback } from '../_shared/crypto.ts'
 
 interface LoginRequest {
   cpf: string
@@ -71,6 +71,7 @@ Deno.serve(async (req: Request) => {
 
   const cpfClean = normalizeCpf(cpf)
   if (!validateCpf(cpfClean)) {
+    console.error('[auth-login] FAIL:cpf_invalid raw=', cpf)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
@@ -85,7 +86,7 @@ Deno.serve(async (req: Request) => {
     .maybeSingle()
 
   if (!user) {
-    // Não revelar se o CPF existe ou não
+    console.error('[auth-login] FAIL:user_not_found cpf_len=', cpfClean.length)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
@@ -118,19 +119,30 @@ Deno.serve(async (req: Request) => {
   let pinOk = false
   let resolvedPinHash = pin_hash // SHA-256 usado para criar a sessão Supabase
   const pairs = tryParsePairsPayload(pin_hash)
+  console.log('[auth-login] pin_mode=', pairs ? 'pairs' : 'sha256', 'pin_sha256_present=', !!pinSha256)
   if (pairs) {
     if (!pinSha256) {
-      console.error('pin_sha256 not found for user (conta criada antes desta versão):', user.id)
-      return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+      // Conta criada antes do pin_sha256 ser gravado — pede que o app reenvie em modo setup
+      console.warn('[auth-login] pin_sha256 ausente, solicitando PIN_SETUP_REQUIRED')
+      return err('PIN_SETUP_REQUIRED', 'PIN_SETUP_REQUIRED', 401)
     }
     const result = await verifyPinWithPairs(pinSha256, pairs)
+    console.log('[auth-login] verifyPinWithPairs ok=', result.ok)
     pinOk = result.ok
     if (result.sha256) resolvedPinHash = result.sha256
   } else {
     pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+    console.log('[auth-login] bcryptVerify ok=', pinOk)
+    // Auto-cura: se pin_sha256 estava faltando e o bcrypt passou, grava agora
+    if (pinOk && !pinSha256) {
+      await supabaseAdmin.auth.admin.updateUserById(user.auth_id, {
+        app_metadata: { ...(authUser?.user?.app_metadata ?? {}), pin_sha256: pin_hash },
+      }).catch(e => console.warn('[auth-login] falha ao gravar pin_sha256 auto-heal:', e))
+    }
   }
 
   if (!pinOk) {
+    console.error('[auth-login] FAIL:pin_wrong mode=', pairs ? 'pairs' : 'sha256')
     await logAudit(user.id, 'pin_failed', { attempts: attempts + 1 })
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
@@ -157,6 +169,7 @@ Deno.serve(async (req: Request) => {
   const answerOk = answerMatches.some(Boolean)
 
   if (!answerOk) {
+    console.error('[auth-login] FAIL:security_answer_wrong user=', user.id)
     await logAudit(user.id, 'security_question_failed', {})
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }

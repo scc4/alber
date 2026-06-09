@@ -123,10 +123,10 @@ export function PINInput({
       if (disabled || clickedPairs.length >= 6) return
       const next = [...clickedPairs, pair]
       setClickedPairs(next)
-      setSecurePairs(generatePairs()) // reembaralha a cada toque
 
       if (next.length === 6) {
         onComplete(JSON.stringify(next))
+        // Regenera pares apenas para a próxima tentativa (não a cada toque)
         setTimeout(() => { setClickedPairs([]); setSecurePairs(generatePairs()) }, 400)
       }
     },
@@ -160,7 +160,6 @@ export function PINInput({
     if (disabled) return
     if (mode === 'secure') {
       setClickedPairs(p => p.slice(0, -1))
-      setSecurePairs(generatePairs())
     } else {
       setDigits(d => d.slice(0, -1))
     }

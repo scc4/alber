@@ -146,7 +146,8 @@
       "errorTitle": "Erro ao entrar",
       "errorInvalid": "Credenciais inválidas. Verifique e tente novamente.",
       "errorRateLimit": "Muitas tentativas. Tente novamente em 15 minutos.",
-      "errorGeneric": "Erro ao fazer login. Verifique sua conexão."
+      "errorGeneric": "Erro ao fazer login. Verifique sua conexão.",
+      "pinSetupRequired": "Por segurança, insira seu PIN novamente para concluir o login."
     },
     "security": {
       "header": "SEGURANÇA",

@@ -322,8 +322,9 @@ Deno.serve(async (req: Request) => {
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
     email_confirm: true,
-    password: pin_hash,   // SHA-256 do PIN — usado como senha para emitir JWT
+    password:      pin_hash,   // SHA-256 do PIN — usado como senha para emitir JWT
     user_metadata: { name, handle: handleNorm },
+    app_metadata:  { pin_bcrypt: pinBcrypt, pin_sha256: pin_hash },
   })
 
   if (authError || !authData.user) {

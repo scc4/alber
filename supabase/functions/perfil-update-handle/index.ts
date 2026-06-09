@@ -1,6 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify } from '../_shared/crypto.ts'
+import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -63,10 +63,19 @@ Deno.serve(async (req: Request) => {
   // Verificar PIN
   const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
   const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
+  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
 
   if (!pinBcrypt) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
 
-  const pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  let pinOk = false
+  const pairs = tryParsePairsPayload(pin_hash)
+  if (pairs) {
+    if (!pinSha256) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    const result = await verifyPinWithPairs(pinSha256, pairs)
+    pinOk = result.ok
+  } else {
+    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  }
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({
       user_id: user.id, event_type: 'handle_change_pin_failed', metadata: {},

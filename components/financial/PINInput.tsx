@@ -1,5 +1,5 @@
 // Spec: /specs/05_security.md seção 2 — PIN scrambled par-a-par
-// Design: /design/pin.jsx — PinKbPairGrid + PinKbArc (split buttons)
+// Design: /design/pin.jsx — PinKbPairGrid (secure) | PinKbSetup (setup)
 // CRÍTICO: nunca expor dígitos individuais fora do hash; screenshot bloqueada
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -17,16 +17,6 @@ import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
 
-// Pares fixos conforme spec seção 2.1
-// Posições são randomizadas a cada render (não os pares em si)
-const PAIRS: readonly [number, number][] = [
-  [0, 2],
-  [4, 6],
-  [5, 7],
-  [8, 9],
-  [1, 3],
-]
-
 // Sequências obviamente inseguras — rejeitadas na criação (spec ON-04)
 const OBVIOUS = new Set([
   '111111', '222222', '333333', '444444', '555555',
@@ -34,8 +24,10 @@ const OBVIOUS = new Set([
   '123456', '654321', '012345',
 ])
 
-function shufflePairs(arr: readonly [number, number][]): [number, number][] {
-  const b = [...arr] as [number, number][]
+// ── Geradores de layout ───────────────────────────────────────────────────────
+
+function shuffle<T>(arr: T[]): T[] {
+  const b = [...arr]
   for (let i = b.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1))
     ;[b[i], b[j]] = [b[j], b[i]]
@@ -43,49 +35,106 @@ function shufflePairs(arr: readonly [number, number][]): [number, number][] {
   return b
 }
 
+/**
+ * Modo 'secure': 5 pares embaralhados com ordem interna aleatória.
+ * Cada press escolhe aleatoriamente um dos dois dígitos do par.
+ */
+function generatePairs(): [number, number][] {
+  const digits = shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+  const pairs: [number, number][] = []
+  for (let i = 0; i < 10; i += 2) {
+    pairs.push(
+      Math.random() < 0.5
+        ? [digits[i], digits[i + 1]]
+        : [digits[i + 1], digits[i]],
+    )
+  }
+  return shuffle(pairs) as [number, number][]
+}
+
+/**
+ * Modo 'setup': 10 dígitos em posições aleatórias.
+ * O usuário vê e escolhe o número exato.
+ */
+function generateShuffledDigits(): number[] {
+  return shuffle([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+}
+
+// ── Interface pública ─────────────────────────────────────────────────────────
+
 export interface PINInputProps {
   /** Chamado com SHA-256(digits) quando 6 dígitos são inseridos */
-  onComplete: (hash: string) => void
+  onComplete:    (hash: string) => void
+  /**
+   * 'secure' (padrão) — pares ambíguos, escolha aleatória, re-embaralha a cada toque.
+   *   Usar em: login, transferir, carregar/descarregar, receber.
+   * 'setup' — dígitos individuais visíveis, posições embaralhadas no mount.
+   *   Usar em: cadastro, recuperação e troca de PIN.
+   */
+  mode?:         'secure' | 'setup'
   /** Rejeita sequências óbvias (usar na criação de PIN) */
   checkObvious?: boolean
-  onObvious?: () => void
+  onObvious?:    () => void
   /** Mensagem de erro externo — dispara shake */
-  error?: string | null
-  disabled?: boolean
+  error?:        string | null
+  disabled?:     boolean
 }
+
+// ── Componente principal ──────────────────────────────────────────────────────
 
 export function PINInput({
   onComplete,
-  checkObvious = false,
+  mode          = 'secure',
+  checkObvious  = false,
   onObvious,
   error,
-  disabled = false,
+  disabled      = false,
 }: PINInputProps) {
-  // Android: FLAG_SECURE requer módulo nativo — implementar via plugin EAS
-  // iOS: TextInput com secureTextEntry abaixo sinaliza ao sistema para ocultar
+  // Setup: acumula dígitos reais para hash SHA-256
+  const [digits,       setDigits]       = useState<number[]>([])
+  // Secure: acumula os pares clicados para envio ao backend
+  const [clickedPairs, setClickedPairs] = useState<[number, number][]>([])
 
-  const [digits, setDigits] = useState<number[]>([])
-  const [layout, setLayout] = useState<[number, number][]>(() => shufflePairs(PAIRS))
+  const [securePairs, setSecurePairs] = useState<[number, number][]>(() => generatePairs())
+  const [setupKeys,   setSetupKeys]   = useState<number[]>(() => generateShuffledDigits())
   const shakeX = useRef(new Animated.Value(0)).current
 
-  // Reshuffle a cada mount — posições diferentes toda vez
-  useEffect(() => {
-    setLayout(shufflePairs(PAIRS))
-  }, [])
+  const entryCount = mode === 'secure' ? clickedPairs.length : digits.length
 
-  // Shake nos dots quando chega erro externo
+  useEffect(() => {
+    if (mode === 'secure') setSecurePairs(generatePairs())
+    else                   setSetupKeys(generateShuffledDigits())
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!error) return
     Animated.sequence([
-      Animated.timing(shakeX, { toValue: 10, duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeX, { toValue: 10,  duration: 55, useNativeDriver: true }),
       Animated.timing(shakeX, { toValue: -10, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 8, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: -8, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 0, duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeX, { toValue: 8,   duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeX, { toValue: -8,  duration: 55, useNativeDriver: true }),
+      Animated.timing(shakeX, { toValue: 0,   duration: 55, useNativeDriver: true }),
     ]).start()
   }, [error, shakeX])
 
-  const press = useCallback(
+  // ── Modo secure: registra o PAR inteiro, envia JSON dos pares ao completar ──
+  const pressSecure = useCallback(
+    (pair: [number, number]) => {
+      if (disabled || clickedPairs.length >= 6) return
+      const next = [...clickedPairs, pair]
+      setClickedPairs(next)
+      setSecurePairs(generatePairs()) // reembaralha a cada toque
+
+      if (next.length === 6) {
+        onComplete(JSON.stringify(next))
+        setTimeout(() => { setClickedPairs([]); setSecurePairs(generatePairs()) }, 400)
+      }
+    },
+    [clickedPairs, disabled, onComplete],
+  )
+
+  // ── Modo setup: registra dígito exato, envia SHA-256 ao completar ───────────
+  const pressSetup = useCallback(
     (digit: number) => {
       if (disabled || digits.length >= 6) return
       const next = [...digits, digit]
@@ -95,13 +144,12 @@ export function PINInput({
         const seq = next.join('')
         if (checkObvious && OBVIOUS.has(seq)) {
           onObvious?.()
-          setTimeout(() => setDigits([]), 350)
+          setTimeout(() => { setDigits([]); setSetupKeys(generateShuffledDigits()) }, 350)
           return
         }
-        // Hash SHA-256 antes de chamar parent — nunca expor dígitos puros
         sha256Hex(seq).then(hash => {
           onComplete(hash)
-          setTimeout(() => setDigits([]), 400)
+          setTimeout(() => { setDigits([]); setSetupKeys(generateShuffledDigits()) }, 400)
         })
       }
     },
@@ -110,15 +158,16 @@ export function PINInput({
 
   const backspace = useCallback(() => {
     if (disabled) return
-    setDigits(d => d.slice(0, -1))
-  }, [disabled])
-
-  const row1 = layout.slice(0, 3)
-  const row2 = layout.slice(3, 5)
+    if (mode === 'secure') {
+      setClickedPairs(p => p.slice(0, -1))
+      setSecurePairs(generatePairs())
+    } else {
+      setDigits(d => d.slice(0, -1))
+    }
+  }, [disabled, mode])
 
   return (
     <View style={styles.root}>
-      {/* iOS: campo secureTextEntry na hierarquia sinaliza ao SO para ocultar tela */}
       {Platform.OS === 'ios' && (
         <TextInput
           secureTextEntry
@@ -129,86 +178,161 @@ export function PINInput({
         />
       )}
 
-      {/* Indicador de segurança */}
       <View style={styles.lockRow}>
         <Text style={styles.lockIcon}>🔒</Text>
         <Text style={styles.lockLabel}>SCREENSHOT BLOQUEADA</Text>
       </View>
 
-      {/* 6 progress dots */}
       <Animated.View style={[styles.dots, { transform: [{ translateX: shakeX }] }]}>
         {Array.from({ length: 6 }, (_, i) => (
           <View
             key={i}
-            style={[styles.dot, digits.length > i ? styles.dotOn : styles.dotOff]}
+            style={[styles.dot, entryCount > i ? styles.dotOn : styles.dotOff]}
           />
         ))}
       </Animated.View>
 
       {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-      {/* Teclado scrambled — linha 1 */}
-      <View style={styles.kbRow}>
-        {row1.map((pair, i) => (
-          <PairKey key={i} pair={pair} onPress={press} disabled={disabled} />
-        ))}
-      </View>
-
-      {/* Teclado scrambled — linha 2: 2 pares + backspace */}
-      <View style={styles.kbRow}>
-        {row2.map((pair, i) => (
-          <PairKey key={i + 3} pair={pair} onPress={press} disabled={disabled} />
-        ))}
-        <BackspaceKey onPress={backspace} disabled={disabled} />
-      </View>
+      {mode === 'secure'
+        ? (
+          <SecureKeyboard
+            pairs={securePairs}
+            onPress={pressSecure}
+            onBackspace={backspace}
+            disabled={disabled}
+          />
+        )
+        : (
+          <SetupKeyboard
+            keys={setupKeys}
+            onPress={pressSetup}
+            onBackspace={backspace}
+            disabled={disabled}
+          />
+        )
+      }
     </View>
   )
 }
 
-// ─── Subcomponentes ──────────────────────────────────────────────────────────
+// ── SecureKeyboard — 5 pares "X ou Y" (2×2 + 1 centralizado) ─────────────────
+
+interface SecureKeyboardProps {
+  pairs:       [number, number][]
+  onPress:     (pair: [number, number]) => void
+  onBackspace: () => void
+  disabled:    boolean
+}
+
+function SecureKeyboard({ pairs, onPress, onBackspace, disabled }: SecureKeyboardProps) {
+  return (
+    <>
+      <View style={styles.kbRow}>
+        <PairKey pair={pairs[0]} onPress={onPress} disabled={disabled} />
+        <PairKey pair={pairs[1]} onPress={onPress} disabled={disabled} />
+      </View>
+      <View style={styles.kbRow}>
+        <PairKey pair={pairs[2]} onPress={onPress} disabled={disabled} />
+        <PairKey pair={pairs[3]} onPress={onPress} disabled={disabled} />
+      </View>
+      {/* placeholder | par5 centralizado | backspace */}
+      <View style={styles.kbRow}>
+        <View style={styles.cellPlaceholder} />
+        <PairKey pair={pairs[4]} onPress={onPress} disabled={disabled} />
+        <BackspaceKey onPress={onBackspace} disabled={disabled} />
+      </View>
+    </>
+  )
+}
+
+// ── SetupKeyboard — 10 dígitos individuais (3×3 + 0 + backspace) ─────────────
+
+interface SetupKeyboardProps {
+  keys:        number[]
+  onPress:     (digit: number) => void
+  onBackspace: () => void
+  disabled:    boolean
+}
+
+function SetupKeyboard({ keys, onPress, onBackspace, disabled }: SetupKeyboardProps) {
+  return (
+    <>
+      <View style={styles.kbRow}>
+        <SingleKey digit={keys[0]} onPress={onPress} disabled={disabled} />
+        <SingleKey digit={keys[1]} onPress={onPress} disabled={disabled} />
+        <SingleKey digit={keys[2]} onPress={onPress} disabled={disabled} />
+      </View>
+      <View style={styles.kbRow}>
+        <SingleKey digit={keys[3]} onPress={onPress} disabled={disabled} />
+        <SingleKey digit={keys[4]} onPress={onPress} disabled={disabled} />
+        <SingleKey digit={keys[5]} onPress={onPress} disabled={disabled} />
+      </View>
+      <View style={styles.kbRow}>
+        <SingleKey digit={keys[6]} onPress={onPress} disabled={disabled} />
+        <SingleKey digit={keys[7]} onPress={onPress} disabled={disabled} />
+        <SingleKey digit={keys[8]} onPress={onPress} disabled={disabled} />
+      </View>
+      {/* placeholder | dígito central | backspace */}
+      <View style={styles.kbRow}>
+        <View style={styles.cellPlaceholder} />
+        <SingleKey digit={keys[9]} onPress={onPress} disabled={disabled} />
+        <BackspaceKey onPress={onBackspace} disabled={disabled} />
+      </View>
+    </>
+  )
+}
+
+// ── Teclas ────────────────────────────────────────────────────────────────────
 
 interface PairKeyProps {
-  pair: [number, number]
-  onPress: (digit: number) => void
+  pair:     [number, number]
+  onPress:  (pair: [number, number]) => void
   disabled: boolean
 }
 
 function PairKey({ pair, onPress, disabled }: PairKeyProps) {
   return (
-    <View style={styles.cell}>
-      <TouchableOpacity
-        style={styles.half}
-        onPress={() => onPress(pair[0])}
-        disabled={disabled}
-        activeOpacity={0.55}
-        accessible
-        accessibilityLabel={`Dígito ${pair[0]}`}
-        accessibilityRole="button"
-      >
-        <Text style={styles.digitText}>{pair[0]}</Text>
-      </TouchableOpacity>
+    <TouchableOpacity
+      style={styles.cell}
+      onPress={() => onPress(pair)}
+      disabled={disabled}
+      activeOpacity={0.55}
+      accessible
+      accessibilityLabel={`${pair[0]} ou ${pair[1]}`}
+      accessibilityRole="button"
+    >
+      <Text style={styles.pairText}>{pair[0]} ou {pair[1]}</Text>
+    </TouchableOpacity>
+  )
+}
 
-      <View style={styles.cellDivider} />
+interface SingleKeyProps {
+  digit:    number
+  onPress:  (digit: number) => void
+  disabled: boolean
+}
 
-      <TouchableOpacity
-        style={styles.half}
-        onPress={() => onPress(pair[1])}
-        disabled={disabled}
-        activeOpacity={0.55}
-        accessible
-        accessibilityLabel={`Dígito ${pair[1]}`}
-        accessibilityRole="button"
-      >
-        <Text style={styles.digitText}>{pair[1]}</Text>
-      </TouchableOpacity>
-    </View>
+function SingleKey({ digit, onPress, disabled }: SingleKeyProps) {
+  return (
+    <TouchableOpacity
+      style={styles.cell}
+      onPress={() => onPress(digit)}
+      disabled={disabled}
+      activeOpacity={0.55}
+      accessible
+      accessibilityLabel={String(digit)}
+      accessibilityRole="button"
+    >
+      <Text style={styles.singleText}>{digit}</Text>
+    </TouchableOpacity>
   )
 }
 
 function BackspaceKey({ onPress, disabled }: { onPress: () => void; disabled: boolean }) {
   return (
     <TouchableOpacity
-      style={[styles.cell, styles.bsCell]}
+      style={styles.cell}
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.55}
@@ -216,16 +340,15 @@ function BackspaceKey({ onPress, disabled }: { onPress: () => void; disabled: bo
       accessibilityLabel="Apagar"
       accessibilityRole="button"
     >
-      {/* Ícone de backspace inline — sem dependência de svg lib */}
       <Text style={styles.bsText}>⌫</Text>
     </TouchableOpacity>
   )
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ── Styles ────────────────────────────────────────────────────────────────────
 
-const CELL_HEIGHT = 56
-const ROW_GAP = 9
+const CELL_HEIGHT = 60
+const ROW_GAP     = 9
 
 const styles = StyleSheet.create({
   root: {
@@ -239,9 +362,7 @@ const styles = StyleSheet.create({
     gap: 5,
     marginBottom: 2,
   },
-  lockIcon: {
-    fontSize: 11,
-  },
+  lockIcon: { fontSize: 11 },
   lockLabel: {
     fontSize: 10,
     color: 'rgba(34,197,94,0.7)',
@@ -288,29 +409,24 @@ const styles = StyleSheet.create({
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.09)',
     borderRadius: spacing.radius.md,
-    flexDirection: 'row',
-    overflow: 'hidden',
-  },
-  half: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  cellDivider: {
-    width: 0.5,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    marginVertical: 12,
+  cellPlaceholder: {
+    flex: 1,
   },
-  digitText: {
-    fontSize: 17,
+  pairText: {
+    fontSize: 16,
     fontWeight: '500',
     color: colors.white[100],
     fontFamily: typography.fontFamily.primary,
+    letterSpacing: 0.5,
   },
-  bsCell: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  singleText: {
+    fontSize: 22,
+    fontWeight: '500',
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
   },
   bsText: {
     fontSize: 22,

@@ -4,7 +4,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
-import { sha256hex, bcryptVerify } from '../_shared/crypto.ts'
+import { sha256hex, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 
 interface LoginRequest {
   cpf: string
@@ -107,13 +107,29 @@ Deno.serve(async (req: Request) => {
 
   const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
   const pinBcrypt: string | undefined = authUser?.user?.app_metadata?.pin_bcrypt
+  const pinSha256: string | undefined = authUser?.user?.app_metadata?.pin_sha256
 
   if (!pinBcrypt) {
     console.error('pin_bcrypt not found for user:', user.id)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
-  const pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  // Detectar modo: JSON de pares (secure) vs SHA-256 direto (setup/legacy)
+  let pinOk = false
+  let resolvedPinHash = pin_hash // SHA-256 usado para criar a sessão Supabase
+  const pairs = tryParsePairsPayload(pin_hash)
+  if (pairs) {
+    if (!pinSha256) {
+      console.error('pin_sha256 not found for user (conta criada antes desta versão):', user.id)
+      return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    }
+    const result = await verifyPinWithPairs(pinSha256, pairs)
+    pinOk = result.ok
+    if (result.sha256) resolvedPinHash = result.sha256
+  } else {
+    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  }
+
   if (!pinOk) {
     await logAudit(user.id, 'pin_failed', { attempts: attempts + 1 })
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
@@ -155,7 +171,7 @@ Deno.serve(async (req: Request) => {
         'Content-Type': 'application/json',
         'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
       },
-      body: JSON.stringify({ email: user.email, password: pin_hash }),
+      body: JSON.stringify({ email: user.email, password: resolvedPinHash }),
     },
   )
 

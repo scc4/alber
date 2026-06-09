@@ -417,10 +417,12 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro temporário ao criar conta. Tente novamente.', 503)
   }
 
-  // PIN bcrypt em app_metadata (não crítico — auth-login usa pin_hash como senha primária)
+  // PIN bcrypt + sha256 em app_metadata
+  // pin_bcrypt: verificação setup mode (bcrypt cost 12)
+  // pin_sha256: verificação secure mode (pairs) — apenas server-side, nunca no JWT
   try {
     await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-      app_metadata: { pin_bcrypt: pinBcrypt },
+      app_metadata: { pin_bcrypt: pinBcrypt, pin_sha256: pin_hash },
     })
   } catch (e) {
     console.error('[auth-register] updateUserById failed (non-critical):', e)

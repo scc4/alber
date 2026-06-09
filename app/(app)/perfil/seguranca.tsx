@@ -60,7 +60,7 @@ function PinStep({ eyebrow, title, error, onComplete }: PinStepProps) {
     <View style={styles.pinWrap}>
       <Text style={styles.stepEyebrow}>{eyebrow}</Text>
       <Text style={styles.stepTitle}>{title}</Text>
-      <PINInput onComplete={onComplete} error={error} checkObvious={false} />
+      <PINInput mode="setup" onComplete={onComplete} error={error} checkObvious={false} />
     </View>
   )
 }

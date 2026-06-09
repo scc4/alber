@@ -116,6 +116,7 @@ export default function NovoPinScreen() {
     >
       <PINInput
         key={`recovery-${phase}-${errKey.current}`}
+        mode="setup"
         onComplete={isCreate ? handleCreate : handleConfirm}
         checkObvious={isCreate}
         onObvious={handleObvious}

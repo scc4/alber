@@ -70,6 +70,7 @@ export default function PinScreen() {
         {/* key força remount e reshuffle das posições ao trocar de fase */}
         <PINInput
           key={`${phase}-${errorKey.current}`}
+          mode="setup"
           onComplete={isCreate ? handleCreate : handleConfirm}
           checkObvious={isCreate}
           onObvious={handleObvious}

@@ -6,7 +6,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { sha256hex, bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
+import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -162,13 +162,22 @@ Deno.serve(async (req: Request) => {
 
   const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(sender.auth_id)
   const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
+  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
 
   if (!pinBcrypt) {
     console.error('pin_bcrypt not found for sender:', sender.id)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
-  const pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  let pinOk = false
+  const pairs = tryParsePairsPayload(pin_hash)
+  if (pairs) {
+    if (!pinSha256) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    const result = await verifyPinWithPairs(pinSha256, pairs)
+    pinOk = result.ok
+  } else {
+    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  }
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({
       user_id:    sender.id,

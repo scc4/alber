@@ -58,6 +58,50 @@ export async function aesDecrypt(encoded: string, secret: string): Promise<strin
   return new TextDecoder().decode(pt)
 }
 
+// ── PIN com pares (mode='secure') ────────────────────────────────────────────
+// Gera todas as 2^6 = 64 combinações possíveis dos pares clicados e testa
+// cada SHA-256 contra o hash armazenado. Custo total: ~64 × SHA-256 ≈ < 1ms.
+
+function generateCombinations(pairs: number[][]): number[][] {
+  if (pairs.length === 0) return [[]]
+  const [first, ...rest] = pairs
+  const restCombos = generateCombinations(rest)
+  return first.flatMap((digit: number) => restCombos.map((combo: number[]) => [digit, ...combo]))
+}
+
+/**
+ * Verifica se alguma combinação dos pares produz o SHA-256 armazenado.
+ * Retorna ok=true e o sha256 correspondente (usado para criar sessão Supabase).
+ */
+export async function verifyPinWithPairs(
+  storedSha256: string,
+  pairs: number[][],
+): Promise<{ ok: boolean; sha256: string | null }> {
+  const combinations = generateCombinations(pairs)
+  for (const combo of combinations) {
+    const hash = await sha256hex(combo.join(''))
+    if (hash === storedSha256) return { ok: true, sha256: hash }
+  }
+  return { ok: false, sha256: null }
+}
+
+/**
+ * Detecta se o payload é JSON de pares (mode='secure') ou SHA-256 direto (mode='setup').
+ * Retorna o array de pares se válido, null caso contrário.
+ */
+export function tryParsePairsPayload(pinHash: string): number[][] | null {
+  try {
+    const parsed = JSON.parse(pinHash)
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 6 &&
+      Array.isArray(parsed[0]) &&
+      parsed[0].length === 2
+    ) return parsed as number[][]
+  } catch { /* não é JSON */ }
+  return null
+}
+
 // ── HMAC-SHA256 (webhook validation) ─────────────────────────────────────────
 
 export async function hmacVerify(payload: string, secret: string, received: string): Promise<boolean> {

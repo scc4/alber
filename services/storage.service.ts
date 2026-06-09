@@ -61,13 +61,18 @@ export async function uploadImage(
       body: blob,
     })
 
-    if (!res.ok) return null
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}))
+      console.error(`[storage] upload failed ${res.status} bucket=${bucket} path=${storagePath}`, errBody)
+      return null
+    }
 
     if (bucket === 'split-photos') {
       return `${SUPABASE_URL}/storage/v1/object/authenticated/${bucket}/${storagePath}`
     }
     return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`
-  } catch {
+  } catch (e) {
+    console.error(`[storage] upload exception bucket=${bucket} path=${storagePath}`, e)
     return null
   }
 }

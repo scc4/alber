@@ -506,23 +506,26 @@ const styles = StyleSheet.create({
   // Cover upload
   coverUpload: {
     marginTop: 10,
-    padding: 20,
+    height: 160,
     borderWidth: 1,
     borderStyle: 'dashed',
     borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   coverUploadText: {
     fontSize: 12,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.5)',
     textAlign: 'center',
+    paddingHorizontal: spacing.lg,
   },
   coverPreview: {
     width: '100%',
     height: '100%',
-    borderRadius: 10,
+    borderRadius: 0,
   },
 
   // Hint

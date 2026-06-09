@@ -111,10 +111,14 @@ export default function GerenciarScreen() {
     if (!lounge || !token) return
     setSaving(true)
     try {
-      const uploadedUrl = bgImageUri
-        ? await uploadImage(bgImageUri, 'lounge-images', `${lounge.id}/bg/${Date.now()}`, token)
-        : null
-      updateVisual(lounge.id, accent, uploadedUrl)
+      // imageUri=undefined → keep existing; imageUri=string → replace; imageUri=null → clear
+      let newImageUri: string | null | undefined = undefined
+      if (bgImageUri) {
+        const uploaded = await uploadImage(bgImageUri, 'lounge-images', `${lounge.id}/bg/${Date.now()}`, token)
+        if (uploaded) newImageUri = uploaded
+        // upload failed: keep existing image (newImageUri stays undefined)
+      }
+      updateVisual(lounge.id, accent, newImageUri)
       router.back()
     } finally {
       setSaving(false)
@@ -810,29 +814,35 @@ const styles = StyleSheet.create({
   },
   bgUpload: {
     marginTop: 12,
-    padding: 24,
+    height: 160,
     backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 0.5,
     borderStyle: 'dashed',
     borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: 12,
     alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
   bgUploadTitle: {
     fontSize: 13,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.55)',
+    paddingHorizontal: spacing.lg,
+    textAlign: 'center',
   },
   bgUploadHint: {
     fontSize: 11,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.32)',
     marginTop: 4,
+    paddingHorizontal: spacing.lg,
+    textAlign: 'center',
   },
   bgPreview: {
     width: '100%',
     height: '100%',
-    borderRadius: 10,
+    borderRadius: 0,
   },
   contrastNote: {
     marginTop: 14,

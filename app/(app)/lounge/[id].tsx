@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -127,6 +128,14 @@ export default function LoungeDetailScreen() {
     <View style={styles.root}>
       {/* ── Hero ──────────────────────────────────────────────────────────────── */}
       <View style={[styles.hero, { backgroundColor: lounge.bgDark }]}>
+        {lounge.imageUri ? (
+          <Image
+            source={{ uri: lounge.imageUri }}
+            style={styles.heroCover}
+            resizeMode="cover"
+          />
+        ) : null}
+        <View style={styles.heroScrim} pointerEvents="none" />
         {isOwner && (
           <View
             style={[styles.heroGlow, { backgroundColor: `${lounge.accent}22` }]}
@@ -331,6 +340,15 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     position: 'relative',
     justifyContent: 'flex-end',
+  },
+  heroCover: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+  },
+  heroScrim: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   heroGlow: {
     position: 'absolute',

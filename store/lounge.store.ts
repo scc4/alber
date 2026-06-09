@@ -202,6 +202,7 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
         type:        input.visibility === 'public' ? 'open' : 'closed',
         description: input.description,
         skin:        { accent: input.accent, bgDark: '#0a0a0a' },
+        image_url:   input.imageUri ?? null,
       }, token)
       set({ loading: false })
       return res

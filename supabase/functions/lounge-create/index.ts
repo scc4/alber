@@ -11,6 +11,7 @@ interface LoungeCreateRequest {
   type:         'open' | 'closed'       // open = público, closed = privado via link
   description?: string
   skin:         { accent: string; bgDark: string }
+  image_url?:   string | null
 }
 
 const supabaseAdmin = createClient(
@@ -44,7 +45,7 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { name, type, description, skin } = body
+  const { name, type, description, skin, image_url } = body
 
   if (!name?.trim()) return err('MISSING_FIELDS', 'name é obrigatório', 400)
   if (!['open', 'closed'].includes(type)) {
@@ -85,6 +86,7 @@ Deno.serve(async (req: Request) => {
       name:         name.trim(),
       type,
       description:  description?.trim() ?? null,
+      image_url:    image_url ?? null,
       owner_id:     user.id,
       skin:         skin ?? { accent: '#5BCEC9', bgDark: '#050a0c' },
       invite_token,

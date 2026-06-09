@@ -254,6 +254,7 @@ export interface CreateLoungeInput {
   type:        'open' | 'closed'
   description: string
   skin:        { accent: string; bgDark: string }
+  image_url?:  string | null
 }
 
 export interface CreateLoungeResponse {

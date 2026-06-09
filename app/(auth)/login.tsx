@@ -24,7 +24,7 @@ import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Field } from '../../components/core/Field'
 import { useAuthStore } from '../../store/auth.store'
 import * as authService from '../../services/auth.service'
-import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
+import { sha256Hex, normalizeSecurityAnswer, legacyDevHash } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
@@ -88,11 +88,11 @@ export default function LoginScreen() {
     if (answer.trim().length < 2 || isLoggingIn) return
     setIsLoggingIn(true)
     try {
-      const answerHash = await sha256Hex(normalizeSecurityAnswer(answer))
-      // Envia CPF sem formatação; handle é enviado como-está
-      // (backend retorna INVALID_CREDENTIALS para handle — suporte futuro)
+      const normalized = normalizeSecurityAnswer(answer)
+      const answerHash = await sha256Hex(normalized)
+      const legacyAnswerHash = legacyDevHash(normalized)
       const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
-      await login(cpfOrHandle, pinHash, answerHash)
+      await login(cpfOrHandle, pinHash, answerHash, legacyAnswerHash)
       router.replace('/(app)/')
     } catch (e: unknown) {
       setIsLoggingIn(false)
@@ -197,6 +197,7 @@ export default function LoginScreen() {
             key={`login-pin-${pinErrKey.current}`}
             onComplete={handlePINComplete}
             mode={pinMode}
+            legacyCompat={pinMode === 'setup'}
             error={pinError}
           />
 

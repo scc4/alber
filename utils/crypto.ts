@@ -15,6 +15,11 @@ export function normalizeSecurityAnswer(answer: string): string {
     .trim()
 }
 
+// Hash legado (fallback dev) — usado apenas para migração de contas antigas
+export function legacyDevHash(input: string): string {
+  return `dev_${input.split('').reduce((a, c) => a + c.charCodeAt(0), 0).toString(16)}`
+}
+
 // Mascara uma resposta para exibição (spec 05_security.md seção 3)
 export function maskAnswer(answer: string): string {
   const n = answer.length

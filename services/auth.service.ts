@@ -114,11 +114,15 @@ export interface LoginResponse {
 }
 
 export async function login(
-  cpf:                  string,
-  pin_hash:             string,
-  security_answer_hash: string,
+  cpf:                         string,
+  pin_hash:                    string,
+  security_answer_hash:        string,
+  security_answer_hash_legacy?: string,
 ): Promise<LoginResponse> {
-  return post<LoginResponse>('auth-login', { cpf, pin_hash, security_answer_hash })
+  return post<LoginResponse>('auth-login', {
+    cpf, pin_hash, security_answer_hash,
+    ...(security_answer_hash_legacy ? { security_answer_hash_legacy } : {}),
+  })
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────

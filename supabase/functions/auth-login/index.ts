@@ -4,12 +4,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
-import { sha256hex, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, verifyPinWithPairsBcryptFallback } from '../_shared/crypto.ts'
+import { sha256hex, bcryptHash, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 
 interface LoginRequest {
   cpf: string
   pin_hash: string
   security_answer_hash: string
+  security_answer_hash_legacy?: string   // dev-fallback hash — migração de contas antigas
 }
 
 // Janela de bloqueio e máximo de tentativas (spec 05_security §2)
@@ -61,7 +62,7 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { cpf, pin_hash, security_answer_hash } = body
+  const { cpf, pin_hash, security_answer_hash, security_answer_hash_legacy } = body
 
   if (!cpf || !pin_hash || !security_answer_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -103,8 +104,6 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Verificar PIN ────────────────────────────────────────────────────────────
-  // pin_hash = SHA-256(digits) enviado pelo app
-  // pin_bcrypt = bcrypt(pin_hash) armazenado no app_metadata
 
   const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
   const pinBcrypt: string | undefined = authUser?.user?.app_metadata?.pin_bcrypt
@@ -115,67 +114,98 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
-  // Detectar modo: JSON de pares (secure) vs SHA-256 direto (setup/legacy)
-  let pinOk = false
-  let resolvedPinHash = pin_hash // SHA-256 usado para criar a sessão Supabase
+  let pinOk          = false
+  let resolvedPinHash = pin_hash
+  let legacyMigration = false   // true quando conta foi registrada com dev-fallback hash
+
   const pairs = tryParsePairsPayload(pin_hash)
   console.log('[auth-login] pin_mode=', pairs ? 'pairs' : 'sha256',
-    'pin_sha256_present=', !!pinSha256,
-    'pin_sha256_len=', pinSha256?.length ?? 0)  // 64=real SHA-256; <64=dev fallback
+    'pin_sha256_len=', pinSha256?.length ?? 0)
+
   if (pairs) {
-    if (!pinSha256) {
-      console.warn('[auth-login] pin_sha256 ausente → PIN_SETUP_REQUIRED')
-      return err('PIN_SETUP_REQUIRED', 'PIN_SETUP_REQUIRED', 401)
-    }
-    if (pinSha256.length !== 64) {
-      // pin_sha256 foi gravado com o fallback dev_ do frontend — acionar setup novamente
-      console.warn('[auth-login] pin_sha256 inválido (len=', pinSha256.length, ') → PIN_SETUP_REQUIRED')
+    // ── Modo pares (fast login) ──────────────────────────────────────────────
+    if (!pinSha256 || pinSha256.length !== 64) {
+      console.warn('[auth-login] pin_sha256 ausente/inválido → PIN_SETUP_REQUIRED')
       return err('PIN_SETUP_REQUIRED', 'PIN_SETUP_REQUIRED', 401)
     }
     const result = await verifyPinWithPairs(pinSha256, pairs)
     console.log('[auth-login] verifyPinWithPairs ok=', result.ok)
     pinOk = result.ok
     if (result.sha256) resolvedPinHash = result.sha256
+
   } else {
-    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
-    console.log('[auth-login] bcryptVerify ok=', pinOk, 'pin_hash_len=', pin_hash.length)
-    // Auto-cura: grava pin_sha256 se estava faltando ou era inválido (dev fallback)
-    const needsHeal = pinOk && (!pinSha256 || pinSha256.length !== 64) && pin_hash.length === 64
-    if (needsHeal) {
-      const { error: healError } = await supabaseAdmin.auth.admin.updateUserById(user.auth_id, {
-        app_metadata: { ...(authUser?.user?.app_metadata ?? {}), pin_sha256: pin_hash },
-      })
-      if (healError) console.warn('[auth-login] auto-heal falhou:', healError.message)
-      else console.log('[auth-login] auto-heal: pin_sha256 gravado com sucesso')
+    // ── Modo setup (SHA-256 direto ou payload de migração { sha256, legacy }) ─
+    let dualPayload: { sha256: string; legacy: string } | null = null
+    try {
+      const p = JSON.parse(pin_hash)
+      if (p?.sha256 && p?.legacy) dualPayload = p
+    } catch { /* plain SHA-256 */ }
+
+    if (dualPayload) {
+      // Tenta hash real primeiro (conta nova com expo-crypto)
+      pinOk = await bcryptVerify(dualPayload.sha256, pinBcrypt)
+      if (pinOk) {
+        resolvedPinHash = dualPayload.sha256
+        console.log('[auth-login] bcryptVerify(sha256) ok=true')
+      } else {
+        // Tenta hash legado (conta registrada antes do expo-crypto)
+        pinOk = await bcryptVerify(dualPayload.legacy, pinBcrypt)
+        console.log('[auth-login] bcryptVerify(legacy) ok=', pinOk)
+        if (pinOk) {
+          resolvedPinHash  = dualPayload.sha256   // sessão usa hash real
+          legacyMigration  = true
+        }
+      }
+    } else {
+      // Plain SHA-256 (sem payload de migração)
+      pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+      console.log('[auth-login] bcryptVerify(plain) ok=', pinOk, 'len=', pin_hash.length)
+      if (pinOk && (!pinSha256 || pinSha256.length !== 64) && pin_hash.length === 64) {
+        const { error: healError } = await supabaseAdmin.auth.admin.updateUserById(user.auth_id, {
+          app_metadata: { ...(authUser?.user?.app_metadata ?? {}), pin_sha256: pin_hash },
+        })
+        if (healError) console.warn('[auth-login] pin_sha256 auto-heal failed:', healError.message)
+        else console.log('[auth-login] pin_sha256 auto-heal ok')
+      }
     }
   }
 
   if (!pinOk) {
-    console.error('[auth-login] FAIL:pin_wrong mode=', pairs ? 'pairs' : 'sha256')
+    console.error('[auth-login] FAIL:pin_wrong')
     await logAudit(user.id, 'pin_failed', { attempts: attempts + 1 })
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
   // ── Verificar pergunta de segurança ──────────────────────────────────────────
-  // Spec 05_security §3: sorteia 1 de 4 perguntas aleatoriamente.
-  // O app envia o hash da resposta à pergunta que escolheu mostrar.
-  // O BFF verifica contra todas as 4 hashes armazenadas.
-  // Qualquer match = autenticação válida para MVP.
 
   const { data: questions } = await supabaseAdmin
     .from('security_questions')
-    .select('answer_hash')
+    .select('id, position, answer_hash')
     .eq('user_id', user.id)
+    .order('position')
 
   if (!questions || questions.length === 0) {
-    console.error('No security questions found for user:', user.id)
+    console.error('[auth-login] no security questions for user:', user.id)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
   const answerMatches = await Promise.all(
     questions.map(q => bcryptVerify(security_answer_hash, q.answer_hash))
   )
-  const answerOk = answerMatches.some(Boolean)
+  let answerOk        = answerMatches.some(Boolean)
+  let legacyAnswerIdx = -1
+
+  if (!answerOk && security_answer_hash_legacy) {
+    const legacyMatches = await Promise.all(
+      questions.map(q => bcryptVerify(security_answer_hash_legacy, q.answer_hash))
+    )
+    answerOk        = legacyMatches.some(Boolean)
+    legacyAnswerIdx = legacyMatches.findIndex(Boolean)
+    if (answerOk) {
+      console.log('[auth-login] security_answer matched via legacy hash (idx=', legacyAnswerIdx, ')')
+      legacyMigration = true
+    }
+  }
 
   if (!answerOk) {
     console.error('[auth-login] FAIL:security_answer_wrong user=', user.id)
@@ -183,7 +213,36 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
-  // ── Sucesso — gerar sessão JWT via Supabase Auth password flow ───────────────
+  // ── Migração legada: atualizar credenciais com hash real ─────────────────────
+  // Executa ANTES do signIn para garantir que a senha Supabase esteja correta.
+
+  if (legacyMigration) {
+    console.log('[auth-login] legacy migration: updating credentials')
+    const newPinBcrypt = await bcryptHash(resolvedPinHash)
+    const { error: migrErr } = await supabaseAdmin.auth.admin.updateUserById(user.auth_id, {
+      password:     resolvedPinHash,
+      app_metadata: {
+        ...(authUser?.user?.app_metadata ?? {}),
+        pin_bcrypt: newPinBcrypt,
+        pin_sha256: resolvedPinHash,
+      },
+    })
+    if (migrErr) console.warn('[auth-login] legacy PIN migration failed:', migrErr.message)
+    else console.log('[auth-login] legacy PIN migration ok')
+
+    // Migrar resposta de segurança do match legado
+    if (legacyAnswerIdx >= 0 && security_answer_hash.length === 64) {
+      const newAnswerBcrypt = await bcryptHash(security_answer_hash, 6)
+      const { error: qErr } = await supabaseAdmin
+        .from('security_questions')
+        .update({ answer_hash: newAnswerBcrypt })
+        .eq('id', questions[legacyAnswerIdx].id)
+      if (qErr) console.warn('[auth-login] security question migration failed:', qErr.message)
+      else console.log('[auth-login] security question', legacyAnswerIdx + 1, 'migrated')
+    }
+  }
+
+  // ── Gerar sessão JWT via Supabase Auth password flow ─────────────────────────
 
   const signInRes = await fetch(
     `${Deno.env.get('SUPABASE_URL')}/auth/v1/token?grant_type=password`,
@@ -208,7 +267,7 @@ Deno.serve(async (req: Request) => {
     refresh_token: string
   }
 
-  await logAudit(user.id, 'login_success', {})
+  await logAudit(user.id, 'login_success', { legacy_migration: legacyMigration })
 
   return json({
     token:         access_token,

@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
-import { sha256Hex } from '../../utils/crypto'
+import { sha256Hex, legacyDevHash } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
@@ -78,6 +78,8 @@ export interface PINInputProps {
   /** Mensagem de erro externo — dispara shake */
   error?:        string | null
   disabled?:     boolean
+  /** Inclui hash legado no payload — somente no fluxo de migração de contas antigas */
+  legacyCompat?: boolean
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -89,6 +91,7 @@ export function PINInput({
   onObvious,
   error,
   disabled      = false,
+  legacyCompat  = false,
 }: PINInputProps) {
   // Setup: acumula dígitos reais para hash SHA-256
   const [digits,       setDigits]       = useState<number[]>([])
@@ -148,7 +151,10 @@ export function PINInput({
           return
         }
         sha256Hex(seq).then(hash => {
-          onComplete(hash)
+          const payload = legacyCompat
+            ? JSON.stringify({ sha256: hash, legacy: legacyDevHash(seq) })
+            : hash
+          onComplete(payload)
           setTimeout(() => { setDigits([]); setSetupKeys(generateShuffledDigits()) }, 400)
         })
       }

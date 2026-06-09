@@ -115,29 +115,34 @@ Deno.serve(async (req: Request) => {
 
   const { data: questions } = await supabaseAdmin
     .from('security_questions')
-    .select('id, position, question, answer_normalized')
+    .select('id, position, question, answer_sha256, answer_normalized')
     .eq('user_id', userId)
     .order('position')
 
   if (!questions || questions.length === 0) return json({ question: '', options: [] })
 
-  // Escolhe a primeira pergunta com answer_normalized disponível
-  const row = questions.find(q => q.answer_normalized) ?? null
-  if (!row || !row.answer_normalized) return json({ question: row?.question ?? '', options: [] })
+  // Escolhe a primeira pergunta com answer_sha256 disponível
+  const row = questions.find(q => q.answer_sha256) ?? null
+  if (!row || !row.answer_sha256) return json({ question: row?.question ?? '', options: [] })
 
-  const answerNorm = row.answer_normalized as string
+  const realSha256    = row.answer_sha256    as string
+  const answerNorm    = (row.answer_normalized as string | null) ?? ''
 
-  // ── Gerar opções: hash + display mascarado ───────────────────────────────────
+  // ── Gerar opções: hash real do banco + decoys com sha256 próprio ─────────────
 
-  const decoys = generateDecoys(answerNorm, 4)
-  const allTexts = [answerNorm, ...decoys]
+  const decoys = generateDecoys(answerNorm || 'resposta', 4)
 
-  const options = await Promise.all(
-    allTexts.map(async text => ({
+  const decoyOptions = await Promise.all(
+    decoys.map(async text => ({
       hash:    await sha256hex(text),
       display: maskAnswer(text),
     }))
   )
+
+  const options = [
+    { hash: realSha256, display: maskAnswer(answerNorm || '***') },
+    ...decoyOptions,
+  ]
 
   // Embaralha para que a opção real não fique sempre na posição 0
   const shuffled = [...options].sort(() => Math.random() - 0.5)

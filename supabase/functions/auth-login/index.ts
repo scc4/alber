@@ -111,7 +111,7 @@ Deno.serve(async (req: Request) => {
   const pinSha256: string | undefined = authUser?.user?.app_metadata?.pin_sha256
 
   if (!pinBcrypt) {
-    console.error('pin_bcrypt not found for user:', user.id)
+    console.error('[auth-login] pin_bcrypt not found for user:', user.id)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
@@ -119,11 +119,17 @@ Deno.serve(async (req: Request) => {
   let pinOk = false
   let resolvedPinHash = pin_hash // SHA-256 usado para criar a sessão Supabase
   const pairs = tryParsePairsPayload(pin_hash)
-  console.log('[auth-login] pin_mode=', pairs ? 'pairs' : 'sha256', 'pin_sha256_present=', !!pinSha256)
+  console.log('[auth-login] pin_mode=', pairs ? 'pairs' : 'sha256',
+    'pin_sha256_present=', !!pinSha256,
+    'pin_sha256_len=', pinSha256?.length ?? 0)  // 64=real SHA-256; <64=dev fallback
   if (pairs) {
     if (!pinSha256) {
-      // Conta criada antes do pin_sha256 ser gravado — pede que o app reenvie em modo setup
-      console.warn('[auth-login] pin_sha256 ausente, solicitando PIN_SETUP_REQUIRED')
+      console.warn('[auth-login] pin_sha256 ausente → PIN_SETUP_REQUIRED')
+      return err('PIN_SETUP_REQUIRED', 'PIN_SETUP_REQUIRED', 401)
+    }
+    if (pinSha256.length !== 64) {
+      // pin_sha256 foi gravado com o fallback dev_ do frontend — acionar setup novamente
+      console.warn('[auth-login] pin_sha256 inválido (len=', pinSha256.length, ') → PIN_SETUP_REQUIRED')
       return err('PIN_SETUP_REQUIRED', 'PIN_SETUP_REQUIRED', 401)
     }
     const result = await verifyPinWithPairs(pinSha256, pairs)
@@ -132,12 +138,15 @@ Deno.serve(async (req: Request) => {
     if (result.sha256) resolvedPinHash = result.sha256
   } else {
     pinOk = await bcryptVerify(pin_hash, pinBcrypt)
-    console.log('[auth-login] bcryptVerify ok=', pinOk)
-    // Auto-cura: se pin_sha256 estava faltando e o bcrypt passou, grava agora
-    if (pinOk && !pinSha256) {
-      await supabaseAdmin.auth.admin.updateUserById(user.auth_id, {
+    console.log('[auth-login] bcryptVerify ok=', pinOk, 'pin_hash_len=', pin_hash.length)
+    // Auto-cura: grava pin_sha256 se estava faltando ou era inválido (dev fallback)
+    const needsHeal = pinOk && (!pinSha256 || pinSha256.length !== 64) && pin_hash.length === 64
+    if (needsHeal) {
+      const { error: healError } = await supabaseAdmin.auth.admin.updateUserById(user.auth_id, {
         app_metadata: { ...(authUser?.user?.app_metadata ?? {}), pin_sha256: pin_hash },
-      }).catch(e => console.warn('[auth-login] falha ao gravar pin_sha256 auto-heal:', e))
+      })
+      if (healError) console.warn('[auth-login] auto-heal falhou:', healError.message)
+      else console.log('[auth-login] auto-heal: pin_sha256 gravado com sucesso')
     }
   }
 

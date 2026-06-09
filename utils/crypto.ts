@@ -1,16 +1,8 @@
-// SHA-256 via Web Crypto API (disponível no Hermes/RN 0.71+)
-// Usado para hash de PIN antes de enviar ao backend (spec 05_security.md seção 7)
+import * as ExpoCrypto from 'expo-crypto'
+
+// SHA-256 via expo-crypto (nativo, confiável em Android/iOS com Hermes)
 export async function sha256Hex(input: string): Promise<string> {
-  try {
-    const data = new TextEncoder().encode(input)
-    const buf = await globalThis.crypto.subtle.digest('SHA-256', data)
-    return Array.from(new Uint8Array(buf))
-      .map(b => b.toString(16).padStart(2, '0'))
-      .join('')
-  } catch {
-    // Fallback de dev — nunca usar em produção
-    return `dev_${input.split('').reduce((a, c) => a + c.charCodeAt(0), 0).toString(16)}`
-  }
+  return ExpoCrypto.digestStringAsync(ExpoCrypto.CryptoDigestAlgorithm.SHA256, input)
 }
 
 // Normaliza string para hash de resposta de segurança:

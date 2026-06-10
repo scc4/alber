@@ -608,6 +608,7 @@
       "visibilityLabel": "VISIBILIDADE",
       "inviteSection": "CONVITE",
       "generateLinkCta": "Gerar link",
+      "inviteNotAvailable": "Link de convite não disponível para este Lounge.",
       "pendingSection": "APROVAÇÕES PENDENTES",
       "noPending": "Nenhuma solicitação pendente",
       "approveCta": "Aprovar",

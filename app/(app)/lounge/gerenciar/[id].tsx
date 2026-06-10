@@ -42,12 +42,10 @@ export default function GerenciarScreen() {
 
   const getLoungeById  = useLoungeStore(s => s.getLoungeById)
   const approveRequest = useLoungeStore(s => s.approveRequest)
-  const rejectRequest  = useLoungeStore(s => s.rejectRequest)
   const promoteMember  = useLoungeStore(s => s.promoteMember)
   const removeMember   = useLoungeStore(s => s.removeMember)
   const sendMessage    = useLoungeStore(s => s.sendMessage)
   const updateVisual   = useLoungeStore(s => s.updateVisual)
-  const generateInvite = useLoungeStore(s => s.generateInvite)
   const cancelEvent    = useLoungeStore(s => s.cancelEvent)
 
   const lounge = getLoungeById(id)
@@ -82,13 +80,13 @@ export default function GerenciarScreen() {
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
   function handleApprove(req: LoungeRequest) {
-    if (!lounge) return
-    approveRequest(lounge.id, req.id)
+    if (!lounge || !token) return
+    approveRequest(req.id, true, token)
   }
 
   function handleReject(req: LoungeRequest) {
-    if (!lounge) return
-    rejectRequest(lounge.id, req.id)
+    if (!lounge || !token) return
+    approveRequest(req.id, false, token)
   }
 
   function handlePromote(member: LoungeMember) {
@@ -97,13 +95,19 @@ export default function GerenciarScreen() {
   }
 
   function handleRemove(member: LoungeMember) {
-    if (!lounge) return
-    removeMember(lounge.id, member.id)
+    if (!lounge || !token) return
+    removeMember(lounge.id, member.id, token)
   }
 
   function handleSendMessage() {
     if (!lounge || !msgText.trim()) return
-    sendMessage(lounge.id, msgText.trim())
+    const name   = user?.name ?? ''
+    const handle = user?.handle ?? ''
+    const parts  = name.trim().split(/\s+/).filter(Boolean)
+    const initials = parts.length > 1
+      ? ((parts[0][0] ?? '') + (parts[parts.length - 1][0] ?? '')).toUpperCase()
+      : name.trim().substring(0, 2).toUpperCase()
+    sendMessage(lounge.id, msgText.trim(), name, handle, initials)
     setMsgText('')
   }
 
@@ -131,9 +135,7 @@ export default function GerenciarScreen() {
   }
 
   function handleGenerateInvite() {
-    if (!lounge) return
-    const token = generateInvite(lounge.id)
-    setInviteUrl(`alber://lounge/${lounge.id}/convite/${token}`)
+    Alert.alert(t('lounge.gerenciar.inviteSection'), t('lounge.gerenciar.inviteNotAvailable'))
   }
 
   function handleCancelEvent(eventId: string, eventName: string) {

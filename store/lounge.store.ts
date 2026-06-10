@@ -111,7 +111,7 @@ interface LoungeState {
 
   // Local-only (sem EF definida no MVP)
   promoteMember:  (loungeId: string, memberId: string) => void
-  removeMember:   (loungeId: string, memberId: string) => void
+  removeMember:   (loungeId: string, memberId: string, token: string) => Promise<void>
   sendMessage:    (loungeId: string, content: string, authorName: string, authorHandle: string, authorInitials: string) => void
   updateVisual:   (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
   cancelEvent:    (eventId: string) => void
@@ -323,14 +323,20 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     }))
   },
 
-  removeMember: (loungeId, memberId) => {
-    set(s => ({
-      myLounges: s.myLounges.map(l =>
-        l.id === loungeId
-          ? { ...l, members: l.members.filter(m => m.id !== memberId), memberCount: l.memberCount - 1 }
-          : l
-      ),
-    }))
+  removeMember: async (loungeId, memberId, token) => {
+    try {
+      await loungeService.removeMember(loungeId, memberId, token)
+      set(s => ({
+        myLounges: s.myLounges.map(l =>
+          l.id === loungeId
+            ? { ...l, members: l.members.filter(m => m.id !== memberId), memberCount: l.memberCount - 1 }
+            : l
+        ),
+      }))
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao remover membro' })
+      throw e
+    }
   },
 
   sendMessage: (loungeId, content, authorName, authorHandle, authorInitials) => {

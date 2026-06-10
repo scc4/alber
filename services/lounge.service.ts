@@ -107,7 +107,9 @@ interface DbMyMembership {
   id:     string
   role:   'owner' | 'admin' | 'member'
   status: 'pending' | 'active' | 'banned'
-  space:  Omit<DbSpace, 'space_members' | 'events'>
+  space:  Omit<DbSpace, 'space_members' | 'events'> & {
+    member_count?: [{ count: number }]
+  }
 }
 
 // ── Mapping helpers ───────────────────────────────────────────────────────────
@@ -235,7 +237,7 @@ function mapLoungeListItem(sm: DbMyMembership): Lounge {
     bgDark:          skin.bgDark  ?? '#0a0a0a',
     imageUri:        s.image_url  ?? null,
     visibility:      s.type === 'open' ? 'public' : 'private',
-    memberCount:     0,
+    memberCount:     sm.space.member_count?.[0]?.count ?? 0,
     role:            mapRole(sm.role),
     ownerId:         s.owner_id,
     members:         [],
@@ -322,6 +324,10 @@ export async function buyTicket(
   return bffPost('event-ticket', { event_id, pin_hash }, token)
 }
 
+export async function removeMember(space_id: string, user_id: string, token: string): Promise<void> {
+  await bffPost('lounge-remove-member', { space_id, user_id }, token)
+}
+
 export async function updateLoungeVisual(
   space_id: string,
   accent: string,
@@ -343,7 +349,10 @@ const SPACE_FULL_SELECT = [
 export async function getMyLounges(token: string): Promise<Lounge[]> {
   const rows = await restGet<DbMyMembership[]>(
     'space_members?select=id,role,status,' +
-    'space:spaces!space_members_space_id_fkey(id,name,type,description,image_url,invite_token,skin,owner_id,status,created_at)' +
+    'space:spaces!space_members_space_id_fkey(' +
+      'id,name,type,description,image_url,invite_token,skin,owner_id,status,created_at,' +
+      'member_count:space_members!space_members_space_id_fkey(count)' +
+    ')' +
     '&status=eq.active&order=created_at.asc',
     token,
   )

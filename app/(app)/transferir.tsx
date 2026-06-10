@@ -17,10 +17,7 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../components/financial/PINInput'
-import {
-  SecurityConfirmation,
-  SecurityQuestion,
-} from '../../components/financial/SecurityConfirmation'
+import { SecurityConfirmation } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
@@ -71,24 +68,7 @@ export default function TransferirScreen() {
   const [transferirResult, setTransferirResult] = useState<TransferirResponse | null>(null)
   const [recents, setRecents]               = useState<Recipient[]>([])
   const [recentsLoading, setRecentsLoading] = useState(true)
-  const [securityQuestions, setSecurityQuestions] = useState<SecurityQuestion[]>([])
-
-  useEffect(() => {
-    if (!token || !user?.id) return
-    ;(async () => {
-      try {
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/security_questions?user_id=eq.${user.id}&select=question&order=position.asc`,
-          { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
-        )
-        if (!res.ok) return
-        const rows: { question: string }[] = await res.json()
-        if (Array.isArray(rows) && rows.length > 0) {
-          setSecurityQuestions(rows.map(r => ({ question: r.question })))
-        }
-      } catch { /* silencioso — SecurityConfirmation usa mock */ }
-    })()
-  }, [token, user?.id])
+  const [securityWrongAnswer, setSecurityWrongAnswer] = useState(false)
 
   useEffect(() => {
     if (!token) { setRecentsLoading(false); return }
@@ -178,7 +158,12 @@ export default function TransferirScreen() {
       setStep('success')
     } catch (e) {
       if (e instanceof BffError) {
-        if (e.code === 'RECIPIENT_NOT_FOUND' || e.code === 'SELF_TRANSFER') {
+        if (e.code === 'WRONG_SECURITY_ANSWER') {
+          setSecurityWrongAnswer(true)
+          setTimeout(() => setSecurityWrongAnswer(false), 1800)
+          setStep('security')
+          return
+        } else if (e.code === 'RECIPIENT_NOT_FOUND' || e.code === 'SELF_TRANSFER') {
           setApiError(
             e.code === 'SELF_TRANSFER'
               ? t('transferir.selfTransferError')
@@ -204,15 +189,6 @@ export default function TransferirScreen() {
         setStep('search')
       }
     }
-  }
-
-  const handleSecurityFail = (_attemptsLeft: number) => {
-    // BFF incrementa contador internamente — nenhuma ação local necessária
-  }
-
-  const handleSecurityBlocked = () => {
-    setPinAttempts(0)
-    setStep('search')
   }
 
   // ─── Etapa 1: Busca ──────────────────────────────────────────────────────────
@@ -355,10 +331,10 @@ export default function TransferirScreen() {
         closeLabel={t('transferir.back')}
       >
         <SecurityConfirmation
-          questions={securityQuestions.length ? securityQuestions : undefined}
+          identifier={`@${user!.handle}`}
+          pinHash={pinHash!}
+          wrongAnswer={securityWrongAnswer}
           onPass={handleSecurityPass}
-          onFail={handleSecurityFail}
-          onBlocked={handleSecurityBlocked}
         />
       </FlowShell>
     )

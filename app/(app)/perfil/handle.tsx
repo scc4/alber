@@ -14,11 +14,11 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../../components/financial/PINInput'
+import { SecurityConfirmation } from '../../../components/financial/SecurityConfirmation'
 import { useAuthStore } from '../../../store/auth.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
-import { sha256Hex, normalizeSecurityAnswer } from '../../../utils/crypto'
 import { formatDate } from '../../../utils/format'
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
@@ -169,62 +169,6 @@ function StepInput({ currentHandle, inCooldown, nextAllowedDate, onConfirm }: St
   )
 }
 
-// ── StepSecurity (text input for answer) ─────────────────────────────────────
-
-interface StepSecurityProps {
-  onConfirm: (answerHash: string) => void
-}
-
-function StepSecurity({ onConfirm }: StepSecurityProps) {
-  const { t }           = useTranslation()
-  const [answer, setAnswer] = useState('')
-  const canSubmit           = answer.trim().length >= 2
-
-  const handleConfirm = async () => {
-    const hash = await sha256Hex(normalizeSecurityAnswer(answer))
-    onConfirm(hash)
-  }
-
-  return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        style={styles.flex}
-        contentContainerStyle={styles.inputContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <Text style={styles.stepEyebrow}>{t('perfil.handle.securityContext')}</Text>
-        <Text style={styles.stepTitle}>{t('perfil.handle.securitySubtitle')}</Text>
-
-        <TextInput
-          style={styles.securityInput}
-          value={answer}
-          onChangeText={setAnswer}
-          placeholder={t('perfil.handle.securityPlaceholder')}
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="done"
-          onSubmitEditing={canSubmit ? handleConfirm : undefined}
-        />
-
-        <TouchableOpacity
-          style={[styles.cta, !canSubmit && styles.ctaDisabled]}
-          onPress={canSubmit ? handleConfirm : undefined}
-          disabled={!canSubmit}
-          activeOpacity={0.75}
-        >
-          <Text style={[styles.ctaText, !canSubmit && styles.ctaTextDisabled]}>
-            {t('perfil.handle.confirmCta')}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
-  )
-}
-
 // ── StepSuccess ───────────────────────────────────────────────────────────────
 
 function StepSuccess({ newHandle }: { newHandle: string }) {
@@ -259,6 +203,7 @@ export default function HandleScreen() {
   const [pinError, setPinError]           = useState<string | null>(null)
   const [submitError, setSubmitError]     = useState<string | null>(null)
   const [submitting, setSubmitting]       = useState(false)
+  const [wrongAnswer, setWrongAnswer]     = useState(false)
   const [inCooldown, setInCooldown]       = useState(false)
   const [nextAllowedDate, setNextAllowed] = useState('')
 
@@ -320,8 +265,9 @@ export default function HandleScreen() {
         if (data.code === 'INVALID_CREDENTIALS' && data.message?.includes('PIN')) {
           setPinError(t('perfil.handle.pinError'))
           setStep('pin')
-        } else if (data.code === 'INVALID_CREDENTIALS') {
-          setSubmitError(t('perfil.handle.securityError'))
+        } else if (data.code === 'WRONG_SECURITY_ANSWER' || data.code === 'INVALID_CREDENTIALS') {
+          setWrongAnswer(true)
+          setTimeout(() => setWrongAnswer(false), 1800)
         } else if (data.code === 'HANDLE_TAKEN') {
           setSubmitError(t('perfil.handle.taken'))
           setStep('input')
@@ -372,19 +318,15 @@ export default function HandleScreen() {
       )}
 
       {step === 'security' && (
-        <View style={styles.flex}>
-          {submitError && (
-            <Text style={[styles.errorText, { paddingHorizontal: spacing.lg, marginTop: spacing.sm }]}>
-              {submitError}
-            </Text>
-          )}
-          {submitting ? (
-            <View style={styles.loadingWrap}>
-              <ActivityIndicator color={colors.white[100]} />
-            </View>
-          ) : (
-            <StepSecurity onConfirm={handleSecurityConfirm} />
-          )}
+        <View style={[styles.flex, { paddingHorizontal: spacing.lg }]}>
+          <SecurityConfirmation
+            identifier={`@${user.handle}`}
+            pinHash={pinHash}
+            eyebrow={t('perfil.handle.securityContext')}
+            submitting={submitting}
+            wrongAnswer={wrongAnswer}
+            onPass={handleSecurityConfirm}
+          />
         </View>
       )}
 

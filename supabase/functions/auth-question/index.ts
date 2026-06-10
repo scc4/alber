@@ -121,9 +121,13 @@ Deno.serve(async (req: Request) => {
 
   if (!questions || questions.length === 0) return json({ question: '', options: [] })
 
-  // Escolhe a primeira pergunta com answer_sha256 disponível
-  const row = questions.find(q => q.answer_sha256) ?? null
-  if (!row || !row.answer_sha256) return json({ question: row?.question ?? '', options: [] })
+  // Sorteia aleatoriamente entre as perguntas que têm answer_sha256
+  const eligible = questions.filter(q => q.answer_sha256)
+  if (eligible.length === 0) {
+    const first = questions[0]
+    return json({ question: first?.question ?? '', options: [] })
+  }
+  const row = eligible[Math.floor(Math.random() * eligible.length)]
 
   const realSha256    = row.answer_sha256    as string
   const answerNorm    = (row.answer_normalized as string | null) ?? ''

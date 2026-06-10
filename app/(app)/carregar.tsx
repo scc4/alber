@@ -20,10 +20,7 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../components/financial/PINInput'
-import {
-  SecurityConfirmation,
-  SecurityQuestion,
-} from '../../components/financial/SecurityConfirmation'
+import { SecurityConfirmation } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Eyebrow } from '../../components/shared/Eyebrow'
 import { QRCodeDisplay } from '../../components/financial/QRCodeDisplay'
@@ -89,27 +86,10 @@ export default function CarregarScreen() {
   const [carregarResult, setCarregarResult]       = useState<CarregarResponse | null>(null)
   const [carregarLoading, setCarregarLoading]     = useState(false)
   const [cashoutRate, setCashoutRate]             = useState(0.02) // fallback: 2%
-  const [securityQuestions, setSecurityQuestions] = useState<SecurityQuestion[]>([])
+  const [securityWrongAnswer, setSecurityWrongAnswer] = useState(false)
   const [kycWebViewVisible, setKycWebViewVisible] = useState(false)
   const [kycWebViewUrl, setKycWebViewUrl]         = useState('')
   const pinKey = useRef(0)
-
-  useEffect(() => {
-    if (!token || !user?.id) return
-    ;(async () => {
-      try {
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/security_questions?user_id=eq.${user.id}&select=question&order=position.asc`,
-          { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
-        )
-        if (!res.ok) return
-        const rows: { question: string }[] = await res.json()
-        if (Array.isArray(rows) && rows.length > 0) {
-          setSecurityQuestions(rows.map(r => ({ question: r.question })))
-        }
-      } catch { /* silencioso — SecurityConfirmation usa mock */ }
-    })()
-  }, [token, user?.id])
 
   useEffect(() => {
     if (!token) return
@@ -192,7 +172,12 @@ export default function CarregarScreen() {
       setStep('success')
     } catch (e) {
       if (e instanceof BffError) {
-        if (e.code === 'INSUFFICIENT_BALANCE') {
+        if (e.code === 'WRONG_SECURITY_ANSWER') {
+          setSecurityWrongAnswer(true)
+          setTimeout(() => setSecurityWrongAnswer(false), 1800)
+          setStep('security')
+          return
+        } else if (e.code === 'INSUFFICIENT_BALANCE') {
           setApiError(t('carregar.errorInsufficient'))
         } else if (e.code === 'KYC_REQUIRED') {
           setStep('kyc_blocked')
@@ -214,11 +199,6 @@ export default function CarregarScreen() {
       }
       setStep('value')
     }
-  }
-
-  const handleSecurityBlocked = () => {
-    setPinError(t('auth.security.blocked'))
-    setStep('value')
   }
 
   const handleDone = () => {
@@ -512,9 +492,10 @@ export default function CarregarScreen() {
         onBack={() => setStep('pin')}
       >
         <SecurityConfirmation
-          questions={securityQuestions.length ? securityQuestions : undefined}
+          identifier={`@${user!.handle}`}
+          pinHash={pinHash!}
+          wrongAnswer={securityWrongAnswer}
           onPass={handleSecurityPass}
-          onBlocked={handleSecurityBlocked}
         />
       </FlowShell>
     )

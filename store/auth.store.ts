@@ -128,6 +128,18 @@ export const useAuthStore = create<AuthState>((set) => ({
       accountStatus:   res.user.account_status as AccountStatus,
       isAuthenticated: true,
     })
+
+    // Enriquece user com pixKey e cpfMasked sem bloquear o login
+    authService.fetchUserProfile(res.token).then(profile => {
+      if (!profile) return
+      const enriched: AuthUser = {
+        ...user,
+        pixKey:     profile.pix_key_masked ?? '',
+        pixKeyType: (profile.pix_key_type ?? 'cpf') as AuthUser['pixKeyType'],
+      }
+      authService.saveUser(enriched as unknown as Record<string, unknown>)
+      set({ user: enriched })
+    }).catch(() => {})
   },
 
   // ── Sessão criada após registro ────────────────────────────────────────────

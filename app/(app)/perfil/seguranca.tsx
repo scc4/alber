@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -14,11 +14,11 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../../components/financial/PINInput'
+import { SecurityConfirmation } from '../../../components/financial/SecurityConfirmation'
 import { useAuthStore } from '../../../store/auth.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
-import { sha256Hex, normalizeSecurityAnswer } from '../../../utils/crypto'
 import { validateCPF } from '../../../utils/cpf'
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
@@ -72,60 +72,6 @@ function PinStep({ eyebrow, title, mode = 'secure', error, onComplete }: PinStep
       <Text style={styles.stepTitle}>{title}</Text>
       <PINInput mode={mode} onComplete={onComplete} error={error} checkObvious={false} />
     </View>
-  )
-}
-
-// ── SecurityStep (text input) ─────────────────────────────────────────────────
-
-interface SecurityStepProps {
-  eyebrow:   string
-  title:     string
-  error?:    string | null
-  onConfirm: (answerHash: string) => void
-}
-
-function SecurityStep({ eyebrow, title, error, onConfirm }: SecurityStepProps) {
-  const { t }               = useTranslation()
-  const [answer, setAnswer] = useState('')
-  const canSubmit           = answer.trim().length >= 2
-
-  const handleConfirm = async () => {
-    const hash = await sha256Hex(normalizeSecurityAnswer(answer))
-    onConfirm(hash)
-  }
-
-  return (
-    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={styles.flex} contentContainerStyle={styles.inputContent} keyboardShouldPersistTaps="handled">
-        <Text style={styles.stepEyebrow}>{eyebrow}</Text>
-        <Text style={styles.stepTitle}>{title}</Text>
-
-        {error && <Text style={styles.errorText}>{error}</Text>}
-
-        <TextInput
-          style={styles.securityInput}
-          value={answer}
-          onChangeText={setAnswer}
-          placeholder={t('perfil.handle.securityPlaceholder')}
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="done"
-          onSubmitEditing={canSubmit ? handleConfirm : undefined}
-        />
-
-        <TouchableOpacity
-          style={[styles.cta, !canSubmit && styles.ctaDisabled]}
-          onPress={canSubmit ? handleConfirm : undefined}
-          disabled={!canSubmit}
-          activeOpacity={0.75}
-        >
-          <Text style={[styles.ctaText, !canSubmit && styles.ctaTextDisabled]}>
-            {t('perfil.handle.confirmCta')}
-          </Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </KeyboardAvoidingView>
   )
 }
 
@@ -354,6 +300,7 @@ export default function SegurancaScreen() {
   const logout    = useAuthStore(s => s.logout)
 
   const [mode, setMode]               = useState<Mode>('main')
+  const [currentPixKey, setCurrentPixKey] = useState(user?.pixKey ?? '')
 
   // PIN flow state
   const [currentPinHash, setCurrentPinHash]     = useState('')
@@ -364,12 +311,23 @@ export default function SegurancaScreen() {
   const [smsError, setSmsError]                 = useState<string | null>(null)
   const [pinSecurityHash, setPinSecurityHash]   = useState('')
   const [submitting, setSubmitting]             = useState(false)
+  const [pinWrongAnswer, setPinWrongAnswer]     = useState(false)
 
   // Pix flow state
   const [pixKey, setPixKey]                     = useState('')
   const [pixKeyType, setPixKeyType]             = useState<PixKeyType>('cpf')
   const [pixPinHash, setPixPinHash]             = useState('')
   const [pixSecurityError, setPixSecurityError] = useState<string | null>(null)
+  const [pixWrongAnswer, setPixWrongAnswer]     = useState(false)
+
+  // Carrega chave PIX atual via perfil
+  useEffect(() => {
+    if (!token) return
+    fetch(`${BFF}/user-profile`, { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.pix_key_masked) setCurrentPixKey(d.pix_key_masked) })
+      .catch(() => {})
+  }, [token])
 
   if (!user) return null
 
@@ -427,8 +385,7 @@ export default function SegurancaScreen() {
   const handlePinSecurity = async (answerHash: string) => {
     setPinSecurityHash(answerHash)
     setSecurityError(null)
-
-    // Send SMS before showing SMS step
+    setSubmitting(true)
     try {
       await fetch(`${BFF}/perfil-send-sms`, {
         method:  'POST',
@@ -436,7 +393,9 @@ export default function SegurancaScreen() {
         body:    JSON.stringify({ purpose: 'pin_change' }),
       })
     } catch {
-      // best-effort — proceed to SMS step even if send fails
+      // best-effort — prossegue mesmo se o envio falhar
+    } finally {
+      setSubmitting(false)
     }
     setMode('pin_sms')
   }
@@ -514,10 +473,13 @@ export default function SegurancaScreen() {
       const data = await res.json()
 
       if (!res.ok) {
-        if (data.code === 'INVALID_CREDENTIALS' && data.message?.includes('PIN')) {
-          setMode('pix_pin')
-        } else if (data.code === 'INVALID_CREDENTIALS') {
-          setPixSecurityError(t('perfil.handle.securityError'))
+        if (data.code === 'WRONG_SECURITY_ANSWER' || data.code === 'INVALID_CREDENTIALS') {
+          if (data.message?.includes('PIN')) {
+            setMode('pix_pin')
+            return
+          }
+          setPixWrongAnswer(true)
+          setTimeout(() => setPixWrongAnswer(false), 1800)
         } else {
           setPixSecurityError(data.message ?? t('common.genericError'))
         }
@@ -538,7 +500,7 @@ export default function SegurancaScreen() {
 
       {mode === 'main' && (
         <MainView
-          pixKey={user.pixKey}
+          pixKey={currentPixKey}
           onStartPin={() => setMode('pin_current')}
           onStartPix={() => setMode('pix_input')}
         />
@@ -574,12 +536,16 @@ export default function SegurancaScreen() {
       )}
 
       {mode === 'pin_security' && (
-        <SecurityStep
-          eyebrow={t('perfil.seguranca.sectionQuestions')}
-          title={t('perfil.seguranca.securityHint')}
-          error={securityError}
-          onConfirm={handlePinSecurity}
-        />
+        <View style={styles.flex}>
+          <SecurityConfirmation
+            identifier={`@${user.handle}`}
+            pinHash={currentPinHash}
+            eyebrow={t('perfil.seguranca.sectionQuestions')}
+            submitting={submitting}
+            wrongAnswer={pinWrongAnswer}
+            onPass={handlePinSecurity}
+          />
+        </View>
       )}
 
       {mode === 'pin_sms' && (
@@ -614,12 +580,16 @@ export default function SegurancaScreen() {
       )}
 
       {mode === 'pix_security' && (
-        <SecurityStep
-          eyebrow={t('perfil.seguranca.sectionQuestions')}
-          title={t('perfil.seguranca.securityHint')}
-          error={pixSecurityError}
-          onConfirm={submitting ? () => {} : handlePixSecurity}
-        />
+        <View style={styles.flex}>
+          <SecurityConfirmation
+            identifier={`@${user.handle}`}
+            pinHash={pixPinHash}
+            eyebrow={t('perfil.seguranca.sectionQuestions')}
+            submitting={submitting}
+            wrongAnswer={pixWrongAnswer}
+            onPass={handlePixSecurity}
+          />
+        </View>
       )}
 
       {mode === 'pix_success' && (

@@ -40,39 +40,46 @@ export async function uploadImage(
   path: string,
   token: string,
 ): Promise<string | null> {
-  try {
-    const rawExt     = localUri.split('.').pop()?.split('?')[0]?.toLowerCase() ?? 'jpg'
-    const mime       = rawExt === 'png'  ? 'image/png'
-                     : rawExt === 'webp' ? 'image/webp'
-                     :                    'image/jpeg'
-    const ext        = mime === 'image/jpeg' ? 'jpg' : rawExt
-    const storagePath = `${path}.${ext}`
+  return new Promise(resolve => {
+    try {
+      const rawExt      = localUri.split('.').pop()?.split('?')[0]?.toLowerCase() ?? 'jpg'
+      const mime        = rawExt === 'png'  ? 'image/png'
+                        : rawExt === 'webp' ? 'image/webp'
+                        :                    'image/jpeg'
+      const ext         = mime === 'image/jpeg' ? 'jpg' : rawExt
+      const storagePath = `${path}.${ext}`
+      const url         = bucket === 'split-photos'
+        ? `${SUPABASE_URL}/storage/v1/object/authenticated/${bucket}/${storagePath}`
+        : `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`
 
-    const blob = await fetch(localUri).then(r => r.blob())
+      // Expo SDK 56 usa winter fetch que não suporta { uri, name, type } como FormDataPart.
+      // XMLHttpRequest ainda usa a implementação nativa do RN e aceita esse padrão.
+      const formData = new FormData()
+      formData.append('file', { uri: localUri, name: `upload.${ext}`, type: mime } as unknown as Blob)
 
-    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${storagePath}`, {
-      method: 'POST',
-      headers: {
-        Authorization:  `Bearer ${token}`,
-        apikey:         ANON_KEY,
-        'Content-Type': mime,
-        'x-upsert':     'true',
-      },
-      body: blob,
-    })
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', `${SUPABASE_URL}/storage/v1/object/${bucket}/${storagePath}`)
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`)
+      xhr.setRequestHeader('apikey', ANON_KEY)
+      xhr.setRequestHeader('x-upsert', 'true')
 
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({}))
-      console.error(`[storage] upload failed ${res.status} bucket=${bucket} path=${storagePath}`, errBody)
-      return null
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(url)
+        } else {
+          console.error(`[storage] upload failed ${xhr.status} bucket=${bucket} path=${storagePath}`, xhr.responseText)
+          resolve(null)
+        }
+      }
+      xhr.onerror = () => {
+        console.error(`[storage] upload network error bucket=${bucket} path=${storagePath}`)
+        resolve(null)
+      }
+
+      xhr.send(formData)
+    } catch (e) {
+      console.error(`[storage] upload exception bucket=${bucket} path=${path}`, e)
+      resolve(null)
     }
-
-    if (bucket === 'split-photos') {
-      return `${SUPABASE_URL}/storage/v1/object/authenticated/${bucket}/${storagePath}`
-    }
-    return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`
-  } catch (e) {
-    console.error(`[storage] upload exception bucket=${bucket} path=${storagePath}`, e)
-    return null
-  }
+  })
 }

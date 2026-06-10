@@ -8,6 +8,7 @@ import {
   Image,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -38,9 +39,10 @@ export default function LoungeDetailScreen() {
   const getLoungeById  = useLoungeStore(s => s.getLoungeById)
   const fetchLounge    = useLoungeStore(s => s.fetchLounge)
   const joinLounge     = useLoungeStore(s => s.joinLounge)
-  const setActive      = useLoungeStore(s => s.setCurrentLounge)
-  const loading        = useLoungeStore(s => s.loading)
-  const storeError     = useLoungeStore(s => s.error)
+  const setActive        = useLoungeStore(s => s.setCurrentLounge)
+  const currentLoungeId  = useLoungeStore(s => s.currentLounge?.id)
+  const loading          = useLoungeStore(s => s.loading)
+  const storeError       = useLoungeStore(s => s.error)
 
   const lounge = getLoungeById(id)
 
@@ -88,6 +90,7 @@ export default function LoungeDetailScreen() {
   const isOwner   = lounge.role === 'owner'
   const isManager = lounge.role === 'owner' || lounge.role === 'manager'
   const isMember  = lounge.role !== null
+  const isActive  = currentLoungeId === lounge.id
 
   const roleLabel = isOwner
     ? t('lounge.roleOwner')
@@ -111,6 +114,11 @@ export default function LoungeDetailScreen() {
   function handleSetActive() {
     if (!lounge) return
     setActive(lounge.id)
+  }
+
+  function handleToggleActive(val: boolean) {
+    if (!lounge) return
+    setActive(val ? lounge.id : '')
   }
 
   function handleEventPress(eventId: string) {
@@ -190,19 +198,38 @@ export default function LoungeDetailScreen() {
 
         {/* CTA row */}
         <View style={styles.ctaRow}>
-          {/* Primary action */}
           {isManager ? (
-            <TouchableOpacity
-              onPress={() => router.push(`/(app)/lounge/gerenciar/${lounge.id}`)}
-              style={styles.ctaPrimary}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.ctaPrimaryText}>{t('lounge.manageCta')}</Text>
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity
+                onPress={() => router.push(`/(app)/lounge/gerenciar/${lounge.id}`)}
+                style={styles.ctaManage}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.ctaPrimaryText}>{t('lounge.manageCta')}</Text>
+              </TouchableOpacity>
+              <View style={styles.ctaActiveWrap}>
+                <Switch
+                  value={isActive}
+                  onValueChange={handleToggleActive}
+                  trackColor={{ false: 'rgba(255,255,255,0.12)', true: lounge.accent }}
+                  thumbColor={colors.white[100]}
+                />
+                <Text style={styles.ctaActiveLabel}>{t('lounge.activeLabel')}</Text>
+              </View>
+            </>
           ) : isMember ? (
-            <View style={styles.ctaMemberBadge}>
-              <Text style={styles.ctaMemberText}>{t('lounge.memberCta')}</Text>
-            </View>
+            <>
+              <View style={styles.ctaMemberBadge}>
+                <Text style={styles.ctaMemberText}>{t('lounge.memberCta')}</Text>
+              </View>
+              <TouchableOpacity
+                onPress={handleSetActive}
+                style={styles.ctaSecondary}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.ctaSecondaryText}>{t('lounge.setActiveCta')}</Text>
+              </TouchableOpacity>
+            </>
           ) : joinSent ? (
             <View style={styles.ctaPendingBadge}>
               <Text style={styles.ctaPendingText}>{t('lounge.requestPending')}</Text>
@@ -214,17 +241,6 @@ export default function LoungeDetailScreen() {
               activeOpacity={0.8}
             >
               <Text style={styles.ctaPrimaryText}>{t('lounge.joinCta')}</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* Set active */}
-          {isMember && (
-            <TouchableOpacity
-              onPress={handleSetActive}
-              style={styles.ctaSecondary}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.ctaSecondaryText}>{t('lounge.setActiveCta')}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -439,15 +455,38 @@ const styles = StyleSheet.create({
   // CTAs
   ctaRow: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    gap: 12,
     marginBottom: 28,
+  },
+  ctaManage: {
+    flex: 3,
+    height: spacing.buttonHeight,
+    backgroundColor: colors.white[100],
+    borderRadius: spacing.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaActiveWrap: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  ctaActiveLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
   },
   ctaPrimary: {
     flex: 2,
-    paddingVertical: 12,
+    height: spacing.buttonHeight,
     backgroundColor: colors.white[100],
-    borderRadius: 10,
+    borderRadius: spacing.radius.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   ctaPrimaryText: {
     fontSize: 12.5,
@@ -458,12 +497,13 @@ const styles = StyleSheet.create({
   },
   ctaSecondary: {
     flex: 1,
-    paddingVertical: 12,
+    height: spacing.buttonHeight,
     backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 10,
+    borderRadius: spacing.radius.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   ctaSecondaryText: {
     fontSize: 12.5,
@@ -473,12 +513,13 @@ const styles = StyleSheet.create({
   },
   ctaMemberBadge: {
     flex: 2,
-    paddingVertical: 12,
+    height: spacing.buttonHeight,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 10,
+    borderRadius: spacing.radius.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   ctaMemberText: {
     fontSize: 12.5,
@@ -488,12 +529,13 @@ const styles = StyleSheet.create({
   },
   ctaPendingBadge: {
     flex: 2,
-    paddingVertical: 12,
+    height: spacing.buttonHeight,
     backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 10,
+    borderRadius: spacing.radius.md,
     alignItems: 'center',
+    justifyContent: 'center',
   },
   ctaPendingText: {
     fontSize: 10,

@@ -554,6 +554,7 @@
     "messagesSection": "Mensagens do Lounge",
     "createEventCta": "+ Criar evento",
     "setActiveCta": "Definir como ativo",
+    "activeLabel": "Ativo",
     "customizeCta": "Personalizar",
     "joinCta": "Solicitar entrada",
     "joinSentCta": "Solicitação enviada",

@@ -322,6 +322,15 @@ export async function buyTicket(
   return bffPost('event-ticket', { event_id, pin_hash }, token)
 }
 
+export async function updateLoungeVisual(
+  space_id: string,
+  accent: string,
+  image_url: string | null | undefined,
+  token: string,
+): Promise<void> {
+  await bffPost('lounge-update-visual', { space_id, accent, image_url }, token)
+}
+
 // ── Read functions (Supabase REST) ────────────────────────────────────────────
 
 const SPACE_FULL_SELECT = [

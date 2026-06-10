@@ -113,7 +113,7 @@ interface LoungeState {
   promoteMember:  (loungeId: string, memberId: string) => void
   removeMember:   (loungeId: string, memberId: string) => void
   sendMessage:    (loungeId: string, content: string, authorName: string, authorHandle: string, authorInitials: string) => void
-  updateVisual:   (loungeId: string, accent: string, imageUri?: string | null) => void
+  updateVisual:   (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
   cancelEvent:    (eventId: string) => void
 }
 
@@ -348,7 +348,10 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     }))
   },
 
-  updateVisual: (loungeId, accent, imageUri) => {
+  updateVisual: async (loungeId, accent, imageUri, token) => {
+    // Persiste no backend — falha lança exceção para o caller
+    await loungeService.updateLoungeVisual(loungeId, accent, imageUri, token)
+    // Atualiza store local otimisticamente após confirmação
     set(s => ({
       myLounges: s.myLounges.map(l =>
         l.id === loungeId

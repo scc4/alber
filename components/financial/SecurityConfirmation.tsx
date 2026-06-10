@@ -1,253 +1,150 @@
 // Spec: /specs/05_security.md seção 3 — Confirmação de segurança
 // Design: /design/pin.jsx — SecurityConfirm
-// Sorteia 1 de N perguntas, exibe 4 opções mascaradas (1 correta + 3 falsas)
+// Challenge gerado pelo backend (auth-question): 1 pergunta + opções mascaradas aleatórias.
 
-import React, { useRef, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
+  ActivityIndicator,
   Animated,
+  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
-import { PrimaryButton } from '../core/PrimaryButton'
 import { useTranslation } from 'react-i18next'
-import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
+import { fetchSecurityChallenge, SecurityChallenge } from '../../services/auth.service'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
 
-export interface SecurityQuestion {
-  question: string
-  /** Resposta em texto puro — usada para hash ao confirmar. Ausente quando vinda do backend sem plain-text. */
-  answer?: string
-  /** Opções mascaradas já construídas pelo backend (1 correta + falsas). Ausente → TextInput mode. */
-  options?: string[]
-  /** Qual das options[] é a resposta correta — para feedback visual local. Obrigatório quando options presente. */
-  maskedAnswer?: string
-}
-
 export interface SecurityConfirmationProps {
-  /** 1-4 perguntas cadastradas. O componente sorteia 1. Omitir usa MOCK_SECURITY_QUESTIONS. */
-  questions?: SecurityQuestion[]
-  /** Recebe o SHA-256(normalizeSecurityAnswer(answer)) para envio ao BFF. */
-  onPass: (answerHash?: string) => void
-  onFail?: (attemptsLeft: number) => void
-  onBlocked?: () => void
-  maxAttempts?: number
-}
-
-function shuffle<T>(arr: T[]): T[] {
-  const b = [...arr]
-  for (let i = b.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1))
-    ;[b[i], b[j]] = [b[j], b[i]]
-  }
-  return b
+  /** Handle (@joao) ou CPF (só dígitos) do usuário autenticado. */
+  identifier: string
+  /** Hash do PIN já capturado neste fluxo. */
+  pinHash: string
+  /** Texto do eyebrow opcional acima da pergunta. */
+  eyebrow?: string
+  /** Passa true enquanto o caller está submetendo ao backend — desabilita opções. */
+  submitting?: boolean
+  /** Passa true brevemente quando o backend rejeita a resposta (WRONG_SECURITY_ANSWER). */
+  wrongAnswer?: boolean
+  /** Callback com o hash da opção selecionada — enviar direto ao BFF. */
+  onPass: (answerHash: string) => void
 }
 
 export function SecurityConfirmation({
-  questions = MOCK_SECURITY_QUESTIONS,
+  identifier,
+  pinHash,
+  eyebrow,
+  submitting,
+  wrongAnswer,
   onPass,
-  onFail,
-  onBlocked,
-  maxAttempts = 3,
 }: SecurityConfirmationProps) {
   const { t } = useTranslation()
+  const [challenge, setChallenge] = useState<SecurityChallenge | null>(null)
+  const [loading, setLoading]     = useState(true)
+  const [fetchErr, setFetchErr]   = useState(false)
+  const shakeX = React.useRef(new Animated.Value(0)).current
 
-  // Sorteia 1 pergunta.
-  // options + maskedAnswer presentes → multiple-choice (opções do backend).
-  // Nenhum dos dois → TextInput mode.
-  const [{ questionText, maskedCorrect, correctAnswer, options }] = useState(() => {
-    const q = questions[Math.floor(Math.random() * questions.length)]
-    if (q.options && q.maskedAnswer) {
-      return {
-        questionText:  q.question,
-        maskedCorrect: q.maskedAnswer as string | null,
-        correctAnswer: q.answer as string | undefined,
-        options:       shuffle(q.options),
-      }
+  const load = useCallback(() => {
+    setLoading(true)
+    setFetchErr(false)
+    setChallenge(null)
+    fetchSecurityChallenge(identifier, pinHash)
+      .then(r => { if (r && r.options.length) setChallenge(r); else setFetchErr(true) })
+      .catch(() => setFetchErr(true))
+      .finally(() => setLoading(false))
+  }, [identifier, pinHash])
+
+  useEffect(() => { load() }, [load])
+
+  // Anima shake quando wrongAnswer passa de false→true
+  const prevWrong = React.useRef(false)
+  useEffect(() => {
+    if (wrongAnswer && !prevWrong.current) {
+      Animated.sequence([
+        Animated.timing(shakeX, { toValue: 10,  duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: -10, duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: 8,   duration: 55, useNativeDriver: true }),
+        Animated.timing(shakeX, { toValue: 0,   duration: 55, useNativeDriver: true }),
+      ]).start()
     }
-    return {
-      questionText:  q.question,
-      maskedCorrect: null as string | null,
-      correctAnswer: undefined as string | undefined,
-      options:       [] as string[],
-    }
-  })
+    prevWrong.current = wrongAnswer ?? false
+  }, [wrongAnswer])
 
-  // Multiple-choice state
-  const [selected, setSelected] = useState<number | null>(null)
-  const [wrong, setWrong] = useState(false)
-  const [attempts, setAttempts] = useState(0)
-  const shakeX = useRef(new Animated.Value(0)).current
-
-  // TextInput state
-  const [textAnswer, setTextAnswer] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-
-  const shake = () => {
-    Animated.sequence([
-      Animated.timing(shakeX, { toValue: 10, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: -10, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 8, duration: 55, useNativeDriver: true }),
-      Animated.timing(shakeX, { toValue: 0, duration: 55, useNativeDriver: true }),
-    ]).start()
-  }
-
-  const pick = (idx: number) => {
-    if (selected !== null) return
-    setSelected(idx)
-
-    const isCorrect = options[idx] === maskedCorrect
-    setTimeout(() => {
-      if (isCorrect) {
-        sha256Hex(normalizeSecurityAnswer(correctAnswer!)).then(hash => onPass(hash))
-      } else {
-        const next = attempts + 1
-        setAttempts(next)
-        shake()
-        setWrong(true)
-        setTimeout(() => {
-          setSelected(null)
-          setWrong(false)
-          if (next >= maxAttempts) {
-            onBlocked?.()
-          } else {
-            onFail?.(maxAttempts - next)
-          }
-        }, 900)
-      }
-    }, 280)
-  }
-
-  // ── TextInput mode (perguntas reais sem answer_text) ──────────────────────
-
-  if (!correctAnswer) {
-    const canSubmit = textAnswer.trim().length >= 2 && !submitting
-
-    const handleSubmit = async () => {
-      if (!canSubmit) return
-      setSubmitting(true)
-      try {
-        const hash = await sha256Hex(normalizeSecurityAnswer(textAnswer))
-        onPass(hash)
-      } finally {
-        setSubmitting(false)
-      }
-    }
-
+  if (loading) {
     return (
-      <View style={styles.root}>
-        <Text style={styles.eyebrow}>{t('auth.security.header')}</Text>
-        <Text style={styles.title}>{t('auth.security.title')}</Text>
-        <Text style={styles.question}>{questionText}</Text>
-        <TextInput
-          style={styles.textInput}
-          value={textAnswer}
-          onChangeText={setTextAnswer}
-          placeholder={t('auth.login.securityAnswerPlaceholder')}
-          placeholderTextColor="rgba(255,255,255,0.25)"
-          autoCapitalize="none"
-          autoCorrect={false}
-          returnKeyType="done"
-          onSubmitEditing={canSubmit ? handleSubmit : undefined}
-          accessibilityLabel={questionText}
-        />
-        <Text style={styles.textHint}>{t('auth.login.securityHint')}</Text>
-        <View style={styles.textSubmitWrap}>
-          <PrimaryButton
-            label={t('auth.security.confirm')}
-            onPress={handleSubmit}
-            state={submitting ? 'loading' : canSubmit ? 'default' : 'disabled'}
-          />
-        </View>
+      <View style={styles.centered}>
+        <ActivityIndicator color="rgba(255,255,255,0.4)" />
       </View>
     )
   }
 
-  // ── Multiple-choice mode ──────────────────────────────────────────────────
+  if (fetchErr || !challenge) {
+    return (
+      <View style={styles.container}>
+        {eyebrow && <Text style={styles.eyebrow}>{eyebrow}</Text>}
+        <Text style={styles.question}>{t('auth.login.securityLoadError')}</Text>
+        <TouchableOpacity style={styles.retryCta} onPress={load} activeOpacity={0.75}>
+          <Text style={styles.retryCtaText}>{t('auth.login.securityRetry')}</Text>
+        </TouchableOpacity>
+      </View>
+    )
+  }
 
   return (
-    <View style={styles.root}>
-      <Text style={styles.eyebrow}>{t('auth.security.header')}</Text>
+    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      {eyebrow && <Text style={styles.eyebrow}>{eyebrow}</Text>}
       <Text style={styles.title}>{t('auth.security.title')}</Text>
-      <Text style={styles.question}>{questionText}</Text>
-
-      {attempts > 0 && (
-        <Text style={styles.attemptHint}>
-          {t('auth.security.attempt', { n: attempts + 1, max: maxAttempts })}
-        </Text>
-      )}
+      <Text style={styles.question}>{challenge.question}</Text>
+      <Text style={styles.hint}>{t('auth.login.securityChooseHint')}</Text>
 
       <Animated.View style={[styles.optionsList, { transform: [{ translateX: shakeX }] }]}>
-        {options.map((opt, i) => {
-          const isSelected = selected === i
-          const isWrong = isSelected && wrong
-
-          return (
-            <TouchableOpacity
-              key={i}
-              style={[
-                styles.option,
-                isSelected && !wrong && styles.optionSelected,
-                isWrong && styles.optionWrong,
-              ]}
-              onPress={() => pick(i)}
-              activeOpacity={0.7}
-              accessible
-              accessibilityRole="button"
-              accessibilityLabel={opt}
-              accessibilityState={{ selected: isSelected }}
-            >
-              <Text style={[styles.optionText, isWrong && styles.optionTextWrong]}>
-                {opt}
-              </Text>
-            </TouchableOpacity>
-          )
-        })}
+        {challenge.options.map((opt, i) => (
+          <TouchableOpacity
+            key={i}
+            style={[styles.option, (submitting) && styles.optionDisabled]}
+            onPress={() => onPass(opt.hash)}
+            disabled={submitting}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={opt.display}
+          >
+            <Text style={[styles.optionText, wrongAnswer && styles.optionTextWrong]}>
+              {opt.display}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </Animated.View>
-    </View>
+
+      {wrongAnswer && (
+        <Text style={styles.wrongHint}>{t('auth.login.securityWrongChoice')}</Text>
+      )}
+      {submitting && (
+        <Text style={styles.hint}>{t('common.verifying')}</Text>
+      )}
+    </ScrollView>
   )
 }
 
-// ─── Mock questions para desenvolvimento ─────────────────────────────────────
-// Opções mascaradas embutidas — em produção virão do backend (EF auth-login / user-profile).
-
-export const MOCK_SECURITY_QUESTIONS: SecurityQuestion[] = [
-  {
-    question:     'Nome do seu primeiro animal de estimação',
-    answer:       'Bolinha',
-    options:      ['Bo***ha', 'L**a', 'T**r', 'M*x'],
-    maskedAnswer: 'Bo***ha',
-  },
-  {
-    question:     'Nome da sua avó materna',
-    answer:       'Maria Silva',
-    options:      ['Mar*****lva', 'An* So***', 'Lu** Fe***', 'Ca** Me***'],
-    maskedAnswer: 'Mar*****lva',
-  },
-  {
-    question:     'Cidade onde seus pais se conheceram',
-    answer:       'Santos',
-    options:      ['Sa**os', 'Ca**as', 'Cu**iba', 'Ma**lia'],
-    maskedAnswer: 'Sa**os',
-  },
-  {
-    question:     'Nome do seu melhor amigo da infância',
-    answer:       'Rodrigo',
-    options:      ['Ro***go', 'Fe***do', 'Gu***vo', 'Ma***os'],
-    maskedAnswer: 'Ro***go',
-  },
-]
-
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// Mantido para backward compat de imports antigos — não usar em código novo.
+export interface SecurityQuestion {
+  question: string
+  answer?: string
+  options?: string[]
+  maskedAnswer?: string
+}
 
 const styles = StyleSheet.create({
-  root: {
+  centered: {
     flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  container: {
     paddingTop: spacing.sm,
+    paddingBottom: spacing.xl,
   },
   eyebrow: {
     fontSize: typography.eyebrow.fontSize,
@@ -273,11 +170,11 @@ const styles = StyleSheet.create({
     lineHeight: typography.size.label.lineHeight,
     marginBottom: spacing.lg,
   },
-  attemptHint: {
-    fontSize: typography.size.micro.fontSize,
-    color: colors.warning[500],
+  hint: {
+    fontSize: typography.size.caption.fontSize,
+    color: 'rgba(255,255,255,0.4)',
     fontFamily: typography.fontFamily.primary,
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
   optionsList: {
     gap: 10,
@@ -290,42 +187,37 @@ const styles = StyleSheet.create({
     padding: 18,
     paddingHorizontal: 20,
   },
-  optionSelected: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  optionWrong: {
-    backgroundColor: 'rgba(239,68,68,0.08)',
-    borderColor: 'rgba(239,68,68,0.3)',
+  optionDisabled: {
+    opacity: 0.45,
   },
   optionText: {
     fontSize: 15,
     color: colors.white[100],
     fontFamily: typography.fontFamily.primary,
+    letterSpacing: 1.2,
   },
   optionTextWrong: {
     color: colors.state.error,
   },
-
-  // TextInput mode
-  textInput: {
-    width: '100%',
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.18)',
-    paddingVertical: spacing.sm + 2,
-    fontSize: 18,
-    color: colors.white[100],
-    fontFamily: typography.fontFamily.primary,
-    marginBottom: spacing.sm,
-  },
-  textHint: {
+  wrongHint: {
     fontSize: typography.size.caption.fontSize,
-    color: 'rgba(255,255,255,0.35)',
+    color: colors.state.error,
     fontFamily: typography.fontFamily.primary,
-    lineHeight: typography.size.caption.lineHeight,
-    marginBottom: spacing.lg,
+    textAlign: 'center',
+    marginTop: spacing.sm,
   },
-  textSubmitWrap: {
-    marginTop: 'auto' as any,
+  retryCta: {
+    marginTop: spacing.xl,
+    height: spacing.buttonHeight,
+    borderRadius: spacing.radius.md,
+    backgroundColor: colors.white[100],
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  retryCtaText: {
+    fontFamily: typography.fontFamily.primary,
+    fontWeight: '600',
+    fontSize: 15,
+    color: colors.black[100],
   },
 })

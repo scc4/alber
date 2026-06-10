@@ -116,10 +116,15 @@ export default function GerenciarScreen() {
       if (bgImageUri) {
         const uploaded = await uploadImage(bgImageUri, 'lounge-images', `${lounge.id}/bg/${Date.now()}`, token)
         if (uploaded) newImageUri = uploaded
-        // upload failed: keep existing image (newImageUri stays undefined)
+        else {
+          Alert.alert('Erro', 'Falha ao enviar imagem. Tente novamente.')
+          return
+        }
       }
-      updateVisual(lounge.id, accent, newImageUri)
+      await updateVisual(lounge.id, accent, newImageUri, token)
       router.back()
+    } catch {
+      Alert.alert('Erro', 'Não foi possível salvar as alterações.')
     } finally {
       setSaving(false)
     }

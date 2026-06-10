@@ -188,7 +188,10 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
   },
 
   setCurrentLounge: (id) => {
-    const lounge = get().getLoungeById(id) ?? null
+    if (!id) { set({ currentLounge: null }); return }
+    // getLoungeById may return undefined if fetchLounge hasn't resolved yet;
+    // fall back to a minimal stub so isActive reflects the correct id immediately.
+    const lounge = get().getLoungeById(id) ?? ({ id } as unknown as Lounge)
     set({ currentLounge: lounge })
   },
 

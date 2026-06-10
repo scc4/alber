@@ -24,6 +24,8 @@ import { colors } from '../../../tokens/colors'
 import { spacing } from '../../../tokens/spacing'
 import { typography } from '../../../tokens/typography'
 
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 const HERO_HEIGHT = 230
@@ -138,7 +140,10 @@ export default function LoungeDetailScreen() {
       <View style={[styles.hero, { backgroundColor: lounge.bgDark }]}>
         {lounge.imageUri ? (
           <Image
-            source={{ uri: lounge.imageUri }}
+            source={{
+              uri: lounge.imageUri,
+              headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY },
+            }}
             style={styles.heroCover}
             resizeMode="cover"
           />

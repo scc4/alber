@@ -28,6 +28,8 @@ import { colors } from '../../../../tokens/colors'
 import { spacing } from '../../../../tokens/spacing'
 import { typography } from '../../../../tokens/typography'
 
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const PALETTE = ['#5BCEC9', '#C9B06A', '#E07D7D', '#7DA3E0', '#B58FE0', '#7AB87A', '#E0B05B', '#9B6B82']
@@ -458,6 +460,15 @@ export default function GerenciarScreen() {
             >
               {bgImageUri ? (
                 <Image source={{ uri: bgImageUri }} style={styles.bgPreview} resizeMode="cover" />
+              ) : lounge.imageUri ? (
+                <Image
+                  source={{
+                    uri: lounge.imageUri,
+                    headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY },
+                  }}
+                  style={styles.bgPreview}
+                  resizeMode="cover"
+                />
               ) : (
                 <>
                   <Text style={styles.bgUploadTitle}>{t('lounge.gerenciar.bgUploadCta')}</Text>

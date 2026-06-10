@@ -3,7 +3,7 @@
 // Variantes: owner (dono) | member (membro) | public | private
 // Layout: hero escuro com dot de acento, badge de papel, nome, nº membros
 
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -18,6 +18,7 @@ export interface LoungeSummary {
   name:        string
   accent:      string
   bgDark:      string
+  imageUri:    string | null
   memberCount: number
   role:        LoungeRole
   visibility:  'public' | 'private'
@@ -55,6 +56,18 @@ export function LoungeCard({ lounge, onPress }: Props) {
       accessibilityRole="button"
       accessibilityLabel={lounge.name}
     >
+      {/* Cover image */}
+      {lounge.imageUri ? (
+        <Image
+          source={{ uri: lounge.imageUri }}
+          style={styles.cover}
+          resizeMode="cover"
+        />
+      ) : null}
+
+      {/* Scrim so text stays legible over the image */}
+      <View style={styles.scrim} pointerEvents="none" />
+
       {/* Accent glow — only for owner */}
       {isOwner && (
         <View
@@ -119,6 +132,15 @@ const styles = StyleSheet.create({
   },
   cardOwner: {
     height: 136,
+  },
+  cover: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+  },
+  scrim: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
   },
   glowOverlay: {
     position: 'absolute',

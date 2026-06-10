@@ -48,7 +48,9 @@ export async function uploadImage(
                         :                    'image/jpeg'
       const ext         = mime === 'image/jpeg' ? 'jpg' : rawExt
       const storagePath = `${path}.${ext}`
-      const url = `${SUPABASE_URL}/storage/v1/object/authenticated/${bucket}/${storagePath}`
+      const url = bucket === 'split-photos'
+        ? `${SUPABASE_URL}/storage/v1/object/authenticated/${bucket}/${storagePath}`
+        : `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${storagePath}`
 
       // Expo SDK 56 usa winter fetch que não suporta { uri, name, type } como FormDataPart.
       // XMLHttpRequest ainda usa a implementação nativa do RN e aceita esse padrão.

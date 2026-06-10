@@ -111,11 +111,6 @@ export default function LoungeDetailScreen() {
     }
   }
 
-  function handleSetActive() {
-    if (!lounge) return
-    setActive(lounge.id)
-  }
-
   function handleToggleActive(val: boolean) {
     if (!lounge) return
     setActive(val ? lounge.id : '')
@@ -218,18 +213,18 @@ export default function LoungeDetailScreen() {
               </View>
             </>
           ) : isMember ? (
-            <>
-              <View style={styles.ctaMemberBadge}>
-                <Text style={styles.ctaMemberText}>{t('lounge.memberCta')}</Text>
+            <View style={styles.ctaMemberBadge}>
+              <Text style={styles.ctaMemberText}>{t('lounge.memberCta')}</Text>
+              <View style={styles.ctaMemberActiveWrap}>
+                <Switch
+                  value={isActive}
+                  onValueChange={handleToggleActive}
+                  trackColor={{ false: 'rgba(255,255,255,0.12)', true: lounge.accent }}
+                  thumbColor={colors.white[100]}
+                />
+                <Text style={styles.ctaActiveLabel}>{t('lounge.activeLabel')}</Text>
               </View>
-              <TouchableOpacity
-                onPress={handleSetActive}
-                style={styles.ctaSecondary}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.ctaSecondaryText}>{t('lounge.setActiveCta')}</Text>
-              </TouchableOpacity>
-            </>
+            </View>
           ) : joinSent ? (
             <View style={styles.ctaPendingBadge}>
               <Text style={styles.ctaPendingText}>{t('lounge.requestPending')}</Text>
@@ -495,37 +490,28 @@ const styles = StyleSheet.create({
     color: colors.black[100],
     letterSpacing: 12.5 * 0.03,
   },
-  ctaSecondary: {
-    flex: 1,
-    height: spacing.buttonHeight,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: spacing.radius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ctaSecondaryText: {
-    fontSize: 12.5,
-    fontWeight: '500',
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-  },
   ctaMemberBadge: {
-    flex: 2,
+    flex: 1,
     height: spacing.buttonHeight,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: spacing.radius.md,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
   },
   ctaMemberText: {
     fontSize: 12.5,
     fontWeight: '500',
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.65)',
+  },
+  ctaMemberActiveWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   ctaPendingBadge: {
     flex: 2,

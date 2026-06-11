@@ -118,6 +118,7 @@ interface LoungeState {
   updateVisual:     (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
   cancelEvent:      (eventId: string) => void
 
+  updateLounge:     (loungeId: string, data: loungeService.UpdateLoungeInput, token: string) => Promise<void>
   setPrimaryLounge: (loungeId: string, token: string) => Promise<void>
   leaveLounge:      (loungeId: string, token: string) => Promise<void>
   deleteLounge:     (loungeId: string, token: string) => Promise<void>
@@ -372,6 +373,24 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
           : l
       ),
     }))
+  },
+
+  updateLounge: async (loungeId, data, token) => {
+    set({ error: null })
+    try {
+      const res = await loungeService.updateLounge(loungeId, data, token)
+      set(s => {
+        const patch = { name: res.name, description: res.description ?? '' }
+        const updated = s.myLounges.map(l => l.id === loungeId ? { ...l, ...patch } : l)
+        const current = s.currentLounge?.id === loungeId
+          ? { ...s.currentLounge, ...patch }
+          : s.currentLounge
+        return { myLounges: updated, currentLounge: current }
+      })
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao atualizar Lounge' })
+      throw e
+    }
   },
 
   setPrimaryLounge: async (loungeId, token) => {

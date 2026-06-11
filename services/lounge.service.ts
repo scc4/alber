@@ -383,6 +383,19 @@ export async function updateLoungeVisual(
   await bffPost('lounge-update-visual', { space_id, accent, image_url }, token)
 }
 
+export interface UpdateLoungeInput {
+  name?:        string
+  description?: string
+}
+
+export async function updateLounge(
+  space_id: string,
+  data: UpdateLoungeInput,
+  token: string,
+): Promise<{ name: string; description: string | null }> {
+  return bffPost('lounge-update', { space_id, ...data }, token)
+}
+
 // ── Read functions (Supabase REST) ────────────────────────────────────────────
 
 const SPACE_FULL_SELECT = [

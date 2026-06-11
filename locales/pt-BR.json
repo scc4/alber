@@ -664,7 +664,14 @@
       "whatsappCta": "WhatsApp",
       "shareCta": "Compartilhar",
       "publicInviteHint": "Lounge público — qualquer pessoa pode solicitar entrada diretamente.",
-      "errorSend": "Erro ao enviar mensagem"
+      "errorSend": "Erro ao enviar mensagem",
+      "nameSection": "NOME E DESCRIÇÃO",
+      "namePlaceholder": "Nome do Lounge",
+      "descPlaceholder": "Descrição (opcional)",
+      "nameErrorTitle": "Nome inválido",
+      "nameErrorShort": "O nome deve ter pelo menos 3 caracteres.",
+      "saveError": "Não foi possível salvar as alterações.",
+      "previewHint": "SEU LOUNGE ATUAL"
     },
     "convite": {
       "loading": "Carregando Lounge…",

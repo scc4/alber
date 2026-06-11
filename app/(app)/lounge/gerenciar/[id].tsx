@@ -49,6 +49,7 @@ export default function GerenciarScreen() {
   const removeMember   = useLoungeStore(s => s.removeMember)
   const sendMessage    = useLoungeStore(s => s.sendMessage)
   const updateVisual   = useLoungeStore(s => s.updateVisual)
+  const updateLounge   = useLoungeStore(s => s.updateLounge)
   const cancelEvent    = useLoungeStore(s => s.cancelEvent)
 
   const lounge = getLoungeById(id)
@@ -63,6 +64,8 @@ export default function GerenciarScreen() {
   const [bgImageUri, setBgImageUri] = useState<string | null>(null)
   const [saving, setSaving]     = useState(false)
   const [copied, setCopied]     = useState(false)
+  const [editName, setEditName] = useState(lounge?.name ?? '')
+  const [editDesc, setEditDesc] = useState(lounge?.description ?? '')
   const inviteUrl = lounge?.inviteToken
     ? `alber://lounge/convite/${lounge.inviteToken}`
     : null
@@ -134,24 +137,52 @@ export default function GerenciarScreen() {
     Share.share({ message: inviteUrl, title: lounge.name })
   }
 
+  const nameChanged   = isOwner && editName.trim() !== lounge.name
+  const descChanged   = isOwner && editDesc.trim() !== (lounge.description ?? '')
+  const accentChanged = accent !== lounge.accent
+  const imageChanged  = bgImageUri !== null
+  const hasChanges    = nameChanged || descChanged || accentChanged || imageChanged
+
   async function handleSaveVisual() {
     if (!lounge || !token) return
+
+    if (isOwner && (nameChanged || descChanged)) {
+      const trimmedName = editName.trim()
+      if (trimmedName.length < 3) {
+        Alert.alert(t('lounge.gerenciar.nameErrorTitle'), t('lounge.gerenciar.nameErrorShort'))
+        return
+      }
+    }
+
     setSaving(true)
     try {
-      // imageUri=undefined → keep existing; imageUri=string → replace; imageUri=null → clear
-      let newImageUri: string | null | undefined = undefined
-      if (bgImageUri) {
-        const uploaded = await uploadImage(bgImageUri, 'lounge-images', `${lounge.id}/bg/${Date.now()}`, token)
-        if (uploaded) newImageUri = uploaded
-        else {
-          Alert.alert('Erro', 'Falha ao enviar imagem. Tente novamente.')
-          return
-        }
+      const ops: Promise<unknown>[] = []
+
+      if (isOwner && (nameChanged || descChanged)) {
+        const data: Record<string, string> = {}
+        if (nameChanged) data.name = editName.trim()
+        if (descChanged) data.description = editDesc.trim()
+        ops.push(updateLounge(lounge.id, data, token))
       }
-      await updateVisual(lounge.id, accent, newImageUri, token)
+
+      if (accentChanged || imageChanged) {
+        let newImageUri: string | null | undefined = undefined
+        if (bgImageUri) {
+          const uploaded = await uploadImage(bgImageUri, 'lounge-images', `${lounge.id}/bg/${Date.now()}`, token)
+          if (!uploaded) {
+            Alert.alert('Erro', 'Falha ao enviar imagem. Tente novamente.')
+            setSaving(false)
+            return
+          }
+          newImageUri = uploaded
+        }
+        ops.push(updateVisual(lounge.id, accent, newImageUri, token))
+      }
+
+      await Promise.all(ops)
       router.back()
     } catch {
-      Alert.alert('Erro', 'Não foi possível salvar as alterações.')
+      Alert.alert('Erro', t('lounge.gerenciar.saveError'))
     } finally {
       setSaving(false)
     }
@@ -475,15 +506,49 @@ export default function GerenciarScreen() {
             contentContainerStyle={[styles.content, { paddingBottom: spacing.xl + 80 }]}
             showsVerticalScrollIndicator={false}
           >
-            {/* Preview */}
+            {/* Preview — reflecte o editName em tempo real */}
             <Eyebrow>{t('lounge.criar.previewLabel')}</Eyebrow>
             <View style={[styles.previewCard, { backgroundColor: `${accent}08`, borderColor: `${accent}28` }]}>
               <View style={[styles.previewGlow, { backgroundColor: `${accent}20` }]} pointerEvents="none" />
               <View style={styles.previewContent}>
-                <Text style={styles.previewHint}>SEU LOUNGE ATUAL</Text>
-                <Text style={styles.previewName}>{lounge.name}</Text>
+                <Text style={styles.previewHint}>{t('lounge.gerenciar.previewHint')}</Text>
+                <Text style={styles.previewName}>{editName || lounge.name}</Text>
               </View>
             </View>
+
+            {/* Nome e descrição — apenas owner */}
+            {isOwner && (
+              <>
+                <View style={styles.sectionGap}>
+                  <Eyebrow>{t('lounge.gerenciar.nameSection')}</Eyebrow>
+                </View>
+                <View style={styles.textFieldWrap}>
+                  <TextInput
+                    style={styles.textField}
+                    value={editName}
+                    onChangeText={v => setEditName(v.slice(0, 50))}
+                    placeholder={lounge.name}
+                    placeholderTextColor="rgba(255,255,255,0.25)"
+                    maxLength={50}
+                    returnKeyType="done"
+                  />
+                  <Text style={styles.textFieldCounter}>{editName.length}/50</Text>
+                </View>
+                <View style={[styles.textFieldWrap, { marginTop: 8 }]}>
+                  <TextInput
+                    style={[styles.textField, styles.textFieldMultiline]}
+                    value={editDesc}
+                    onChangeText={v => setEditDesc(v.slice(0, 240))}
+                    placeholder={t('lounge.gerenciar.descPlaceholder')}
+                    placeholderTextColor="rgba(255,255,255,0.25)"
+                    maxLength={240}
+                    multiline
+                    textAlignVertical="top"
+                  />
+                  <Text style={styles.textFieldCounter}>{editDesc.length}/240</Text>
+                </View>
+              </>
+            )}
 
             {/* Accent color */}
             <View style={styles.sectionGap}>
@@ -540,7 +605,7 @@ export default function GerenciarScreen() {
             <PrimaryButton
               label={t('lounge.gerenciar.saveCta')}
               onPress={handleSaveVisual}
-              state={saving ? 'loading' : 'default'}
+              state={saving ? 'loading' : !hasChanges ? 'disabled' : 'default'}
             />
           </View>
         </View>
@@ -896,6 +961,32 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily.primary,
     color: colors.white[100],
     letterSpacing: -20 * 0.02,
+  },
+  textFieldWrap: {
+    position: 'relative',
+  },
+  textField: {
+    padding: 13,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    fontSize: 14,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
+    paddingRight: 44,
+  },
+  textFieldMultiline: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  textFieldCounter: {
+    position: 'absolute',
+    right: 10,
+    bottom: 10,
+    fontSize: 10,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.25)',
   },
   palette: {
     flexDirection: 'row',

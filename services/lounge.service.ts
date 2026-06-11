@@ -185,24 +185,26 @@ function mapEvent(e: DbEvent, spaceId: string): LoungeEvent {
 }
 
 function mapSpaceFull(s: DbSpace, myUserId: string): Lounge {
-  const skin          = s.skin ?? {}
-  const allMembers    = s.space_members ?? []
-  const activeMembers = allMembers.filter(m => m.status === 'active')
-  const pending       = allMembers.filter(m => m.status === 'pending')
-  const myMembership  = allMembers.find(m => m.user_id === myUserId)
+  const skin               = s.skin ?? {}
+  const allMembers         = s.space_members ?? []
+  const activeMembers      = allMembers.filter(m => m.status === 'active')
+  const pending            = allMembers.filter(m => m.status === 'pending')
+  const myActiveMembership = allMembers.find(m => m.user_id === myUserId && m.status === 'active')
+  const myAnyMembership    = allMembers.find(m => m.user_id === myUserId)
 
   return {
-    id:          s.id,
-    name:        s.name,
-    description: s.description ?? '',
-    accent:      skin.accent  ?? '#5BCEC9',
-    bgDark:      skin.bgDark  ?? '#0a0a0a',
-    imageUri:    s.image_url  ?? null,
-    visibility:  s.type === 'open' ? 'public' : 'private',
-    memberCount: activeMembers.length,
-    role:        myMembership ? mapRole(myMembership.role) : null,
-    ownerId:     s.owner_id,
-    isPrimary:   false,
+    id:           s.id,
+    name:         s.name,
+    description:  s.description ?? '',
+    accent:       skin.accent  ?? '#5BCEC9',
+    bgDark:       skin.bgDark  ?? '#0a0a0a',
+    imageUri:     s.image_url  ?? null,
+    visibility:   s.type === 'open' ? 'public' : 'private',
+    memberCount:  activeMembers.length,
+    role:         myActiveMembership ? mapRole(myActiveMembership.role) : null,
+    memberStatus: (myAnyMembership?.status ?? null) as Lounge['memberStatus'],
+    ownerId:      s.owner_id,
+    isPrimary:    false,
     members: activeMembers.map<LoungeMember>(m => ({
       id:       m.member?.id  ?? m.user_id,
       name:     m.member?.name ?? '',
@@ -241,6 +243,7 @@ function mapLoungeListItem(sm: DbMyMembership): Lounge {
     visibility:      s.type === 'open' ? 'public' : 'private',
     memberCount:     sm.space.member_count?.[0]?.count ?? 0,
     role:            mapRole(sm.role),
+    memberStatus:    'active' as const,
     ownerId:         s.owner_id,
     isPrimary:       sm.is_primary ?? false,
     members:         [],

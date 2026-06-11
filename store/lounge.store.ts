@@ -64,6 +64,7 @@ export interface Lounge {
   visibility:      'public' | 'private'
   memberCount:     number
   role:            LoungeRole
+  memberStatus:    'pending' | 'active' | 'banned' | 'left' | null
   ownerId:         string
   isPrimary:       boolean
   members:         LoungeMember[]

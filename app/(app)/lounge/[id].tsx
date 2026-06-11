@@ -89,10 +89,11 @@ export default function LoungeDetailScreen() {
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
-  const isOwner       = lounge.role === 'owner'
-  const isManager     = lounge.role === 'owner' || lounge.role === 'manager'
-  const isMember      = lounge.role !== null
+  const isOwner          = lounge.role === 'owner'
+  const isManager        = lounge.role === 'owner' || lounge.role === 'manager'
+  const isMember         = lounge.role !== null           // só active members têm role != null
   const isNonOwnerMember = isMember && !isOwner
+  const isPendingMember  = lounge.memberStatus === 'pending' && !isMember
 
   const roleLabel = isOwner
     ? t('lounge.roleOwner')
@@ -288,7 +289,7 @@ export default function LoungeDetailScreen() {
                 <Text style={styles.ctaLeaveLinkText}>{t('lounge.leaveCta')}</Text>
               </TouchableOpacity>
             </>
-          ) : joinSent ? (
+          ) : (isPendingMember || joinSent) ? (
             <View style={styles.ctaPendingBadge}>
               <Text style={styles.ctaPendingText}>{t('lounge.requestPending')}</Text>
             </View>

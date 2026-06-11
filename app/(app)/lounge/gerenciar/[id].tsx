@@ -20,7 +20,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useLoungeStore } from '../../../../store/lounge.store'
-import type { LoungeRequest } from '../../../../store/lounge.store'
+import type { LoungeMember, LoungeRequest } from '../../../../store/lounge.store'
 import { useAuthStore } from '../../../../store/auth.store'
 import { pickFromGallery, uploadImage } from '../../../../services/storage.service'
 import { Header } from '../../../../components/core/Header'
@@ -113,8 +113,28 @@ export default function GerenciarScreen() {
   }
 
   function handleRemove(member: LoungeMember) {
-    if (!lounge || !token) return
-    removeMember(lounge.id, member.id, token)
+    if (!lounge || !token || processingIds.has(member.id)) return
+    Alert.alert(
+      t('lounge.gerenciar.removeConfirmTitle'),
+      t('lounge.gerenciar.removeConfirmBody', { name: member.name || member.handle }),
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: t('lounge.gerenciar.removeConfirmCta'),
+          style: 'destructive',
+          onPress: async () => {
+            setProcessingIds(s => new Set(s).add(member.id))
+            try {
+              await removeMember(lounge.id, member.id, token)
+            } catch (e: any) {
+              Alert.alert(t('lounge.gerenciar.approveErrorTitle'), e?.message ?? t('lounge.gerenciar.removeErrorBody'))
+            } finally {
+              setProcessingIds(s => { const n = new Set(s); n.delete(member.id); return n })
+            }
+          },
+        },
+      ],
+    )
   }
 
   async function handleSendMessage() {
@@ -452,8 +472,12 @@ export default function GerenciarScreen() {
                         : t('lounge.roleMember')}
                     </Text>
                     {canManage && (
-                      <TouchableOpacity onPress={() => handleRemove(member)}>
-                        <Text style={styles.removeText}>{t('lounge.gerenciar.removeFromLounge')}</Text>
+                      <TouchableOpacity
+                        onPress={() => handleRemove(member)}
+                        style={[styles.removeBtn, processingIds.has(member.id) && { opacity: 0.45 }]}
+                        disabled={processingIds.has(member.id)}
+                      >
+                        <Text style={styles.removeBtnText}>{t('lounge.gerenciar.removeFromLounge')}</Text>
                       </TouchableOpacity>
                     )}
                   </View>
@@ -872,15 +896,18 @@ const styles = StyleSheet.create({
     letterSpacing: 9 * 0.1,
     textTransform: 'uppercase',
   },
-  promoteText: {
-    fontSize: 10,
+  removeBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 0.5,
+    borderColor: 'rgba(239,68,68,0.35)',
+  },
+  removeBtnText: {
+    fontSize: 11,
     fontFamily: typography.fontFamily.primary,
     fontWeight: '600',
-  },
-  removeText: {
-    fontSize: 10,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(239,68,68,0.7)',
+    color: 'rgba(239,68,68,0.8)',
   },
 
   // Request actions

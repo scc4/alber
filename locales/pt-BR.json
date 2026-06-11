@@ -635,6 +635,8 @@
       "noPending": "Nenhuma solicitação pendente",
       "approveCta": "Aprovar",
       "rejectCta": "Recusar",
+      "approveErrorTitle": "Erro ao processar",
+      "approveErrorBody": "Não foi possível processar a solicitação.",
       "membersSection": "MEMBROS",
       "promoteToManager": "Nomear gestor",
       "removeFromLounge": "Remover",

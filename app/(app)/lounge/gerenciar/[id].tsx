@@ -20,7 +20,7 @@ import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useLoungeStore } from '../../../../store/lounge.store'
-import type { LoungeMember, LoungeRequest } from '../../../../store/lounge.store'
+import type { LoungeRequest } from '../../../../store/lounge.store'
 import { useAuthStore } from '../../../../store/auth.store'
 import { pickFromGallery, uploadImage } from '../../../../services/storage.service'
 import { Header } from '../../../../components/core/Header'
@@ -43,16 +43,13 @@ export default function GerenciarScreen() {
   const { t }   = useTranslation()
   const insets  = useSafeAreaInsets()
 
-  const getLoungeById  = useLoungeStore(s => s.getLoungeById)
+  const lounge         = useLoungeStore(s => s.myLounges.find(l => l.id === id) ?? s.exploring.find(l => l.id === id))
   const approveRequest = useLoungeStore(s => s.approveRequest)
-  const promoteMember  = useLoungeStore(s => s.promoteMember)
   const removeMember   = useLoungeStore(s => s.removeMember)
   const sendMessage    = useLoungeStore(s => s.sendMessage)
   const updateVisual   = useLoungeStore(s => s.updateVisual)
   const updateLounge   = useLoungeStore(s => s.updateLounge)
   const cancelEvent    = useLoungeStore(s => s.cancelEvent)
-
-  const lounge = getLoungeById(id)
 
   const token     = useAuthStore(s => s.token)
   const user      = useAuthStore(s => s.user)
@@ -66,6 +63,7 @@ export default function GerenciarScreen() {
   const [copied, setCopied]     = useState(false)
   const [editName, setEditName] = useState(lounge?.name ?? '')
   const [editDesc, setEditDesc] = useState(lounge?.description ?? '')
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
   const inviteUrl = lounge?.inviteToken
     ? `alber://lounge/convite/${lounge.inviteToken}`
     : null
@@ -87,19 +85,28 @@ export default function GerenciarScreen() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
-  function handleApprove(req: LoungeRequest) {
-    if (!lounge || !token) return
-    approveRequest(req.id, true, token)
+  async function handleApprove(req: LoungeRequest) {
+    if (!lounge || !token || processingIds.has(req.id)) return
+    setProcessingIds(s => new Set(s).add(req.id))
+    try {
+      await approveRequest(req.id, true, token)
+    } catch (e: any) {
+      Alert.alert(t('lounge.gerenciar.approveErrorTitle'), e?.message ?? t('lounge.gerenciar.approveErrorBody'))
+    } finally {
+      setProcessingIds(s => { const n = new Set(s); n.delete(req.id); return n })
+    }
   }
 
-  function handleReject(req: LoungeRequest) {
-    if (!lounge || !token) return
-    approveRequest(req.id, false, token)
-  }
-
-  function handlePromote(member: LoungeMember) {
-    if (!lounge) return
-    promoteMember(lounge.id, member.id)
+  async function handleReject(req: LoungeRequest) {
+    if (!lounge || !token || processingIds.has(req.id)) return
+    setProcessingIds(s => new Set(s).add(req.id))
+    try {
+      await approveRequest(req.id, false, token)
+    } catch (e: any) {
+      Alert.alert(t('lounge.gerenciar.approveErrorTitle'), e?.message ?? t('lounge.gerenciar.approveErrorBody'))
+    } finally {
+      setProcessingIds(s => { const n = new Set(s); n.delete(req.id); return n })
+    }
   }
 
   function handleRemove(member: LoungeMember) {
@@ -381,30 +388,38 @@ export default function GerenciarScreen() {
             <Text style={styles.emptyText}>{t('lounge.gerenciar.noPending')}</Text>
           ) : (
             <View style={styles.memberList}>
-              {lounge.pendingRequests.map((req, i) => (
-                <View key={req.id} style={[styles.memberRow, i > 0 && styles.memberRowBorder]}>
-                  <View style={[styles.avatar, { backgroundColor: avatarHue(req.handle) }]}>
-                    <Text style={styles.avatarText}>{req.initials[0]}</Text>
+              {lounge.pendingRequests.map((req, i) => {
+                const isProcessing = processingIds.has(req.id)
+                return (
+                  <View key={req.id} style={[styles.memberRow, i > 0 && styles.memberRowBorder]}>
+                    <View style={[styles.avatar, { backgroundColor: avatarHue(req.handle) }]}>
+                      <Text style={styles.avatarText}>{req.initials[0] ?? '?'}</Text>
+                    </View>
+                    <View style={styles.memberInfo}>
+                      <Text style={styles.memberName}>{req.name || req.handle || req.userId.slice(0, 8)}</Text>
+                      <Text style={styles.memberHandle}>{req.handle}</Text>
+                    </View>
+                    <View style={[styles.requestActions, isProcessing && { opacity: 0.45 }]}>
+                      <TouchableOpacity
+                        onPress={() => handleApprove(req)}
+                        style={[styles.approveBtn, { borderColor: `${lounge.accent}55` }]}
+                        disabled={isProcessing}
+                      >
+                        <Text style={[styles.approveBtnText, { color: lounge.accent }]}>
+                          {t('lounge.gerenciar.approveCta')}
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => handleReject(req)}
+                        style={styles.rejectBtn}
+                        disabled={isProcessing}
+                      >
+                        <Text style={styles.rejectBtnText}>{t('lounge.gerenciar.rejectCta')}</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                  <View style={styles.memberInfo}>
-                    <Text style={styles.memberName}>{req.name}</Text>
-                    <Text style={styles.memberHandle}>{req.handle}</Text>
-                  </View>
-                  <View style={styles.requestActions}>
-                    <TouchableOpacity
-                      onPress={() => handleApprove(req)}
-                      style={[styles.approveBtn, { borderColor: `${lounge.accent}55` }]}
-                    >
-                      <Text style={[styles.approveBtnText, { color: lounge.accent }]}>
-                        {t('lounge.gerenciar.approveCta')}
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity onPress={() => handleReject(req)} style={styles.rejectBtn}>
-                      <Text style={styles.rejectBtnText}>{t('lounge.gerenciar.rejectCta')}</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
+                )
+              })}
             </View>
           )}
 
@@ -433,13 +448,6 @@ export default function GerenciarScreen() {
                         ? t('lounge.roleManager')
                         : t('lounge.roleMember')}
                     </Text>
-                    {canManage && isOwner && (
-                      <TouchableOpacity onPress={() => handlePromote(member)}>
-                        <Text style={[styles.promoteText, { color: lounge.accent }]}>
-                          {member.role === 'member' ? t('lounge.gerenciar.promoteToManager') : ''}
-                        </Text>
-                      </TouchableOpacity>
-                    )}
                     {canManage && (
                       <TouchableOpacity onPress={() => handleRemove(member)}>
                         <Text style={styles.removeText}>{t('lounge.gerenciar.removeFromLounge')}</Text>

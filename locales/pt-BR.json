@@ -658,7 +658,21 @@
       "cancelConfirmTitle": "Cancelar evento?",
       "cancelConfirmBody": "Os {{n}} participantes serão notificados e os ingressos pagos serão reembolsados automaticamente em Albers. Esta ação não pode ser desfeita.",
       "cancelConfirmCta": "Cancelar e reembolsar todos",
-      "cancelBack": "Voltar"
+      "cancelBack": "Voltar",
+      "copyLinkCta": "Copiar link",
+      "linkCopied": "Copiado!",
+      "whatsappCta": "WhatsApp",
+      "shareCta": "Compartilhar",
+      "publicInviteHint": "Lounge público — qualquer pessoa pode solicitar entrada diretamente.",
+      "errorSend": "Erro ao enviar mensagem"
+    },
+    "convite": {
+      "loading": "Carregando Lounge…",
+      "notFound": "Link de convite inválido ou expirado.",
+      "privateLabel": "LOUNGE PRIVADO",
+      "memberCount": "{{n}} membros",
+      "joinCta": "Entrar no Lounge",
+      "errorJoin": "Erro ao entrar no Lounge"
     },
     "criarEvento": {
       "title": "Criar Evento",

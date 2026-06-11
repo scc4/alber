@@ -2,7 +2,7 @@
 // Camada HTTP entre app e Edge Functions / Supabase REST do módulo Lounge
 
 import { BffError } from './auth.service'
-import type { Lounge, LoungeMember, LoungeRequest } from '../store/lounge.store'
+import type { Lounge, LoungeMember, LoungeMessage, LoungeRequest } from '../store/lounge.store'
 import type { LoungeEvent, EventBatch } from '../components/lounge/EventCard'
 import type { LoungeRole } from '../components/lounge/LoungeCard'
 
@@ -72,35 +72,46 @@ interface DbEvent {
   visibility:      'members' | 'public'
   is_paid:         boolean
   is_recurring:    boolean
-  recurrence_freq: string | null
+  recurrence_freq: 'daily' | 'weekly' | 'biweekly' | 'monthly' | null
   status:          'active' | 'cancelled'
   created_at:      string
   event_batches:   DbBatch[]
 }
 
 interface DbSpaceMember {
-  id:        string
-  user_id:   string
-  role:      'owner' | 'admin' | 'member'
-  status:    'pending' | 'active' | 'banned'
-  joined_at: string | null
+  id:         string
+  user_id:    string
+  role:       'owner' | 'admin' | 'member'
+  status:     'pending' | 'active' | 'banned' | 'left'
+  is_primary: boolean
+  joined_at:  string | null
   created_at: string
-  member:    { id: string; name: string; handle: string } | null
+  member:     { id: string; name: string; handle: string } | null
+}
+
+interface DbLoungeMessage {
+  id:          string
+  author_id:   string
+  author_role: 'owner' | 'admin'
+  content:     string
+  created_at:  string
+  author:      { id: string; name: string; handle: string } | null
 }
 
 interface DbSpace {
-  id:           string
-  name:         string
-  type:         'open' | 'closed'
-  description:  string | null
-  image_url:    string | null
-  invite_token: string | null
-  skin:         DbSkin
-  owner_id:     string
-  status:       string
-  created_at:   string
-  space_members: DbSpaceMember[]
-  events:        DbEvent[]
+  id:              string
+  name:            string
+  type:            'open' | 'closed'
+  description:     string | null
+  image_url:       string | null
+  invite_token:    string | null
+  skin:            DbSkin
+  owner_id:        string
+  status:          string
+  created_at:      string
+  space_members:   DbSpaceMember[]
+  events:          DbEvent[]
+  lounge_messages: DbLoungeMessage[]
 }
 
 interface DbMyMembership {
@@ -161,6 +172,20 @@ function mapBatch(b: DbBatch): EventBatch {
   }
 }
 
+function mapMessage(m: DbLoungeMessage): LoungeMessage {
+  const name = m.author?.name ?? ''
+  return {
+    id:             m.id,
+    authorId:       m.author?.id ?? m.author_id,
+    authorName:     name,
+    authorHandle:   m.author?.handle ?? '',
+    authorInitials: getInitials(name || '?'),
+    role:           m.author_role === 'owner' ? 'owner' : 'manager',
+    content:        m.content,
+    createdAt:      m.created_at,
+  }
+}
+
 function mapEvent(e: DbEvent, spaceId: string): LoungeEvent {
   const batches = (e.event_batches ?? [])
     .sort((a, b) => a.batch_number - b.batch_number)
@@ -204,7 +229,7 @@ function mapSpaceFull(s: DbSpace, myUserId: string): Lounge {
     role:         myActiveMembership ? mapRole(myActiveMembership.role) : null,
     memberStatus: (myAnyMembership?.status ?? null) as Lounge['memberStatus'],
     ownerId:      s.owner_id,
-    isPrimary:    false,
+    isPrimary:    myActiveMembership?.is_primary ?? false,
     members: activeMembers.map<LoungeMember>(m => ({
       id:       m.member?.id  ?? m.user_id,
       name:     m.member?.name ?? '',
@@ -224,7 +249,10 @@ function mapSpaceFull(s: DbSpace, myUserId: string): Lounge {
     events:      (s.events ?? [])
       .filter(e => e.status === 'active')
       .map(e => mapEvent(e, s.id)),
-    messages:    [],
+    messages:    (s.lounge_messages ?? [])
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      .slice(0, 20)
+      .map(mapMessage),
     inviteToken: s.invite_token ?? null,
     createdAt:   s.created_at,
   }
@@ -359,9 +387,10 @@ export async function updateLoungeVisual(
 
 const SPACE_FULL_SELECT = [
   'id', 'name', 'type', 'description', 'image_url', 'invite_token', 'skin', 'owner_id', 'status', 'created_at',
-  'space_members(id,user_id,role,status,joined_at,created_at,member:users!space_members_user_id_fkey(id,name,handle))',
+  'space_members(id,user_id,role,status,is_primary,joined_at,created_at,member:users!space_members_user_id_fkey(id,name,handle))',
   'events(id,name,description,image_url,date,visibility,is_paid,is_recurring,recurrence_freq,status,created_at,' +
     'event_batches(id,batch_number,batch_type,price_brl,capacity,sold,valid_until,status))',
+  'lounge_messages(id,author_id,author_role,content,created_at,author:users!lounge_messages_author_id_fkey(id,name,handle))',
 ].join(',')
 
 export async function getMyLounges(token: string): Promise<Lounge[]> {
@@ -388,12 +417,63 @@ export async function getLounge(id: string, myUserId: string, token: string): Pr
 
 export async function getExploring(query: string, token: string): Promise<Lounge[]> {
   const filter = query.trim() ? `&name=ilike.*${encodeURIComponent(query.trim())}*` : ''
-  const rows = await restGet<Omit<DbSpace, 'space_members' | 'events'>[]>(
+  const rows = await restGet<Omit<DbSpace, 'space_members' | 'events' | 'lounge_messages'>[]>(
     `spaces?select=id,name,type,description,image_url,skin,owner_id,status,created_at&type=eq.open&status=eq.active${filter}&order=created_at.desc`,
     token,
   )
   return rows.map(s => mapSpaceFull(
-    { ...s, space_members: [], events: [], invite_token: null },
+    { ...s, space_members: [], events: [], invite_token: null, lounge_messages: [] },
     '',
   ))
+}
+
+// ── Preview de convite (sem membership) ──────────────────────────────────────
+
+export interface InvitePreview {
+  id:           string
+  name:         string
+  description:  string | null
+  type:         'open' | 'closed'
+  skin:         DbSkin
+  image_url:    string | null
+  member_count: number
+}
+
+export async function getInvitePreview(invite_token: string, token: string): Promise<InvitePreview | null> {
+  const res = await bffPost<InvitePreview | { code: string }>(
+    'lounge-invite-preview',
+    { invite_token },
+    token,
+  ).catch(() => null)
+  return res && 'id' in res ? res : null
+}
+
+// ── Enviar mensagem (owner ou admin) ─────────────────────────────────────────
+
+interface SendMessageResponse {
+  id:            string
+  author_id:     string
+  author_name:   string
+  author_handle: string
+  author_role:   'owner' | 'admin'
+  content:       string
+  created_at:    string
+}
+
+export async function sendMessage(
+  space_id: string,
+  content: string,
+  token: string,
+): Promise<LoungeMessage> {
+  const res = await bffPost<SendMessageResponse>('lounge-message-send', { space_id, content }, token)
+  return {
+    id:             res.id,
+    authorId:       res.author_id,
+    authorName:     res.author_name,
+    authorHandle:   res.author_handle,
+    authorInitials: getInitials(res.author_name || '?'),
+    role:           res.author_role === 'owner' ? 'owner' : 'manager',
+    content:        res.content,
+    createdAt:      res.created_at,
+  }
 }

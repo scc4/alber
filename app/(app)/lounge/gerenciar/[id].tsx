@@ -6,13 +6,16 @@ import { useState } from 'react'
 import {
   Alert,
   Image,
+  Linking,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native'
+import * as Clipboard from 'expo-clipboard'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
@@ -53,14 +56,16 @@ export default function GerenciarScreen() {
   const token     = useAuthStore(s => s.token)
   const user      = useAuthStore(s => s.user)
 
-  const [tab, setTab]         = useState<Tab>('overview')
-  const [msgText, setMsgText] = useState('')
-  const [accent, setAccent]   = useState(lounge?.accent ?? PALETTE[0])
+  const [tab, setTab]           = useState<Tab>('overview')
+  const [msgText, setMsgText]   = useState('')
+  const [sending, setSending]   = useState(false)
+  const [accent, setAccent]     = useState(lounge?.accent ?? PALETTE[0])
   const [bgImageUri, setBgImageUri] = useState<string | null>(null)
-  const [saving, setSaving]   = useState(false)
-  const [inviteUrl, setInviteUrl] = useState<string | null>(
-    lounge?.inviteToken ? `alber://lounge/${id}/convite/${lounge.inviteToken}` : null
-  )
+  const [saving, setSaving]     = useState(false)
+  const [copied, setCopied]     = useState(false)
+  const inviteUrl = lounge?.inviteToken
+    ? `alber://lounge/convite/${lounge.inviteToken}`
+    : null
 
   // ── Not found / unauthorised ──────────────────────────────────────────────────
 
@@ -99,16 +104,34 @@ export default function GerenciarScreen() {
     removeMember(lounge.id, member.id, token)
   }
 
-  function handleSendMessage() {
-    if (!lounge || !msgText.trim()) return
-    const name   = user?.name ?? ''
-    const handle = user?.handle ?? ''
-    const parts  = name.trim().split(/\s+/).filter(Boolean)
-    const initials = parts.length > 1
-      ? ((parts[0][0] ?? '') + (parts[parts.length - 1][0] ?? '')).toUpperCase()
-      : name.trim().substring(0, 2).toUpperCase()
-    sendMessage(lounge.id, msgText.trim(), name, handle, initials)
-    setMsgText('')
+  async function handleSendMessage() {
+    if (!lounge || !token || !msgText.trim()) return
+    setSending(true)
+    try {
+      await sendMessage(lounge.id, msgText.trim(), token)
+      setMsgText('')
+    } catch (e: any) {
+      Alert.alert('Erro', e?.message ?? t('lounge.gerenciar.errorSend'))
+    } finally {
+      setSending(false)
+    }
+  }
+
+  async function handleCopyLink() {
+    if (!inviteUrl) return
+    await Clipboard.setStringAsync(inviteUrl)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2500)
+  }
+
+  function handleShareWhatsApp() {
+    if (!inviteUrl) return
+    Linking.openURL(`whatsapp://send?text=${encodeURIComponent(inviteUrl)}`)
+  }
+
+  function handleShare() {
+    if (!inviteUrl || !lounge) return
+    Share.share({ message: inviteUrl, title: lounge.name })
   }
 
   async function handleSaveVisual() {
@@ -225,10 +248,43 @@ export default function GerenciarScreen() {
           <View style={styles.sectionGap}>
             <Eyebrow>{t('lounge.gerenciar.inviteSection')}</Eyebrow>
           </View>
-          {inviteUrl ? (
-            <View style={styles.inviteCard}>
-              <Text style={styles.inviteUrl} numberOfLines={1}>{inviteUrl}</Text>
+          {lounge.visibility === 'public' ? (
+            <View style={styles.invitePublicHint}>
+              <Text style={styles.invitePublicText}>{t('lounge.gerenciar.publicInviteHint')}</Text>
             </View>
+          ) : inviteUrl ? (
+            <>
+              <View style={styles.inviteCard}>
+                <Text style={styles.inviteUrl} numberOfLines={1}>{inviteUrl}</Text>
+              </View>
+              <View style={styles.inviteActions}>
+                <TouchableOpacity
+                  onPress={handleCopyLink}
+                  style={[styles.inviteActionBtn, { borderColor: copied ? `${lounge.accent}88` : 'rgba(255,255,255,0.12)' }]}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.inviteActionText, copied && { color: lounge.accent }]}>
+                    {copied ? t('lounge.gerenciar.linkCopied') : t('lounge.gerenciar.copyLinkCta')}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleShareWhatsApp}
+                  style={styles.inviteActionBtn}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.inviteActionText}>{t('lounge.gerenciar.whatsappCta')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleShare}
+                  style={[styles.inviteActionBtn, { borderColor: `${lounge.accent}44` }]}
+                  activeOpacity={0.75}
+                >
+                  <Text style={[styles.inviteActionText, { color: lounge.accent }]}>
+                    {t('lounge.gerenciar.shareCta')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </>
           ) : (
             <TouchableOpacity
               onPress={handleGenerateInvite}
@@ -405,7 +461,7 @@ export default function GerenciarScreen() {
             <PrimaryButton
               label={t('lounge.gerenciar.sendCta')}
               onPress={handleSendMessage}
-              state={msgText.trim().length === 0 ? 'disabled' : 'default'}
+              state={sending ? 'loading' : msgText.trim().length === 0 ? 'disabled' : 'default'}
             />
           </View>
         </View>
@@ -598,6 +654,39 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(255,255,255,0.6)',
+  },
+  inviteActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  inviteActionBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+  },
+  inviteActionText: {
+    fontSize: 11.5,
+    fontFamily: typography.fontFamily.primary,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.65)',
+  },
+  invitePublicHint: {
+    marginTop: 10,
+    padding: 12,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 10,
+  },
+  invitePublicText: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.4)',
   },
   generateLinkBtn: {
     marginTop: 10,

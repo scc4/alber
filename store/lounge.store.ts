@@ -114,7 +114,7 @@ interface LoungeState {
   // Local-only (sem EF definida no MVP)
   promoteMember:    (loungeId: string, memberId: string) => void
   removeMember:     (loungeId: string, memberId: string, token: string) => Promise<void>
-  sendMessage:      (loungeId: string, content: string, authorName: string, authorHandle: string, authorInitials: string) => void
+  sendMessage:      (loungeId: string, content: string, token: string) => Promise<void>
   updateVisual:     (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
   cancelEvent:      (eventId: string) => void
 
@@ -346,22 +346,19 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     }
   },
 
-  sendMessage: (loungeId, content, authorName, authorHandle, authorInitials) => {
-    const msg: LoungeMessage = {
-      id:             `msg-${Date.now()}`,
-      authorId:       'self',
-      authorName,
-      authorHandle,
-      authorInitials,
-      role:           'owner',
-      content,
-      createdAt:      new Date().toISOString(),
+  sendMessage: async (loungeId, content, token) => {
+    set({ error: null })
+    try {
+      const msg = await loungeService.sendMessage(loungeId, content, token)
+      set(s => ({
+        myLounges: s.myLounges.map(l =>
+          l.id === loungeId ? { ...l, messages: [msg, ...l.messages] } : l
+        ),
+      }))
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao enviar mensagem' })
+      throw e
     }
-    set(s => ({
-      myLounges: s.myLounges.map(l =>
-        l.id === loungeId ? { ...l, messages: [msg, ...l.messages] } : l
-      ),
-    }))
   },
 
   updateVisual: async (loungeId, accent, imageUri, token) => {

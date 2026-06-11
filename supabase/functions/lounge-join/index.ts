@@ -109,7 +109,7 @@ Deno.serve(async (req: Request) => {
     const { error: insertErr } = await supabaseAdmin
       .from('space_members')
       .upsert(
-        { space_id: space.id, user_id: user.id, role: 'member', status: 'active', joined_at: new Date().toISOString() },
+        { space_id: space.id, user_id: user.id, role: 'member', status: 'active', is_primary: false, joined_at: new Date().toISOString() },
         { onConflict: 'space_id,user_id' },
       )
 
@@ -136,7 +136,7 @@ Deno.serve(async (req: Request) => {
   const { error: insertErr } = await supabaseAdmin
     .from('space_members')
     .upsert(
-      { space_id: space.id, user_id: user.id, role: 'member', status: 'pending' },
+      { space_id: space.id, user_id: user.id, role: 'member', status: 'pending', is_primary: false, joined_at: null },
       { onConflict: 'space_id,user_id' },
     )
 

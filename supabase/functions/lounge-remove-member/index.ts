@@ -81,7 +81,7 @@ Deno.serve(async (req: Request) => {
 
   const { error: updateErr } = await supabaseAdmin
     .from('space_members')
-    .update({ status: 'banned' })
+    .update({ status: 'banned', is_primary: false })
     .eq('id', target.id)
 
   if (updateErr) {

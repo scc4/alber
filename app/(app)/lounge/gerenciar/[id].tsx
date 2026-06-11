@@ -45,6 +45,7 @@ export default function GerenciarScreen() {
 
   const lounge         = useLoungeStore(s => s.myLounges.find(l => l.id === id) ?? s.exploring.find(l => l.id === id))
   const approveRequest = useLoungeStore(s => s.approveRequest)
+  const fetchLounge    = useLoungeStore(s => s.fetchLounge)
   const removeMember   = useLoungeStore(s => s.removeMember)
   const sendMessage    = useLoungeStore(s => s.sendMessage)
   const updateVisual   = useLoungeStore(s => s.updateVisual)
@@ -86,10 +87,11 @@ export default function GerenciarScreen() {
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
   async function handleApprove(req: LoungeRequest) {
-    if (!lounge || !token || processingIds.has(req.id)) return
+    if (!lounge || !token || !user || processingIds.has(req.id)) return
     setProcessingIds(s => new Set(s).add(req.id))
     try {
       await approveRequest(req.id, true, token)
+      await fetchLounge(lounge.id, user.id, token)
     } catch (e: any) {
       Alert.alert(t('lounge.gerenciar.approveErrorTitle'), e?.message ?? t('lounge.gerenciar.approveErrorBody'))
     } finally {
@@ -98,10 +100,11 @@ export default function GerenciarScreen() {
   }
 
   async function handleReject(req: LoungeRequest) {
-    if (!lounge || !token || processingIds.has(req.id)) return
+    if (!lounge || !token || !user || processingIds.has(req.id)) return
     setProcessingIds(s => new Set(s).add(req.id))
     try {
       await approveRequest(req.id, false, token)
+      await fetchLounge(lounge.id, user.id, token)
     } catch (e: any) {
       Alert.alert(t('lounge.gerenciar.approveErrorTitle'), e?.message ?? t('lounge.gerenciar.approveErrorBody'))
     } finally {

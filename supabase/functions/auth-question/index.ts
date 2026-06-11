@@ -101,12 +101,26 @@ Deno.serve(async (req: Request) => {
   const pairs = tryParsePairsPayload(pin_hash)
 
   if (pairs) {
-    if (pinSha256?.length === 64) {
-      const result = await verifyPinWithPairs(pinSha256, pairs)
-      pinOk = result.ok
+    if (!pinSha256 || pinSha256.length !== 64) {
+      // pin_sha256 ausente — conta registrada antes do fast-login; cliente deve usar modo setup
+      return json({ question: '', options: [], pin_setup_required: true })
     }
+    const result = await verifyPinWithPairs(pinSha256, pairs)
+    pinOk = result.ok
   } else {
-    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+    // Verificar dual payload { sha256, legacy } (enviado pelo PINInput em legacyCompat=true)
+    let dualPayload: { sha256: string; legacy: string } | null = null
+    try {
+      const p = JSON.parse(pin_hash)
+      if (p?.sha256 && p?.legacy) dualPayload = p
+    } catch { /* plain SHA-256 */ }
+
+    if (dualPayload) {
+      pinOk = await bcryptVerify(dualPayload.sha256, pinBcrypt)
+      if (!pinOk) pinOk = await bcryptVerify(dualPayload.legacy, pinBcrypt)
+    } else {
+      pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+    }
   }
 
   if (!pinOk) return json({ question: '', options: [] })

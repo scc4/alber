@@ -74,6 +74,13 @@ export default function LoginScreen() {
     const cpfOrHandle = identifier.startsWith('@') ? identifier : identifier.replace(/\D/g, '')
     authService.fetchSecurityChallenge(cpfOrHandle, pinHash)
       .then(result => {
+        if (result === 'PIN_SETUP_REQUIRED') {
+          pinErrKey.current++
+          setPinHash('')
+          setPinMode('setup')
+          setPhase('pin')
+          return
+        }
         if (result) setChallenge(result)
         else setChallengeError(true)
       })

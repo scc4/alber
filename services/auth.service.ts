@@ -182,7 +182,7 @@ export interface SecurityChallenge {
 export async function fetchSecurityChallenge(
   identifier: string,
   pinHash: string,
-): Promise<SecurityChallenge | null> {
+): Promise<SecurityChallenge | null | 'PIN_SETUP_REQUIRED'> {
   try {
     const res = await fetch(`${BFF}/auth-question`, {
       method: 'POST',
@@ -194,7 +194,8 @@ export async function fetchSecurityChallenge(
       body: JSON.stringify({ identifier, pin_hash: pinHash }),
     })
     if (!res.ok) return null
-    const data = await res.json() as { question: string; options: { hash: string; display: string }[] }
+    const data = await res.json() as { question: string; options: { hash: string; display: string }[]; pin_setup_required?: boolean }
+    if (data.pin_setup_required) return 'PIN_SETUP_REQUIRED'
     if (!data.question && !data.options?.length) return null
     return { question: data.question, options: data.options ?? [] }
   } catch { return null }

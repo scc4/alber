@@ -217,7 +217,13 @@
       "stale": "Saldo pode estar desatualizado"
     },
     "lounge": {
-      "label": "Seu Lounge atual"
+      "label": "Lounge principal",
+      "noPrimary": "Nenhum Lounge principal",
+      "noPrimaryCta": "Definir principal →",
+      "noPrimaryLabel": "Definir Lounge principal",
+      "empty": "Você não participa de nenhum Lounge",
+      "emptyLabel": "Explorar Lounges",
+      "exploreCta": "Explorar Lounges →"
     },
     "actions": {
       "receber": "Receber",
@@ -555,6 +561,22 @@
     "createEventCta": "+ Criar evento",
     "setActiveCta": "Definir como ativo",
     "activeLabel": "Ativo",
+    "primaryLabel": "Lounge principal",
+    "badgePrimary": "PRINCIPAL",
+    "sectionOwned": "Meu Lounge",
+    "sectionMember": "Lounges que participo",
+    "deleteCta": "Excluir Lounge",
+    "deleteTitle": "Excluir Lounge?",
+    "deleteBody": "Todos os membros serão notificados e removidos. Esta ação não pode ser desfeita.",
+    "deleteCancel": "Cancelar",
+    "errorDelete": "Erro ao encerrar o Lounge",
+    "leaveCta": "Sair do Lounge",
+    "leaveTitle": "Sair do Lounge?",
+    "leaveBody": "Você deixará de ter acesso a este Lounge.",
+    "leaveBodyPrimary": "Este é seu Lounge principal. Ele será removido da sua home.",
+    "leaveCancel": "Cancelar",
+    "errorLeave": "Erro ao sair do Lounge",
+    "errorSetPrimary": "Erro ao definir Lounge principal",
     "customizeCta": "Personalizar",
     "joinCta": "Solicitar entrada",
     "joinSentCta": "Solicitação enviada",

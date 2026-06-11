@@ -1,6 +1,6 @@
 # Alber — Spec Módulo Alber Lounge
-**Versão:** 1.2  
-**Data:** 30/04/2026  
+**Versão:** 1.3  
+**Data:** 10/06/2026  
 **Depende de:** 02_design_system.md, 03_backend.md
 
 ---
@@ -17,13 +17,28 @@ Qualquer usuário pode criar até 1 Lounge — sem aprovação prévia.
 
 | Perfil | Capacidades |
 |---|---|
-| Membro | Explorar, solicitar entrada, participar de eventos |
-| Gestor | Membro + enviar mensagens, gerenciar membros, criar eventos, ver confirmados |
-| Dono | Gestor + nomear gestores, customizar Lounge, definir tipo |
+| Membro | Explorar, solicitar entrada, participar de eventos, definir como principal, sair |
+| Gestor | Membro + enviar mensagens, gerenciar membros, criar eventos, ver confirmados, definir como principal, sair |
+| Dono | Gestor + nomear gestores, customizar Lounge, definir tipo, excluir Lounge |
 
 **Criação livre:** qualquer usuário cadastrado pode criar 1 Lounge pelo app.
 Sem aprovação prévia do admin. Limite: 1 lounge ativo por usuário.
 
+---
+
+## 3. Lounge Principal
+
+O Lounge Principal é o que aparece na tela Home do usuário.
+
+**Regras:**
+- Apenas `role != 'owner'` pode definir um Lounge como principal
+  (Donos exibem seu Lounge na Home automaticamente pelo `currentLounge`)
+- Um usuário pode ter apenas 1 Lounge principal por vez
+  (garantido por `UNIQUE INDEX WHERE is_primary = true AND status = 'active'`)
+- Ao sair (`lounge-leave`) ou ao excluir o Lounge (`lounge-delete`):
+  `is_primary` é automaticamente limpo → Home volta ao estado vazio
+- Campo persistido em `space_members.is_primary BOOLEAN DEFAULT false`
+- EF: `POST /lounge-set-primary { space_id }` → retorna `{ success, space_id }`
 
 ---
 
@@ -52,17 +67,24 @@ Lounge criado — usuário vira dono automaticamente
 
 ## 5. Tela principal — tabs
 
-**Meus Lounges:** Lounges onde é membro, gestor ou dono  
-**Explorar:** busca + lista de Lounges públicos e privados
+**Meus Lounges:** duas seções:
+- **Meu Lounge** — Lounges onde `role === 'owner'`
+- **Lounges que participo** — Lounges onde `role !== 'owner'`; badge PRINCIPAL quando `isPrimary = true`
+
+**Explorar:** busca + lista de Lounges públicos
 
 ---
 
-## 5. Tela de detalhe do Lounge
+## 5b. Tela de detalhe do Lounge
 
-- Hero + logo + nome + descrição + nº membros
-- [Solicitar entrada] ou [Membro ✓]
+- Hero + logo + nome + descrição + nº membros + badge de role
+- CTAs por role:
+  - **Dono:** `[Gerenciar]` + `[Excluir Lounge]` (vermelho, Alert de confirmação)
+  - **Gestor:** `[Gerenciar]` + switch Lounge Principal + link "Sair do Lounge"
+  - **Membro:** switch Lounge Principal + link "Sair do Lounge"
+  - **Não-membro:** `[Solicitar entrada]` ou badge "SOLICITAÇÃO ENVIADA"
 - Seção EVENTOS (EventCards com lote atual e disponibilidade)
-- Seção MENSAGENS DO SPACE (feed de mensagens dos gestores/dono)
+- Seção MENSAGENS DO LOUNGE (feed de mensagens dos gestores/dono)
 
 ---
 
@@ -303,12 +325,31 @@ Ambos verificados:
 
 ---
 
-## 10. Lounge ativo na Home
+## 10. Lounge principal na Home
 
-- Definido em: detalhe do Lounge → [Definir como Lounge atual]
-- Ou em: Perfil → Lounges → selecionar ativo
-- Apenas Lounges onde o usuário é membro
-- Sem Lounge ativo: skin padrão black/white
+- Exibido quando `space_members.is_primary = true` para o usuário logado
+- `fetchMyLounges` define `currentLounge` automaticamente com o lounge principal
+- **Dono:** seu Lounge aparece na Home com o `currentLounge` padrão (sem necessidade de definir)
+- **Membro/Gestor:** deve definir explicitamente via switch "Lounge principal" na tela de detalhe
+- Estados da Home:
+  - `primaryLounge` existe → exibe nome, skin e role
+  - Tem lounges mas nenhum é principal → "Nenhum Lounge principal · Definir principal →"
+  - Sem lounges → "Você não participa de nenhum Lounge · Explorar Lounges →"
+
+### Sair do Lounge (Membro/Gestor)
+
+- EF: `POST /lounge-leave { space_id }` → `{ success }`
+- `space_members.status = 'left'`, `is_primary = false`
+- Dono não pode sair — deve excluir o Lounge
+- Alert de confirmação; se era principal, informa que será removido da Home
+
+### Excluir Lounge (Dono)
+
+- EF: `POST /lounge-delete { space_id }` → `{ success }`
+- `spaces.status = 'deleted'` (soft delete)
+- `space_members.status = 'left'`, `is_primary = false` para todos
+- Push para cada membro ativo: "[nome] foi encerrado pelo dono."
+- Alert de confirmação antes de executar
 
 ---
 
@@ -338,7 +379,7 @@ Ambos verificados:
 
 | ID | Critério |
 |---|---|
-| AS-01 | Donos habilitados apenas via painel admin |
+| AS-01 | Criação de Lounge disponível para qualquer usuário cadastrado (sem aprovação prévia) |
 | AS-02 | Lounge público exige solicitação + aprovação |
 | AS-03 | Lounge privado acessível apenas via link |
 | AS-04 | Mensagem entregue via push + feed |
@@ -347,7 +388,11 @@ Ambos verificados:
 | AS-07 | Evento pago exige PIN e verifica saldo |
 | AS-08 | Cancelamento reembolsa automaticamente todos |
 | AS-09 | Ingresso confirmado visível em Atividade |
-| AS-10 | Lounge ativo reflete skin na Home |
+| AS-10 | Lounge principal reflete skin na Home |
+| AS-19 | Apenas role != 'owner' pode definir Lounge como principal |
+| AS-20 | Sair do Lounge limpa is_primary e remove da lista do usuário |
+| AS-21 | Excluir Lounge notifica todos os membros ativos por push |
+| AS-22 | Home exibe estado vazio correto quando não há Lounge principal |
 | AS-11 | Taxa de evento configurada no painel admin |
 | AS-12 | Lote esgotado ativa próximo automaticamente |
 | AS-13 | Badge "Últimas vagas" com ≤ 10% de capacidade |

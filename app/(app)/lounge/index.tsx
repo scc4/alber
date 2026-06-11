@@ -155,8 +155,42 @@ export default function LoungeIndexScreen() {
           <Text style={styles.emptyText}>{t('lounge.tabExplore')}</Text>
         )}
 
-        {/* Lounge list */}
-        {(tab === 'mine' ? myLounges : exploring).map(lounge => (
+        {/* Mine: two sections */}
+        {tab === 'mine' && (() => {
+          const owned   = myLounges.filter(l => l.role === 'owner')
+          const member  = myLounges.filter(l => l.role !== 'owner')
+          return (
+            <>
+              {owned.length > 0 && (
+                <>
+                  <SectionLabel>{t('lounge.sectionOwned')}</SectionLabel>
+                  {owned.map(lounge => (
+                    <LoungeCard
+                      key={lounge.id}
+                      lounge={lounge}
+                      onPress={() => openLounge(lounge.id)}
+                    />
+                  ))}
+                </>
+              )}
+              {member.length > 0 && (
+                <>
+                  <SectionLabel>{t('lounge.sectionMember')}</SectionLabel>
+                  {member.map(lounge => (
+                    <LoungeCard
+                      key={lounge.id}
+                      lounge={lounge}
+                      onPress={() => openLounge(lounge.id)}
+                    />
+                  ))}
+                </>
+              )}
+            </>
+          )
+        })()}
+
+        {/* Explore: flat list */}
+        {tab === 'explore' && exploring.map(lounge => (
           <LoungeCard
             key={lounge.id}
             lounge={lounge}
@@ -166,6 +200,25 @@ export default function LoungeIndexScreen() {
       </ScrollView>
     </View>
   )
+}
+
+// ─── SectionLabel ─────────────────────────────────────────────────────────────
+
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text style={sectionLabelStyle}>{children}</Text>
+  )
+}
+
+const sectionLabelStyle: import('react-native').TextStyle = {
+  fontSize: 10,
+  fontFamily: typography.fontFamily.primary,
+  fontWeight: '500',
+  letterSpacing: 10 * 0.1,
+  color: 'rgba(255,255,255,0.35)',
+  textTransform: 'uppercase',
+  marginBottom: 10,
+  marginTop: 4,
 }
 
 // ─── Inline icons (SVG-free RN equivalents) ───────────────────────────────────

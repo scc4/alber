@@ -22,6 +22,7 @@ export interface LoungeSummary {
   memberCount: number
   role:        LoungeRole
   visibility:  'public' | 'private'
+  isPrimary?:  boolean
 }
 
 interface Props {
@@ -37,6 +38,7 @@ export function LoungeCard({ lounge, onPress }: Props) {
   const isOwner   = lounge.role === 'owner'
   const isManager = lounge.role === 'manager'
   const hasBadge  = lounge.role !== null
+  const isPrimary = lounge.isPrimary ?? false
 
   const roleLabel = isOwner
     ? t('lounge.roleOwner')
@@ -81,7 +83,7 @@ export function LoungeCard({ lounge, onPress }: Props) {
 
       {/* Content */}
       <View style={styles.inner} pointerEvents="none">
-        {/* Top row: dot + badge */}
+        {/* Top row: dot + role badge + principal badge */}
         <View style={styles.topRow}>
           <View style={[styles.accentDot, { backgroundColor: lounge.accent }]} />
           {hasBadge && (
@@ -101,6 +103,13 @@ export function LoungeCard({ lounge, onPress }: Props) {
           {!hasBadge && lounge.visibility === 'private' && (
             <View style={styles.badgeDefault}>
               <Text style={styles.badgeText}>{t('lounge.visPrivate')}</Text>
+            </View>
+          )}
+          {isPrimary && (
+            <View style={[styles.badge, { backgroundColor: `${lounge.accent}22`, borderColor: `${lounge.accent}55` }]}>
+              <Text style={[styles.badgeText, { color: lounge.accent }]}>
+                {t('lounge.badgePrimary')}
+              </Text>
             </View>
           )}
         </View>

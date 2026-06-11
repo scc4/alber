@@ -19,7 +19,12 @@
       "Bash(git commit *)",
       "Bash(npx expo *)",
       "Bash(python *)",
-      "Bash(Select-String -Pattern \"metro|babel|app\\\\.json|expo\")"
+      "Bash(Select-String -Pattern \"metro|babel|app\\\\.json|expo\")",
+      "PowerShell(git *)",
+      "Bash(curl *)",
+      "Bash(esm)",
+      "Bash(cjs\" | head -20)",
+      "Bash(git push *)"
     ]
   }
 }

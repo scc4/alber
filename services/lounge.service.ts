@@ -104,10 +104,11 @@ interface DbSpace {
 }
 
 interface DbMyMembership {
-  id:     string
-  role:   'owner' | 'admin' | 'member'
-  status: 'pending' | 'active' | 'banned'
-  space:  Omit<DbSpace, 'space_members' | 'events'> & {
+  id:         string
+  role:       'owner' | 'admin' | 'member'
+  status:     'pending' | 'active' | 'banned' | 'left'
+  is_primary: boolean
+  space:      Omit<DbSpace, 'space_members' | 'events'> & {
     member_count?: [{ count: number }]
   }
 }
@@ -201,6 +202,7 @@ function mapSpaceFull(s: DbSpace, myUserId: string): Lounge {
     memberCount: activeMembers.length,
     role:        myMembership ? mapRole(myMembership.role) : null,
     ownerId:     s.owner_id,
+    isPrimary:   false,
     members: activeMembers.map<LoungeMember>(m => ({
       id:       m.member?.id  ?? m.user_id,
       name:     m.member?.name ?? '',
@@ -240,6 +242,7 @@ function mapLoungeListItem(sm: DbMyMembership): Lounge {
     memberCount:     sm.space.member_count?.[0]?.count ?? 0,
     role:            mapRole(sm.role),
     ownerId:         s.owner_id,
+    isPrimary:       sm.is_primary ?? false,
     members:         [],
     pendingRequests: [],
     events:          [],
@@ -328,6 +331,18 @@ export async function removeMember(space_id: string, user_id: string, token: str
   await bffPost('lounge-remove-member', { space_id, user_id }, token)
 }
 
+export async function setPrimaryLounge(space_id: string, token: string): Promise<void> {
+  await bffPost('lounge-set-primary', { space_id }, token)
+}
+
+export async function leaveLounge(space_id: string, token: string): Promise<void> {
+  await bffPost('lounge-leave', { space_id }, token)
+}
+
+export async function deleteLounge(space_id: string, token: string): Promise<void> {
+  await bffPost('lounge-delete', { space_id }, token)
+}
+
 export async function updateLoungeVisual(
   space_id: string,
   accent: string,
@@ -348,7 +363,7 @@ const SPACE_FULL_SELECT = [
 
 export async function getMyLounges(token: string): Promise<Lounge[]> {
   const rows = await restGet<DbMyMembership[]>(
-    'space_members?select=id,role,status,' +
+    'space_members?select=id,role,status,is_primary,' +
     'space:spaces!space_members_space_id_fkey(' +
       'id,name,type,description,image_url,invite_token,skin,owner_id,status,created_at,' +
       'member_count:space_members!space_members_space_id_fkey(count)' +

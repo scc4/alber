@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 import {
   ActivityIndicator,
+  Alert,
   Image,
   ScrollView,
   StyleSheet,
@@ -36,11 +37,12 @@ export default function LoungeDetailScreen() {
   const token      = useAuthStore(s => s.token)
   const userId     = useAuthStore(s => s.user?.id ?? '')
 
-  const getLoungeById  = useLoungeStore(s => s.getLoungeById)
-  const fetchLounge    = useLoungeStore(s => s.fetchLounge)
-  const joinLounge     = useLoungeStore(s => s.joinLounge)
-  const setActive        = useLoungeStore(s => s.setCurrentLounge)
-  const currentLoungeId  = useLoungeStore(s => s.currentLounge?.id)
+  const getLoungeById    = useLoungeStore(s => s.getLoungeById)
+  const fetchLounge      = useLoungeStore(s => s.fetchLounge)
+  const joinLounge       = useLoungeStore(s => s.joinLounge)
+  const setPrimaryLounge = useLoungeStore(s => s.setPrimaryLounge)
+  const leaveLounge      = useLoungeStore(s => s.leaveLounge)
+  const deleteLounge     = useLoungeStore(s => s.deleteLounge)
   const loading          = useLoungeStore(s => s.loading)
   const storeError       = useLoungeStore(s => s.error)
 
@@ -87,10 +89,10 @@ export default function LoungeDetailScreen() {
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
-  const isOwner   = lounge.role === 'owner'
-  const isManager = lounge.role === 'owner' || lounge.role === 'manager'
-  const isMember  = lounge.role !== null
-  const isActive  = currentLoungeId === lounge.id
+  const isOwner       = lounge.role === 'owner'
+  const isManager     = lounge.role === 'owner' || lounge.role === 'manager'
+  const isMember      = lounge.role !== null
+  const isNonOwnerMember = isMember && !isOwner
 
   const roleLabel = isOwner
     ? t('lounge.roleOwner')
@@ -111,9 +113,59 @@ export default function LoungeDetailScreen() {
     }
   }
 
-  function handleToggleActive(val: boolean) {
-    if (!lounge) return
-    setActive(val ? lounge.id : '')
+  async function handleSetPrimary(val: boolean) {
+    if (!lounge || !token || !val) return
+    try {
+      await setPrimaryLounge(lounge.id, token)
+    } catch (e: any) {
+      Alert.alert('Erro', e?.message ?? t('lounge.errorSetPrimary'))
+    }
+  }
+
+  function handleLeave() {
+    if (!lounge || !token) return
+    Alert.alert(
+      t('lounge.leaveTitle'),
+      lounge.isPrimary ? t('lounge.leaveBodyPrimary') : t('lounge.leaveBody'),
+      [
+        { text: t('lounge.leaveCancel'), style: 'cancel' },
+        {
+          text: t('lounge.leaveCta'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await leaveLounge(lounge.id, token)
+              router.replace('/(app)/lounge')
+            } catch (e: any) {
+              Alert.alert('Erro', e?.message ?? t('lounge.errorLeave'))
+            }
+          },
+        },
+      ],
+    )
+  }
+
+  function handleDelete() {
+    if (!lounge || !token) return
+    Alert.alert(
+      t('lounge.deleteTitle'),
+      t('lounge.deleteBody'),
+      [
+        { text: t('lounge.deleteCancel'), style: 'cancel' },
+        {
+          text: t('lounge.deleteCta'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteLounge(lounge.id, token)
+              router.replace('/(app)/lounge')
+            } catch (e: any) {
+              Alert.alert('Erro', e?.message ?? t('lounge.errorDelete'))
+            }
+          },
+        },
+      ],
+    )
   }
 
   function handleEventPress(eventId: string) {
@@ -191,9 +243,10 @@ export default function LoungeDetailScreen() {
           <Text style={styles.description}>{lounge.description}</Text>
         )}
 
-        {/* CTA row */}
-        <View style={styles.ctaRow}>
-          {isManager ? (
+        {/* CTA block */}
+        <View style={styles.ctaBlock}>
+          {isOwner ? (
+            /* Owner: Gerenciar + Excluir */
             <>
               <TouchableOpacity
                 onPress={() => router.push(`/(app)/lounge/gerenciar/${lounge.id}`)}
@@ -202,29 +255,39 @@ export default function LoungeDetailScreen() {
               >
                 <Text style={styles.ctaPrimaryText}>{t('lounge.manageCta')}</Text>
               </TouchableOpacity>
-              <View style={styles.ctaActiveWrap}>
-                <Switch
-                  value={isActive}
-                  onValueChange={handleToggleActive}
-                  trackColor={{ false: 'rgba(255,255,255,0.12)', true: lounge.accent }}
-                  thumbColor={colors.white[100]}
-                />
-                <Text style={styles.ctaActiveLabel}>{t('lounge.activeLabel')}</Text>
-              </View>
+              <TouchableOpacity
+                onPress={handleDelete}
+                style={styles.ctaDelete}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.ctaDeleteText}>{t('lounge.deleteCta')}</Text>
+              </TouchableOpacity>
             </>
-          ) : isMember ? (
-            <View style={styles.ctaMemberBadge}>
-              <Text style={styles.ctaMemberText}>{t('lounge.memberCta')}</Text>
-              <View style={styles.ctaMemberActiveWrap}>
+          ) : isNonOwnerMember ? (
+            /* Manager or member: Gerenciar (if manager) + Principal switch + Sair */
+            <>
+              {lounge.role === 'manager' && (
+                <TouchableOpacity
+                  onPress={() => router.push(`/(app)/lounge/gerenciar/${lounge.id}`)}
+                  style={styles.ctaManage}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.ctaPrimaryText}>{t('lounge.manageCta')}</Text>
+                </TouchableOpacity>
+              )}
+              <View style={styles.ctaPrimaryRow}>
                 <Switch
-                  value={isActive}
-                  onValueChange={handleToggleActive}
+                  value={lounge.isPrimary}
+                  onValueChange={handleSetPrimary}
                   trackColor={{ false: 'rgba(255,255,255,0.12)', true: lounge.accent }}
                   thumbColor={colors.white[100]}
                 />
-                <Text style={styles.ctaActiveLabel}>{t('lounge.activeLabel')}</Text>
+                <Text style={styles.ctaActiveLabel}>{t('lounge.primaryLabel')}</Text>
               </View>
-            </View>
+              <TouchableOpacity onPress={handleLeave} style={styles.ctaLeaveLink}>
+                <Text style={styles.ctaLeaveLinkText}>{t('lounge.leaveCta')}</Text>
+              </TouchableOpacity>
+            </>
           ) : joinSent ? (
             <View style={styles.ctaPendingBadge}>
               <Text style={styles.ctaPendingText}>{t('lounge.requestPending')}</Text>
@@ -448,26 +511,38 @@ const styles = StyleSheet.create({
   },
 
   // CTAs
-  ctaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+  ctaBlock: {
+    gap: 10,
     marginBottom: 28,
   },
   ctaManage: {
-    flex: 3,
     height: spacing.buttonHeight,
     backgroundColor: colors.white[100],
     borderRadius: spacing.radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ctaActiveWrap: {
-    flex: 2,
+  ctaDelete: {
+    height: spacing.buttonHeight,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(239,68,68,0.35)',
+    borderRadius: spacing.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaDeleteText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
+    color: colors.state.error,
+    letterSpacing: 12.5 * 0.03,
+  },
+  ctaPrimaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: 8,
+    gap: 10,
+    paddingHorizontal: 4,
   },
   ctaActiveLabel: {
     fontSize: 13,
@@ -476,7 +551,6 @@ const styles = StyleSheet.create({
     color: colors.white[100],
   },
   ctaPrimary: {
-    flex: 2,
     height: spacing.buttonHeight,
     backgroundColor: colors.white[100],
     borderRadius: spacing.radius.md,
@@ -490,31 +564,17 @@ const styles = StyleSheet.create({
     color: colors.black[100],
     letterSpacing: 12.5 * 0.03,
   },
-  ctaMemberBadge: {
-    flex: 1,
-    height: spacing.buttonHeight,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: spacing.radius.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
+  ctaLeaveLink: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
   },
-  ctaMemberText: {
+  ctaLeaveLinkText: {
     fontSize: 12.5,
-    fontWeight: '500',
     fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.65)',
-  },
-  ctaMemberActiveWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    color: 'rgba(255,255,255,0.4)',
+    textDecorationLine: 'underline',
   },
   ctaPendingBadge: {
-    flex: 2,
     height: spacing.buttonHeight,
     backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 0.5,

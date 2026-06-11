@@ -101,21 +101,25 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing]         = useState(false)
   const [dismissedBanner, setDismissedBanner] = useState(false)
 
+  const primaryLounge = useMemo(
+    () => myLounges.find(l => l.isPrimary) ?? null,
+    [myLounges],
+  )
+
   const skin = useMemo(() => {
-    if (!myLounges.length) return spaceSkins.none
-    const lounge = myLounges[0]
+    if (!primaryLounge) return spaceSkins.none
     const roleLabel: string | null =
-      lounge.role === 'owner'   ? t('lounge.roleOwner')
-      : lounge.role === 'manager' ? t('lounge.roleManager')
+      primaryLounge.role === 'owner'   ? t('lounge.roleOwner')
+      : primaryLounge.role === 'manager' ? t('lounge.roleManager')
       : t('lounge.roleMember')
     return {
-      name:   lounge.name,
-      accent: lounge.accent,
-      bgDark: lounge.bgDark,
+      name:   primaryLounge.name,
+      accent: primaryLounge.accent,
+      bgDark: primaryLounge.bgDark,
       wm:     0.035 as const,
       role:   roleLabel,
     }
-  }, [myLounges, t])
+  }, [primaryLounge, t])
 
   // Carrega preferência de ocultar e saldo no mount
   useEffect(() => {
@@ -156,7 +160,6 @@ export default function HomeScreen() {
     }
   }
 
-  console.log('[home] user object:', JSON.stringify(user))
   const firstName = user?.name?.split(' ')[0] ?? ''
 
   const handleDebugLogout = async () => {
@@ -242,25 +245,55 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {/* Seção Lounge atual */}
-        <Pressable
-          onPress={() => handleNav('lounge')}
-          style={styles.loungeSection}
-          accessibilityRole="button"
-          accessibilityLabel={skin.name}
-        >
-          <Eyebrow>{t('home.lounge.label')}</Eyebrow>
-          <View style={styles.loungeNameRow}>
-            {myLounges.length > 0 && (
+        {/* Seção Lounge principal */}
+        {primaryLounge ? (
+          <Pressable
+            onPress={() => handleNav('lounge')}
+            style={styles.loungeSection}
+            accessibilityRole="button"
+            accessibilityLabel={skin.name}
+          >
+            <Eyebrow>{t('home.lounge.label')}</Eyebrow>
+            <View style={styles.loungeNameRow}>
               <View style={[styles.loungeDot, { backgroundColor: skin.accent }]} />
+              <Text style={styles.loungeName}>{skin.name}</Text>
+              <Text style={styles.loungeChevron}>›</Text>
+            </View>
+            {skin.role != null && (
+              <Eyebrow color="rgba(255,255,255,0.32)">{skin.role}</Eyebrow>
             )}
-            <Text style={styles.loungeName}>{skin.name}</Text>
-            <Text style={styles.loungeChevron}>›</Text>
-          </View>
-          {skin.role != null && (
-            <Eyebrow color="rgba(255,255,255,0.32)">{skin.role}</Eyebrow>
-          )}
-        </Pressable>
+          </Pressable>
+        ) : myLounges.length > 0 ? (
+          /* Has lounges but none set as primary */
+          <Pressable
+            onPress={() => handleNav('lounge')}
+            style={styles.loungeSection}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.lounge.noPrimaryLabel')}
+          >
+            <Eyebrow>{t('home.lounge.label')}</Eyebrow>
+            <View style={styles.loungeNameRow}>
+              <Text style={[styles.loungeName, styles.loungeNameMuted]}>{t('home.lounge.noPrimary')}</Text>
+              <Text style={styles.loungeChevron}>›</Text>
+            </View>
+            <Eyebrow color="rgba(255,255,255,0.32)">{t('home.lounge.noPrimaryCta')}</Eyebrow>
+          </Pressable>
+        ) : (
+          /* No lounges at all */
+          <Pressable
+            onPress={() => handleNav('lounge')}
+            style={styles.loungeSection}
+            accessibilityRole="button"
+            accessibilityLabel={t('home.lounge.emptyLabel')}
+          >
+            <Eyebrow>{t('home.lounge.label')}</Eyebrow>
+            <View style={styles.loungeNameRow}>
+              <Text style={[styles.loungeName, styles.loungeNameMuted]}>{t('home.lounge.empty')}</Text>
+              <Text style={styles.loungeChevron}>›</Text>
+            </View>
+            <Eyebrow color="rgba(255,255,255,0.32)">{t('home.lounge.exploreCta')}</Eyebrow>
+          </Pressable>
+        )}
 
         {/* Action rows */}
         <View style={styles.actionsWrap}>
@@ -502,6 +535,11 @@ const styles = StyleSheet.create({
     letterSpacing: -0.52,
     fontFamily: typography.fontFamily.primary,
     flex: 1,
+  },
+  loungeNameMuted: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.35)',
   },
   loungeChevron: {
     fontSize: 22,

@@ -65,6 +65,7 @@ export interface Lounge {
   memberCount:     number
   role:            LoungeRole
   ownerId:         string
+  isPrimary:       boolean
   members:         LoungeMember[]
   pendingRequests: LoungeRequest[]
   events:          LoungeEvent[]
@@ -110,11 +111,15 @@ interface LoungeState {
   buyTicket:      (eventId: string, pinHash: string | undefined, token: string) => Promise<loungeService.BuyTicketResponse>
 
   // Local-only (sem EF definida no MVP)
-  promoteMember:  (loungeId: string, memberId: string) => void
-  removeMember:   (loungeId: string, memberId: string, token: string) => Promise<void>
-  sendMessage:    (loungeId: string, content: string, authorName: string, authorHandle: string, authorInitials: string) => void
-  updateVisual:   (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
-  cancelEvent:    (eventId: string) => void
+  promoteMember:    (loungeId: string, memberId: string) => void
+  removeMember:     (loungeId: string, memberId: string, token: string) => Promise<void>
+  sendMessage:      (loungeId: string, content: string, authorName: string, authorHandle: string, authorInitials: string) => void
+  updateVisual:     (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
+  cancelEvent:      (eventId: string) => void
+
+  setPrimaryLounge: (loungeId: string, token: string) => Promise<void>
+  leaveLounge:      (loungeId: string, token: string) => Promise<void>
+  deleteLounge:     (loungeId: string, token: string) => Promise<void>
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -152,7 +157,8 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     set({ loading: true, error: null })
     try {
       const lounges = await loungeService.getMyLounges(token)
-      set({ myLounges: lounges, loading: false })
+      const primary = lounges.find(l => l.isPrimary) ?? null
+      set({ myLounges: lounges, loading: false, currentLounge: primary })
     } catch (e) {
       set({ loading: false, error: e instanceof BffError ? e.message : 'Erro ao carregar Lounges' })
     }
@@ -368,6 +374,53 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
           : l
       ),
     }))
+  },
+
+  setPrimaryLounge: async (loungeId, token) => {
+    set({ error: null })
+    try {
+      await loungeService.setPrimaryLounge(loungeId, token)
+      set(s => {
+        const updated = s.myLounges.map(l => ({ ...l, isPrimary: l.id === loungeId }))
+        const primary = updated.find(l => l.id === loungeId) ?? null
+        return { myLounges: updated, currentLounge: primary }
+      })
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao definir Lounge principal' })
+      throw e
+    }
+  },
+
+  leaveLounge: async (loungeId, token) => {
+    set({ error: null })
+    try {
+      await loungeService.leaveLounge(loungeId, token)
+      set(s => {
+        const updated = s.myLounges.filter(l => l.id !== loungeId)
+        const wasPrimary = s.myLounges.find(l => l.id === loungeId)?.isPrimary ?? false
+        return {
+          myLounges:     updated,
+          currentLounge: wasPrimary ? null : s.currentLounge,
+        }
+      })
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao sair do Lounge' })
+      throw e
+    }
+  },
+
+  deleteLounge: async (loungeId, token) => {
+    set({ error: null })
+    try {
+      await loungeService.deleteLounge(loungeId, token)
+      set(s => ({
+        myLounges:     s.myLounges.filter(l => l.id !== loungeId),
+        currentLounge: s.currentLounge?.id === loungeId ? null : s.currentLounge,
+      }))
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao encerrar Lounge' })
+      throw e
+    }
   },
 
   cancelEvent: (eventId) => {

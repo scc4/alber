@@ -12,7 +12,7 @@ import { typography } from '../../tokens/typography'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const QR_DURATION = 30 * 60  // 1 800 segundos
+const QR_DURATION = 30 * 60  // fallback quando expiresAt não é fornecido
 const GRID_CELLS  = 25
 const GRID_SIZE   = 170      // px — espelha o 170×170 do flows1.jsx
 const CELL_SIZE   = GRID_SIZE / GRID_CELLS  // 6.8 px
@@ -65,6 +65,12 @@ function fmtTime(seconds: number): string {
   return `${mm}:${ss}`
 }
 
+// "2026-06-18T23:59:59-03:00" → "23:59"
+function fmtHHMM(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 // ─── Componente ───────────────────────────────────────────────────────────────
 
 export function QRCodeDisplay({
@@ -74,8 +80,10 @@ export function QRCodeDisplay({
   onExpire,
   onGenerateNew,
 }: QRCodeDisplayProps) {
-  const { t }     = useTranslation()
-  const timerRef  = useRef<ReturnType<typeof setInterval> | null>(null)
+  const { t }    = useTranslation()
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Segundos restantes — usado internamente para detectar expiração
   const [countdown, setCountdown] = useState(() => {
     if (expiresAt) {
       return Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
@@ -85,9 +93,10 @@ export function QRCodeDisplay({
 
   const cells   = useMemo(generateQRGrid, [])
   const expired  = countdown === 0
-  const isWarn   = countdown < 60 && !expired
+  // Aviso nos últimos 5 min quando exibirmos countdown (modo sem expiresAt)
+  const isWarn   = !expiresAt && countdown < 5 * 60 && !expired
 
-  // Countdown em tempo real
+  // Timer — decrementa para detectar expiração (não usado para exibição quando expiresAt presente)
   useEffect(() => {
     timerRef.current = setInterval(() => {
       setCountdown(c => Math.max(0, c - 1))
@@ -143,15 +152,21 @@ export function QRCodeDisplay({
         )}
       </View>
 
-      {/* Countdown ou botão de regerar */}
+      {/* Validade ou botão de regerar */}
       <View style={styles.info}>
         {!expired ? (
-          <Text
-            style={[styles.countdown, isWarn && styles.countdownWarn]}
-            accessibilityLiveRegion="polite"
-          >
-            {t('carregar.qr.expiresIn', { time: fmtTime(countdown) })}
-          </Text>
+          expiresAt ? (
+            <Text style={styles.validUntil}>
+              {t('carregar.qr.validUntil', { time: fmtHHMM(expiresAt) })}
+            </Text>
+          ) : (
+            <Text
+              style={[styles.countdown, isWarn && styles.countdownWarn]}
+              accessibilityLiveRegion="polite"
+            >
+              {t('carregar.qr.expiresIn', { time: fmtTime(countdown) })}
+            </Text>
+          )
         ) : (
           <Pressable
             onPress={onGenerateNew}
@@ -246,6 +261,13 @@ const styles = StyleSheet.create({
     marginTop: 18,
     alignItems: 'center',
     gap: 6,
+  },
+  validUntil: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.55)',
+    fontFamily: typography.fontFamily.primary,
+    letterSpacing: -0.1,
   },
   countdown: {
     fontSize: 14,

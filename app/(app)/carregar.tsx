@@ -89,7 +89,9 @@ export default function CarregarScreen() {
   const [securityWrongAnswer, setSecurityWrongAnswer] = useState(false)
   const [kycWebViewVisible, setKycWebViewVisible] = useState(false)
   const [kycWebViewUrl, setKycWebViewUrl]         = useState('')
-  const pinKey = useRef(0)
+  const pinKey            = useRef(0)
+  const pollingRef        = useRef<ReturnType<typeof setInterval> | null>(null)
+  const initialBalanceRef = useRef<number>(0)
 
   useEffect(() => {
     if (!token) return
@@ -105,6 +107,35 @@ export default function CarregarScreen() {
       } catch { /* mantém fallback 2% */ }
     })()
   }, [token])
+
+  // ── Polling: detecta pagamento PIX confirmado ─────────────────────────────
+  // Inicia ao entrar no step 'qr', para ao sair ou confirmar
+
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (step === 'qr') {
+      initialBalanceRef.current = balance
+      pollingRef.current = setInterval(() => {
+        fetchBalance().catch(() => {})
+      }, 5000)
+    } else {
+      stopPolling()
+    }
+    return stopPolling
+  }, [step]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (step === 'qr' && balance > initialBalanceRef.current) {
+      stopPolling()
+      handleCarregarSuccess()
+    }
+  }, [balance]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const numericAmount = parseBRL(rawAmount)
   const isValidCarregar    = numericAmount >= 5

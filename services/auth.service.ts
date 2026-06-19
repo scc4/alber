@@ -160,6 +160,7 @@ export interface UserProfileResponse {
   email_masked:   string
   pix_key_masked: string
   pix_key_type:   string
+  has_pix_key:    boolean
 }
 
 export async function fetchUserProfile(token: string): Promise<UserProfileResponse | null> {

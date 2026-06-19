@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../../store/auth.store'
+import { createPixKey } from '../../../services/financial.service'
 import { formatDate } from '../../../utils/format'
 import { colors, spaceSkins } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
@@ -94,6 +95,118 @@ function kycInfo(status: string, t: (k: string) => string): { label: string; col
   }
 }
 
+// ── PixKeyCard ────────────────────────────────────────────────────────────────
+
+interface PixKeyCardProps {
+  onGenerated: (masked: string) => void
+}
+
+function PixKeyCard({ onGenerated }: PixKeyCardProps) {
+  const { t }     = useTranslation()
+  const token     = useAuthStore(s => s.token)
+  const setUser   = useAuthStore(s => s.setUser)
+  const user      = useAuthStore(s => s.user)
+
+  const [loading, setLoading] = useState(false)
+  const [error,   setError]   = useState('')
+
+  const handleGenerate = async () => {
+    if (!token) return
+    setLoading(true)
+    setError('')
+    try {
+      const res = await createPixKey(token)
+      if (user) setUser({ ...user, hasPixKey: true, pixKey: res.pix_key_masked })
+      onGenerated(res.pix_key_masked)
+    } catch {
+      setError(t('perfil.pixKeyError'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <View style={pixCardStyles.wrap}>
+      <View style={pixCardStyles.dot} />
+      <View style={pixCardStyles.body}>
+        <Text style={pixCardStyles.title}>{t('perfil.pixKeyMissingTitle')}</Text>
+        <Text style={pixCardStyles.body2}>{t('perfil.pixKeyMissingBody')}</Text>
+        {error ? <Text style={pixCardStyles.error}>{error}</Text> : null}
+      </View>
+      <TouchableOpacity
+        style={[pixCardStyles.btn, loading && pixCardStyles.btnLoading]}
+        onPress={handleGenerate}
+        disabled={loading}
+        activeOpacity={0.75}
+      >
+        <Text style={pixCardStyles.btnText}>
+          {loading ? t('perfil.pixKeyGenerating') : t('perfil.pixKeyGenerateCta')}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+
+const pixCardStyles = StyleSheet.create({
+  wrap: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.lg,
+    padding: 14,
+    borderRadius: spacing.radius.md,
+    borderWidth: 0.5,
+    borderColor: 'rgba(245,158,11,0.3)',
+    backgroundColor: 'rgba(245,158,11,0.06)',
+    gap: 10,
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.warning[500],
+    marginTop: 4,
+  },
+  body: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 13,
+    fontWeight: typography.weight.bold,
+    color: colors.warning[500],
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: 3,
+  },
+  body2: {
+    fontSize: 12,
+    color: colors.warning[500],
+    fontFamily: typography.fontFamily.primary,
+    lineHeight: 17,
+  },
+  error: {
+    fontSize: 11,
+    color: colors.state.error,
+    fontFamily: typography.fontFamily.primary,
+    marginTop: 4,
+  },
+  btn: {
+    paddingVertical: 11,
+    borderRadius: 9,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(245,158,11,0.4)',
+    alignItems: 'center',
+  },
+  btnLoading: {
+    opacity: 0.5,
+  },
+  btnText: {
+    fontSize: 12,
+    fontWeight: typography.weight.bold,
+    color: colors.warning[500],
+    letterSpacing: 0.5,
+    fontFamily: typography.fontFamily.primary,
+  },
+})
+
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function PerfilScreen() {
@@ -108,6 +221,8 @@ export default function PerfilScreen() {
   const { label: kycLabel, color: kycColor } = kycInfo(kycStatus, t)
 
   const [memberSince, setMemberSince] = useState('')
+  const [hasPixKey,   setHasPixKey]   = useState<boolean | null>(null)
+  const [pixKeySuccessMsg, setPixKeySuccessMsg] = useState('')
 
   useEffect(() => {
     if (!isLoadingSession && !user) {
@@ -121,9 +236,14 @@ export default function PerfilScreen() {
       headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY },
     })
       .then(r => r.json())
-      .then(d => { if (d.member_since) setMemberSince(d.member_since) })
+      .then(d => {
+        if (d.member_since) setMemberSince(d.member_since)
+        if (typeof d.has_pix_key === 'boolean') setHasPixKey(d.has_pix_key)
+      })
       .catch(() => {})
   }, [token])
+
+  const showPixKeyCard = kycStatus === 'approved' && hasPixKey === false
 
   const handleLogout = useCallback(() => {
     Alert.alert(
@@ -177,6 +297,21 @@ export default function PerfilScreen() {
             ) : null}
           </View>
         </View>
+
+        {/* Chave Pix ausente — card de geração */}
+        {showPixKeyCard && (
+          <PixKeyCard
+            onGenerated={(masked) => {
+              setHasPixKey(true)
+              setPixKeySuccessMsg(t('perfil.pixKeySuccess'))
+            }}
+          />
+        )}
+        {pixKeySuccessMsg ? (
+          <View style={styles.pixSuccessWrap}>
+            <Text style={styles.pixSuccessText}>{pixKeySuccessMsg}</Text>
+          </View>
+        ) : null}
 
         {/* CONTA */}
         <Section title={t('perfil.sectionConta')}>
@@ -381,6 +516,21 @@ const styles = StyleSheet.create({
   rowChevron: {
     fontSize: 18,
     color: 'rgba(255,255,255,0.2)',
+  },
+  pixSuccessWrap: {
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: spacing.radius.md,
+    backgroundColor: 'rgba(34,197,94,0.08)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(34,197,94,0.25)',
+  },
+  pixSuccessText: {
+    fontSize: 12,
+    color: colors.state.success,
+    fontFamily: typography.fontFamily.primary,
   },
   suporteIntro: {
     fontSize: 12,

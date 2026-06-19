@@ -7,6 +7,7 @@ import { sha256hex, aesDecrypt } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { refundPayment } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 const HANDLED_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
 
@@ -41,6 +42,7 @@ Deno.serve(async (req: Request) => {
       status: string
       value: number
       externalReference?: string
+      pixQrCodeId?: string          // presente em pagamentos via QR Code estático
       pixTransaction?: {
         payer?: {
           cpfCnpj?: string
@@ -59,12 +61,14 @@ Deno.serve(async (req: Request) => {
   const { event, payment } = payload
 
   // ── PAYMENT_REFUNDED — atualizar status ──────────────────────────────────────
+  // Para QR estático, pixQrCodeId identifica a transação; para dinâmico, payment.id.
 
   if (event === 'PAYMENT_REFUNDED') {
+    const refundLookupId = payment.pixQrCodeId ?? payment.id
     await supabaseAdmin
       .from('transactions')
       .update({ status: 'refunded' })
-      .eq('asaas_payment_id', payment.id)
+      .eq('asaas_payment_id', refundLookupId)
       .neq('status', 'refunded') // idempotência
 
     return new Response('OK', { status: 200 })
@@ -77,16 +81,20 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Localizar transação pelo asaas_payment_id ────────────────────────────────
+  // QR estático: pixQrCodeId é o ID do QR (chave em asaas_payment_id).
+  // QR dinâmico (legado): usa payment.id diretamente.
+
+  const txLookupId = payment.pixQrCodeId ?? payment.id
 
   const { data: tx, error: txErr } = await supabaseAdmin
     .from('transactions')
-    .select('id, user_id, status, amount_brl')
-    .eq('asaas_payment_id', payment.id)
+    .select('id, user_id, status, amount, amount_brl')
+    .eq('asaas_payment_id', txLookupId)
     .maybeSingle()
 
   if (txErr || !tx) {
     // Pode ocorrer em webhooks de teste ou pagamentos externos — não é erro crítico
-    console.warn('Webhook: transação não encontrada para payment.id', payment.id)
+    console.warn('Webhook: transação não encontrada para lookup_id', txLookupId)
     return new Response('OK', { status: 200 })
   }
 
@@ -165,6 +173,14 @@ Deno.serve(async (req: Request) => {
     event_type: 'carregar_completed',
     metadata:   { transaction_id: tx.id, asaas_payment_id: payment.id, value: payment.value },
   })
+
+  const amountAlbers = Number(tx.amount ?? 0)
+  await sendPush(
+    userData.id,
+    'Albers carregados!',
+    `Seus ${amountAlbers} Albers foram carregados com sucesso.`,
+    { type: 'carregar_completed', transaction_id: tx.id },
+  )
 
   return new Response('OK', { status: 200 })
 })

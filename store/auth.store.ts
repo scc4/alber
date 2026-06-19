@@ -25,6 +25,7 @@ export interface AuthUser {
   cpfMasked:    string  // '***.xxx-xx' — preenchido via endpoint de perfil (futuro)
   pixKey:       string  // mascarado — preenchido via endpoint de perfil (futuro)
   pixKeyType:   'cpf' | 'phone' | 'email' | 'random'
+  hasPixKey?:   boolean // undefined quando ainda não carregado do perfil (trata como true)
 }
 
 interface AuthState {
@@ -129,13 +130,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       isAuthenticated: true,
     })
 
-    // Enriquece user com pixKey e cpfMasked sem bloquear o login
+    // Enriquece user com pixKey, hasPixKey e cpfMasked sem bloquear o login
     authService.fetchUserProfile(res.token).then(profile => {
       if (!profile) return
       const enriched: AuthUser = {
         ...user,
         pixKey:     profile.pix_key_masked ?? '',
         pixKeyType: (profile.pix_key_type ?? 'cpf') as AuthUser['pixKeyType'],
+        hasPixKey:  profile.has_pix_key ?? true,
       }
       authService.saveUser(enriched as unknown as Record<string, unknown>)
       set({ user: enriched })

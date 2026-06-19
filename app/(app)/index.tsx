@@ -40,6 +40,7 @@ function resolveBanner(
   kycStatus: string,
   accountStatus: string,
   dismissed: boolean,
+  hasPixKey: boolean | undefined,
   t: (k: string) => string,
 ): BannerData | null {
   if (kycStatus === 'rejected') {
@@ -68,6 +69,15 @@ function resolveBanner(
       cta: t('home.banners.statusCta'),
       dismissible: true,
       target: '',
+    }
+  }
+  if (kycStatus === 'approved' && hasPixKey === false) {
+    return {
+      tone: 'warning',
+      text: t('home.banners.pixKeyMissing'),
+      cta: t('home.banners.pixKeyCta'),
+      dismissible: true,
+      target: '/(app)/perfil',
     }
   }
   if (accountStatus === 'evaluation') {
@@ -140,7 +150,7 @@ export default function HomeScreen() {
     setRefreshing(false)
   }
 
-  const banner = resolveBanner(kycStatus, accountStatus, dismissedBanner, t)
+  const banner = resolveBanner(kycStatus, accountStatus, dismissedBanner, user?.hasPixKey, t)
 
   const handleAction = (action: string) => {
     switch (action) {

@@ -65,6 +65,7 @@ Deno.serve(async (req: Request) => {
     birth_masked:   maskBirth(user.birth_date ?? ''),
     pix_key_masked: pixKeyMasked,
     pix_key_type:   user.pix_key_type ?? 'cpf',
+    has_pix_key:    !!user.pix_key,
   })
 })
 

@@ -11,6 +11,8 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
+import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
+import { createPixAddressKey } from '../_shared/asaas.ts'
 
 // Asaas envia o authToken configurado no header 'asaas-access-token' (mesmo padrão do pix webhook)
 const HANDLED_EVENTS = new Set([
@@ -104,7 +106,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: userData, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, name, kyc_status')
+    .select('id, name, kyc_status, asaas_api_key_enc, pix_key')
     .eq('asaas_account_id', asaasAccountId)
     .maybeSingle()
 
@@ -141,6 +143,29 @@ Deno.serve(async (req: Request) => {
   }
 
   console.log(`[kyc-webhook] usuário ${userData.id} → kyc_status="${newKycStatus}"`)
+
+  // ── Criar chave Pix EVP se ainda não tiver ───────────────────────────────────
+
+  if (newKycStatus === 'approved' && !userData.pix_key && userData.asaas_api_key_enc) {
+    try {
+      const encSecret = Deno.env.get('ASAAS_API_KEY')!
+      const subApiKey = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
+      const { key } = await createPixAddressKey('EVP', subApiKey)
+      const encryptedKey = await aesEncrypt(key, encSecret)
+      await supabaseAdmin
+        .from('users')
+        .update({ pix_key: encryptedKey, pix_key_type: 'random' })
+        .eq('id', userData.id)
+      console.log(`[kyc-webhook] chave Pix EVP criada para usuário ${userData.id}`)
+    } catch (pixErr) {
+      console.error('[kyc-webhook] falha ao criar chave Pix EVP (não bloqueante):', pixErr)
+      await logError(supabaseAdmin, 'webhooks-asaas-kyc', pixErr, {
+        context: 'create_pix_key',
+        user_id: userData.id,
+        asaas_account_id: asaasAccountId,
+      })
+    }
+  }
 
   // ── Push notification ao usuário ─────────────────────────────────────────────
 

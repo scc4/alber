@@ -58,10 +58,13 @@ export async function getBalance(token: string): Promise<BalanceResponse> {
 // ── Carregar (spec §4.3) ──────────────────────────────────────────────────────
 
 export interface CarregarResponse {
-  payment_id:    string
-  qr_code:       string
-  qr_code_image: string
-  expires_at:    string
+  payment_id:      string
+  qr_code:         string
+  qr_code_payload: string
+  qr_code_image:   string
+  amount_albers:   number
+  amount_brl:      number
+  expires_at:      string
 }
 
 export async function carregar(token: string, amountAlbers: number): Promise<CarregarResponse> {
@@ -89,6 +92,17 @@ export async function descarregar(
     pin_hash:             pinHash,
     security_answer_hash: securityAnswerHash,
   }, token)
+}
+
+// ── Criar chave Pix EVP ───────────────────────────────────────────────────────
+
+export interface CreatePixKeyResponse {
+  pix_key_masked: string
+  pix_key_type:   string
+}
+
+export async function createPixKey(token: string): Promise<CreatePixKeyResponse> {
+  return post<CreatePixKeyResponse>('financial-create-pix-key', {}, token)
 }
 
 // ── Receber (spec §4.5) ───────────────────────────────────────────────────────

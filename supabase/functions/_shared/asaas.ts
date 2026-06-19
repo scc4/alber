@@ -245,6 +245,44 @@ export async function cashoutPix(
   return { id: d.id, status: d.status }
 }
 
+// ── QR Code estático (spec 04_api §4.9) ──────────────────────────────────────
+// format: "ALL" retorna encodedImage (PNG base64) + payload (BR Code).
+
+export async function createPixStaticQrCode(
+  addressKey: string,
+  value: number,
+  description: string,
+  expirationSeconds: number,
+  subcontaApiKey: string,
+): Promise<{ id: string; encodedImage: string; payload: string }> {
+  const res = await asaasRequest('POST', '/pix/qrCodes/static', subcontaApiKey, {
+    addressKey,
+    description,
+    value,
+    format: 'ALL',
+    expirationSeconds,
+  })
+  if (!res.ok) throw new Error(`ASAAS_STATIC_QRCODE_FAILED: ${JSON.stringify(res.data)}`)
+  const d = res.data as Record<string, unknown>
+  return {
+    id:           d.id as string,
+    encodedImage: d.encodedImage as string,
+    payload:      d.payload as string,
+  }
+}
+
+// ── Chave Pix (spec 04_api §4.9) ─────────────────────────────────────────────
+
+export async function createPixAddressKey(
+  type: 'EVP' | 'CPF' | 'EMAIL' | 'PHONE',
+  subcontaApiKey: string,
+): Promise<{ key: string; type: string }> {
+  const res = await asaasRequest('POST', '/pix/addressKeys', subcontaApiKey, { type })
+  if (!res.ok) throw new Error(`ASAAS_PIX_KEY_FAILED: ${JSON.stringify(res.data)}`)
+  const d = res.data as { key: string; type: string }
+  return { key: d.key, type: d.type }
+}
+
 // ── Refund (spec 04_api §4.6) ────────────────────────────────────────────────
 
 export async function refundPayment(

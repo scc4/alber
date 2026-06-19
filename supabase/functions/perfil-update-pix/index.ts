@@ -113,7 +113,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // Encriptar chave Pix
-  const aesSecret = Deno.env.get('AES_SECRET')!
+  const aesSecret = Deno.env.get('ENCRYPTION_KEY')!
   let pixKeyEnc: string
   try {
     pixKeyEnc = await aesEncrypt(pix_key, aesSecret)

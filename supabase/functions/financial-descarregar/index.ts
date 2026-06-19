@@ -250,10 +250,21 @@ Deno.serve(async (req: Request) => {
 
   const feeTxId = feeTxData?.id
 
+  // ── Descriptografar chave Pix para envio ─────────────────────────────────────
+
+  let pixKeyRaw: string
+  try {
+    pixKeyRaw = await aesDecrypt(user.pix_key, Deno.env.get('ENCRYPTION_KEY')!)
+  } catch (e) {
+    console.error('pix_key decryption failed:', e)
+    await logError(supabaseAdmin, 'financial-descarregar', e, safePayload)
+    return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
+  }
+
   // ── Asaas: cash out via Pix externo (spec 04_api §4.5) ────────────────────────
 
   try {
-    await cashoutPix(netBrl, user.pix_key, user.pix_key_type, transactionId, subApiKey)
+    await cashoutPix(netBrl, pixKeyRaw, user.pix_key_type, transactionId, subApiKey)
   } catch (e) {
     console.error('Asaas cashout failed:', e)
     await logError(supabaseAdmin, 'financial-descarregar', e, { ...safePayload, transaction_id: transactionId })

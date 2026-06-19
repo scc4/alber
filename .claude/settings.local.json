@@ -24,7 +24,19 @@
       "Bash(curl *)",
       "Bash(esm)",
       "Bash(cjs\" | head -20)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(supabase status *)",
+      "Bash(supabase projects *)",
+      "Bash(supabase secrets *)",
+      "Read(//c/Users/fernando/.config/supabase/**)",
+      "Read(//c/Users/fernando/AppData/Roaming/supabase/**)",
+      "Read(//c/Users/fernando/.supabase/**)",
+      "Read(//c/Users/fernando/**)",
+      "Read(//root/.config/**)",
+      "Read(//root/**)",
+      "Bash(env)",
+      "Read(//mnt/c/Users/fernando/AppData/Roaming/**)",
+      "Read(//mnt/c/Users/fernando/**)"
     ]
   }
 }

@@ -70,8 +70,7 @@ Deno.serve(async (req: Request) => {
 
   let apiKey: string
   try {
-    const aesSecret = Deno.env.get('AES_SECRET') ?? ''
-    apiKey = await aesDecrypt(user.asaas_api_key_enc, aesSecret)
+    apiKey = await aesDecrypt(user.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
   } catch {
     return err('DECRYPT_FAILED', 'Erro ao descriptografar chave', 500)
   }

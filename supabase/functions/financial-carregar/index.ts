@@ -118,10 +118,11 @@ Deno.serve(async (req: Request) => {
     return err('ACCOUNT_NOT_CONFIGURED', 'Subconta financeira não configurada', 503)
   }
 
-  const encSecret = Deno.env.get('ASAAS_API_KEY')!
+  const apiKeySecret = Deno.env.get('ASAAS_API_KEY')!
+  const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')!
   let subApiKey: string
   try {
-    subApiKey = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
+    subApiKey = await aesDecrypt(userData.asaas_api_key_enc, apiKeySecret)
   } catch (e) {
     console.error('API key decryption failed:', e)
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
@@ -132,7 +133,7 @@ Deno.serve(async (req: Request) => {
   let pixKeyRaw: string
   if (userData.pix_key) {
     try {
-      pixKeyRaw = await aesDecrypt(userData.pix_key, encSecret)
+      pixKeyRaw = await aesDecrypt(userData.pix_key, pixKeySecret)
     } catch (e) {
       console.error('pix_key decryption failed:', e)
       return err('CRYPTO_ERROR', 'Erro ao ler chave Pix', 500)
@@ -142,7 +143,7 @@ Deno.serve(async (req: Request) => {
     try {
       const created   = await createPixAddressKey('EVP', subApiKey)
       pixKeyRaw       = created.key
-      const encrypted = await aesEncrypt(pixKeyRaw, encSecret)
+      const encrypted = await aesEncrypt(pixKeyRaw, pixKeySecret)
       await supabaseAdmin
         .from('users')
         .update({ pix_key: encrypted, pix_key_type: 'random' })

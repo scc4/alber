@@ -148,10 +148,9 @@ Deno.serve(async (req: Request) => {
 
   if (newKycStatus === 'approved' && !userData.pix_key && userData.asaas_api_key_enc) {
     try {
-      const encSecret = Deno.env.get('ASAAS_API_KEY')!
-      const subApiKey = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
-      const { key } = await createPixAddressKey('EVP', subApiKey)
-      const encryptedKey = await aesEncrypt(key, encSecret)
+      const subApiKey    = await aesDecrypt(userData.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+      const { key }      = await createPixAddressKey('EVP', subApiKey)
+      const encryptedKey = await aesEncrypt(key, Deno.env.get('ENCRYPTION_KEY')!)
       await supabaseAdmin
         .from('users')
         .update({ pix_key: encryptedKey, pix_key_type: 'random' })

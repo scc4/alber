@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
   let pixKeyMasked = '***'
   if (user.pix_key) {
     try {
-      const aesSecret = Deno.env.get('AES_SECRET') ?? ''
+      const aesSecret = Deno.env.get('ENCRYPTION_KEY') ?? ''
       const decrypted = await aesDecrypt(user.pix_key, aesSecret)
       pixKeyMasked = maskPixKey(decrypted, user.pix_key_type ?? 'cpf')
     } catch {

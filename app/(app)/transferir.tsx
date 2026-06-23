@@ -69,6 +69,7 @@ export default function TransferirScreen() {
   const [recents, setRecents]               = useState<Recipient[]>([])
   const [recentsLoading, setRecentsLoading] = useState(true)
   const [securityWrongAnswer, setSecurityWrongAnswer] = useState(false)
+  const [searching, setSearching]                     = useState(false)
 
   useEffect(() => {
     if (!token) { setRecentsLoading(false); return }
@@ -104,32 +105,58 @@ export default function TransferirScreen() {
 
   // ─── Handlers busca ──────────────────────────────────────────────────────────
 
-  const tryFind = (q: string) => {
+  const tryFind = async (q: string) => {
     const clean = q.trim()
     if (clean.length < 2) return
-    const myHandle = user?.handle?.replace('@', '').toLowerCase()
+
+    const myHandle    = user?.handle?.replace('@', '').toLowerCase()
     const inputHandle = clean.replace('@', '').toLowerCase()
     if (myHandle && inputHandle === myHandle) {
       setSelfError(true)
       setNotFound(false)
       return
     }
+
+    // Fast path: recent contacts
     const found = recents.find(
       r =>
         r.handle.replace('@', '').toLowerCase().includes(inputHandle) ||
         r.name.toLowerCase().includes(inputHandle),
     )
-    const resolved = found ?? {
-      name:     clean,
-      handle:   clean.startsWith('@') ? clean : '',
-      initials: clean.replace('@', '').slice(0, 2).toUpperCase(),
+    if (found) {
+      setQuery(found.handle)
+      setRecipient(found)
+      setNotFound(false)
+      setSelfError(false)
+      setApiError(null)
+      setStep('value')
+      return
     }
-    setRecipient(resolved)
-    if (found) setQuery(found.handle) // normaliza query para o handle completo
-    setNotFound(false)
-    setSelfError(false)
-    setApiError(null)
-    setStep('value')
+
+    // API fallback: user-search
+    setSearching(true)
+    try {
+      const params = new URLSearchParams({ q: clean })
+      const res = await fetch(`${BFF_URL}/user-search?${params}`, {
+        headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) { setNotFound(true); return }
+      const results: Array<{ id: string; name: string; handle: string }> = await res.json()
+      if (results.length === 0) { setNotFound(true); return }
+      const first    = results[0]
+      const name     = first.name || first.handle.replace('@', '')
+      const initials = name.split(' ').map((p: string) => p[0]).slice(0, 2).join('').toUpperCase()
+      setQuery(first.handle)
+      setRecipient({ name, handle: first.handle, initials })
+      setNotFound(false)
+      setSelfError(false)
+      setApiError(null)
+      setStep('value')
+    } catch {
+      setNotFound(true)
+    } finally {
+      setSearching(false)
+    }
   }
 
   const handleSelectRecent = (r: Recipient) => {
@@ -260,7 +287,7 @@ export default function TransferirScreen() {
         <PrimaryButton
           label={t('transferir.searchCta')}
           onPress={() => tryFind(query)}
-          state={query.length >= 2 ? 'default' : 'disabled'}
+          state={searching ? 'loading' : query.length >= 2 ? 'default' : 'disabled'}
         />
       </FlowShell>
     )

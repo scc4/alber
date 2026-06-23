@@ -7,7 +7,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
-import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
+import { transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 
@@ -334,7 +334,8 @@ Deno.serve(async (req: Request) => {
     )
   } catch (e) {
     console.error('Asaas transfer payer→receiver failed:', e)
-    await logError(supabaseAdmin, 'financial-receber', e, { ...safePayload, payer_tx_id: payerTxId })
+    const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+    await logError(supabaseAdmin, 'financial-receber', e, { ...safePayload, payer_tx_id: payerTxId }, { asaas_response: asaasResponse })
     const failIds = [payerTxId, rcvTxId, feeTxId].filter(Boolean) as string[]
     await supabaseAdmin.from('transactions').update({ status: 'failed' }).in('id', failIds)
     return err('ASAAS_ERROR', 'Falha ao processar a transferência. Tente novamente.', 503)
@@ -355,7 +356,8 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
       // Não-crítico: taxa fica na subconta do pagador — reconciliar manualmente
       console.error('Fee transfer to parent failed (non-critical):', e)
-      await logError(supabaseAdmin, 'financial-receber', e, { ...safePayload, fee, payer_tx_id: payerTxId })
+      const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+      await logError(supabaseAdmin, 'financial-receber', e, { ...safePayload, fee, payer_tx_id: payerTxId }, { asaas_response: asaasResponse })
     }
   }
 

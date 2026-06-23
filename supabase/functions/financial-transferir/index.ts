@@ -8,7 +8,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
-import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
+import { transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 
@@ -301,7 +301,8 @@ Deno.serve(async (req: Request) => {
     )
   } catch (e) {
     console.error('Asaas transfer sender→recipient failed:', e)
-    await logError(supabaseAdmin, 'financial-transferir', e, { ...safePayload, sender_tx_id: senderTxId })
+    const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+    await logError(supabaseAdmin, 'financial-transferir', e, { ...safePayload, sender_tx_id: senderTxId }, { asaas_response: asaasResponse })
     const failIds = [senderTxId, recipientTxId].filter(Boolean) as string[]
     await supabaseAdmin.from('transactions').update({ status: 'failed' }).in('id', failIds)
     return err('ASAAS_ERROR', 'Falha ao processar a transferência. Tente novamente.', 503)

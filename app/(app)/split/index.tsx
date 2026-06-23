@@ -2,7 +2,7 @@
 // Spec: /specs/06_modules/split.md
 // Lista de splits ativos e encerrados. 5 estados: loading, error, empty, success, disabled.
 
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -23,12 +23,14 @@ export default function SplitIndexScreen() {
   const insets = useSafeAreaInsets()
 
   const token        = useAuthStore(s => s.token)
-  const activeSplits = useSplitStore(s => s.getActiveSplits())
-  const closedSplits = useSplitStore(s => s.getClosedSplits())
+  const splits       = useSplitStore(s => s.splits)
   const loading      = useSplitStore(s => s.loading)
   const error        = useSplitStore(s => s.error)
   const setActiveId  = useSplitStore(s => s.setActiveSplitId)
   const fetchMySplits = useSplitStore(s => s.fetchMySplits)
+
+  const activeSplits = useMemo(() => splits.filter(sp => sp.status === 'active'), [splits])
+  const closedSplits = useMemo(() => splits.filter(sp => sp.status !== 'active'), [splits])
 
   useEffect(() => {
     if (token) fetchMySplits(token)

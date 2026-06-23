@@ -6,11 +6,12 @@
 //   - Split deve estar aberto (status = 'open') e ser variável
 //   - PIN verificado via bcrypt (padrão dos flows financeiros)
 //   - final_amount registrado em split_participants por participante
-//   - TODO: Asaas transfers para liquidação financeira real
+//   - excedente (blocked_amount − final_amount) devolvido ao participante via Asaas
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify } from '../_shared/crypto.ts'
+import { bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
+import { transferToWallet, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 
@@ -61,7 +62,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, auth_id')
+    .select('id, auth_id, asaas_api_key_enc')
     .eq('auth_id', authUser.id)
     .maybeSingle()
 
@@ -103,40 +104,120 @@ Deno.serve(async (req: Request) => {
   if (split.type !== 'variable')
     return err('INVALID_TYPE', 'Fechamento manual disponível apenas em splits variáveis', 422)
 
-  // ── Registrar final_amount para cada participante ─────────────────────────────
+  // ── Descriptografar API key do dono para emitir devoluções ──────────────────
+
+  if (!user.asaas_api_key_enc) {
+    return err('ACCOUNT_NOT_CONFIGURED', 'Conta do dono não configurada para devoluções', 503)
+  }
+
+  let ownerApiKey: string
+  try {
+    ownerApiKey = await aesDecrypt(user.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+  } catch (e) {
+    await logError(supabaseAdmin, 'split-close', e, { split_id })
+    return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
+  }
+
+  // ── Buscar blocked_amount por participante (quanto cada um já pagou ao dono) ──
+
+  const { data: participantBlocks } = await supabaseAdmin
+    .from('split_participants')
+    .select('user_id, blocked_amount')
+    .eq('split_id', split_id)
+    .eq('status', 'accepted')
+
+  const blockedByUser = new Map<string, number>()
+  for (const p of participantBlocks ?? []) {
+    blockedByUser.set(p.user_id, Number(p.blocked_amount))
+  }
+
+  // ── Registrar final_amount + devolver excedente (dono → participante) ─────────
 
   const now = new Date().toISOString()
   const allocationEntries = Object.entries(allocations)
 
-  const updatePromises = allocationEntries.map(async ([userId, amount]) => {
-    if (typeof amount !== 'number' || amount < 0) return
+  const updatePromises = allocationEntries.map(async ([userId, finalAmount]) => {
+    if (typeof finalAmount !== 'number' || finalAmount < 0) return
 
+    // Atualizar final_amount e status do participante
     await supabaseAdmin
       .from('split_participants')
-      .update({ final_amount: amount, status: 'settled' })
+      .update({ final_amount: finalAmount, status: 'settled' })
       .eq('split_id', split_id)
       .eq('user_id', userId)
       .catch(e => console.error(`[split-close] final_amount update failed user=${userId}:`, e))
 
-    // Registrar TX de liquidação
+    // TX de liquidação (contabilidade do valor final cobrado)
     await supabaseAdmin.from('transactions').insert({
       user_id:        userId,
       type:           'split_settle',
-      amount,
-      amount_brl:     amount,
+      amount:         finalAmount,
+      amount_brl:     finalAmount,
       fee_amount:     0,
       status:         'completed',
       reference_id:   split_id,
       reference_type: 'split',
-      metadata:       { split_id, split_name: split.name, final_amount: amount },
+      metadata:       { split_id, split_name: split.name, final_amount: finalAmount },
     }).catch(e => console.error(`[split-close] split_settle tx failed user=${userId}:`, e))
+
+    // Calcular excedente: o que o participante pagou além do valor final definido
+    const blocked   = blockedByUser.get(userId) ?? 0
+    const excedente = parseFloat((blocked - finalAmount).toFixed(2))
+
+    if (excedente < 0.01) return  // sem excedente para devolver
+
+    // Buscar wallet do participante para receber a devolução
+    const { data: participantUser } = await supabaseAdmin
+      .from('users')
+      .select('asaas_wallet_id')
+      .eq('id', userId)
+      .maybeSingle()
+
+    if (!participantUser?.asaas_wallet_id) {
+      console.error(`[split-close] sem wallet para participante ${userId}`)
+      return
+    }
+
+    // TX de devolução pending antes do Asaas
+    const { data: refundTxRow } = await supabaseAdmin
+      .from('transactions')
+      .insert({
+        user_id:        userId,
+        type:           'split_refund',
+        amount:         excedente,
+        amount_brl:     excedente,
+        fee_amount:     0,
+        status:         'pending',
+        reference_id:   split_id,
+        reference_type: 'split',
+        metadata:       { split_id, split_name: split.name, blocked, final_amount: finalAmount },
+      })
+      .select('id')
+      .single()
+    const refundTxId = refundTxRow?.id ?? crypto.randomUUID()
+
+    // Asaas: dono → participante (devolução real do excedente)
+    // best-effort: não bloqueia o fechamento por falha individual
+    try {
+      await transferToWallet(
+        excedente,
+        participantUser.asaas_wallet_id,
+        `Devolução Split: ${split.name}`,
+        refundTxId,
+        ownerApiKey,
+      )
+      await supabaseAdmin.from('transactions').update({ status: 'completed' }).eq('id', refundTxId)
+    } catch (e) {
+      const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+      await logError(supabaseAdmin, 'split-close', e,
+        { split_id, user_id: userId, excedente },
+        { asaas_response: asaasResponse },
+      )
+      await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', refundTxId)
+    }
   })
 
   await Promise.allSettled(updatePromises)
-
-  // TODO: Asaas transfers — liquidar blocked_amount residual de volta para cada
-  // participante e transferir final_amount para a conta do dono.
-  // Implementar em split-close v2 após split-settle-asaas Edge Function.
 
   // ── Fechar split ──────────────────────────────────────────────────────────────
 

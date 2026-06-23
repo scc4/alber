@@ -6,13 +6,14 @@
 //   - Auto-close quando todos aderiram (SP-06)
 //
 // Variable:
-//   - Bloqueio virtual da quota no DB (blocked_amount)
-//   - Se há lançamentos: recálculo de todos os participantes (§11.3, SP-18)
+//   - Asaas transfer imediato participante → dono (SP-02 — dinheiro real ao entrar)
+//   - blocked_amount = total pago ao dono (não diminui com lançamentos)
+//   - §11.3: recalcula, devolve excedente real (dono → participantes existentes)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt } from '../_shared/crypto.ts'
-import { transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
+import { transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 
@@ -251,57 +252,164 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Variable: registrar split_block + recalcular se há lançamentos (§11.3) ───
+  // ── Variable: Asaas transfer imediato joiner → dono + recálculo §11.3 real ──
 
   if (split.type === 'variable') {
-    await supabaseAdmin.from('transactions').insert({
-      user_id:        joiner.id,
-      type:           'split_block',
-      amount:         amountForJoiner,
-      amount_brl:     amountForJoiner,
-      fee_amount:     0,
-      status:         'completed',
-      reference_id:   split.id,
-      reference_type: 'split',
-      metadata:       { split_id: split.id, split_name: split.name },
-    }).catch(e => console.error('[split-join] split_block tx failed (non-critical):', e))
+    // Buscar wallet e API key do dono (receber pagamento + fazer devoluções §11.3)
+    const { data: ownerUser } = await supabaseAdmin
+      .from('users')
+      .select('asaas_wallet_id, asaas_api_key_enc')
+      .eq('id', split.owner_id)
+      .maybeSingle()
 
-    // Recálculo §11.3: só quando há lançamentos anteriores
+    if (!ownerUser?.asaas_wallet_id) {
+      await supabaseAdmin.from('split_participants').delete()
+        .eq('split_id', split.id).eq('user_id', joiner.id)
+      return err('ACCOUNT_NOT_CONFIGURED', 'Conta do dono não configurada', 503)
+    }
+
+    // TX pending antes do Asaas (idempotência)
+    const { data: txRow } = await supabaseAdmin
+      .from('transactions')
+      .insert({
+        user_id:        joiner.id,
+        type:           'split_block',
+        amount:         amountForJoiner,
+        amount_brl:     amountForJoiner,
+        fee_amount:     0,
+        status:         'pending',
+        reference_id:   split.id,
+        reference_type: 'split',
+        metadata:       { split_id: split.id, split_name: split.name },
+      })
+      .select('id')
+      .single()
+    const txId = txRow?.id ?? crypto.randomUUID()
+
+    // Asaas: joiner → dono (dinheiro real ao entrar — SP-02)
+    try {
+      await transferToWallet(
+        amountForJoiner,
+        ownerUser.asaas_wallet_id,
+        `Split: ${split.name}`,
+        txId,
+        joinerApiKey,
+      )
+      await supabaseAdmin.from('transactions').update({ status: 'completed' }).eq('id', txId)
+    } catch (e) {
+      console.error('Asaas variable split join failed:', e)
+      const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+      await logError(supabaseAdmin, 'split-join', e,
+        { split_id: split.id, joiner_id: joiner.id },
+        { asaas_response: asaasResponse },
+      )
+      await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', txId)
+      await supabaseAdmin.from('split_participants').delete()
+        .eq('split_id', split.id).eq('user_id', joiner.id)
+      return err('ASAAS_ERROR', 'Falha ao processar pagamento. Tente novamente.', 503)
+    }
+
+    // Recálculo §11.3 com dinheiro real: quando há lançamentos anteriores
     if (totalLaunched > 0 && currentParticipants && currentParticipants.length > 0) {
-      // amountForJoiner já é o novo per_person: (target - launched) / (accepted + 1)
-      const newPerPerson = amountForJoiner
+      // amountForJoiner = (target - launched) / (N+1) — nova obrigação restante por pessoa
+      const newRemainingPerPerson = amountForJoiner
+
+      // Descriptografar API key do dono para emitir devoluções
+      let ownerApiKey: string | null = null
+      if (ownerUser.asaas_api_key_enc) {
+        try {
+          ownerApiKey = await aesDecrypt(ownerUser.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+        } catch (e) {
+          await logError(supabaseAdmin, 'split-join', e,
+            { split_id: split.id, reason: 'owner_key_decrypt_recalc' },
+          )
+        }
+      }
+
+      // Buscar todos split_debit TXs do split em uma query (consumed por participante)
+      const { data: allDebitTxs } = await supabaseAdmin
+        .from('transactions')
+        .select('user_id, amount')
+        .eq('type', 'split_debit')
+        .eq('reference_id', split.id)
+        .eq('status', 'completed')
+
+      const consumedByUser = new Map<string, number>()
+      for (const tx of allDebitTxs ?? []) {
+        consumedByUser.set(
+          tx.user_id,
+          parseFloat(((consumedByUser.get(tx.user_id) ?? 0) + Number(tx.amount)).toFixed(2)),
+        )
+      }
 
       const recalcUpdates = (currentParticipants as ParticipantRow[]).map(async (p) => {
-        const oldBlocked = parseFloat(Number(p.blocked_amount).toFixed(2))
-        const delta      = parseFloat((newPerPerson - oldBlocked).toFixed(2))
+        const consumed      = consumedByUser.get(p.user_id) ?? 0
+        const oldPaid       = parseFloat(Number(p.blocked_amount).toFixed(2))
+        const newObligation = parseFloat((consumed + newRemainingPerPerson).toFixed(2))
+        const refund        = parseFloat((oldPaid - newObligation).toFixed(2))
 
-        if (Math.abs(delta) < 0.01) return  // sem mudança relevante
-
-        const txType  = delta > 0 ? 'split_block' : 'split_release'
-        const txAmt   = Math.abs(delta)
-
-        await supabaseAdmin.from('transactions').insert({
-          user_id:        p.user_id,
-          type:           txType,
-          amount:         txAmt,
-          amount_brl:     txAmt,
-          fee_amount:     0,
-          status:         'completed',
-          reference_id:   split.id,
-          reference_type: 'split',
-          metadata:       { split_id: split.id, reason: 'participant_recalc', new_per_person: newPerPerson },
-        }).catch(e => console.error('[split-join] recalc tx failed:', e))
-
+        // Atualizar blocked_amount para nova obrigação total (consumido + restante)
         await supabaseAdmin
           .from('split_participants')
-          .update({ blocked_amount: newPerPerson })
+          .update({ blocked_amount: newObligation })
           .eq('id', p.id)
-          .catch(e => console.error('[split-join] recalc update failed:', e))
+          .catch(e => console.error(`[split-join] recalc blocked update failed user=${p.user_id}:`, e))
+
+        if (refund < 0.01 || !ownerApiKey) return  // sem devolução significativa
+
+        // Buscar wallet do participante para receber a devolução
+        const { data: participantUser } = await supabaseAdmin
+          .from('users')
+          .select('asaas_wallet_id')
+          .eq('id', p.user_id)
+          .maybeSingle()
+
+        if (!participantUser?.asaas_wallet_id) {
+          console.error(`[split-join] recalc: sem wallet para participante ${p.user_id}`)
+          return
+        }
+
+        // TX de devolução pending
+        const { data: refundTxRow } = await supabaseAdmin
+          .from('transactions')
+          .insert({
+            user_id:        p.user_id,
+            type:           'split_refund',
+            amount:         refund,
+            amount_brl:     refund,
+            fee_amount:     0,
+            status:         'pending',
+            reference_id:   split.id,
+            reference_type: 'split',
+            metadata:       { split_id: split.id, reason: 'participant_recalc', new_remaining: newRemainingPerPerson },
+          })
+          .select('id')
+          .single()
+        const refundTxId = refundTxRow?.id ?? crypto.randomUUID()
+
+        // Asaas: dono → participante (best-effort — não bloqueia se falhar)
+        try {
+          await transferToWallet(
+            refund,
+            participantUser.asaas_wallet_id,
+            `Devolução Split: ${split.name}`,
+            refundTxId,
+            ownerApiKey,
+          )
+          await supabaseAdmin.from('transactions').update({ status: 'completed' }).eq('id', refundTxId)
+        } catch (e) {
+          const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+          await logError(supabaseAdmin, 'split-join', e,
+            { split_id: split.id, participant_id: p.user_id, refund },
+            { asaas_response: asaasResponse },
+          )
+          await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', refundTxId)
+        }
       })
 
       await Promise.allSettled(recalcUpdates)
 
-      // Push §11.3: novo participante → todos existentes recalculados (SP-19)
+      // Push §11.3 para participantes recalculados (SP-19)
       const recalcPushes = (currentParticipants as ParticipantRow[]).map(p =>
         sendPush(
           p.user_id,

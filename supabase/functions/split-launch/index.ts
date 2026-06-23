@@ -122,16 +122,34 @@ Deno.serve(async (req: Request) => {
   const participantCount = participants.length
   const perPerson        = parseFloat((valueRounded / participantCount).toFixed(2))
 
-  // ── Verificar que todos têm blocked_amount suficiente ────────────────────────
+  // ── Verificar que todos têm saldo restante suficiente (blocked − consumido) ───
+  // blocked_amount = total pago ao dono; consumido = soma de split_debit TXs.
 
-  const insufficient = (participants as ParticipantRow[]).filter(
-    p => parseFloat(Number(p.blocked_amount).toFixed(2)) < perPerson,
-  )
+  const { data: allDebitTxs } = await supabaseAdmin
+    .from('transactions')
+    .select('user_id, amount')
+    .eq('type', 'split_debit')
+    .eq('reference_id', split_id)
+    .eq('status', 'completed')
+
+  const consumedByUser = new Map<string, number>()
+  for (const tx of allDebitTxs ?? []) {
+    consumedByUser.set(
+      tx.user_id,
+      parseFloat(((consumedByUser.get(tx.user_id) ?? 0) + Number(tx.amount)).toFixed(2)),
+    )
+  }
+
+  const insufficient = (participants as ParticipantRow[]).filter((p) => {
+    const consumed  = consumedByUser.get(p.user_id) ?? 0
+    const remaining = parseFloat((Number(p.blocked_amount) - consumed).toFixed(2))
+    return remaining < perPerson
+  })
 
   if (insufficient.length > 0) {
     return err(
       'INSUFFICIENT_BLOCKED',
-      `${insufficient.length} participante(s) não têm saldo reservado suficiente ` +
+      `${insufficient.length} participante(s) não têm saldo restante suficiente ` +
       `para este lançamento (necessário: ${perPerson.toFixed(2)} Albers cada)`,
       422,
     )
@@ -159,20 +177,12 @@ Deno.serve(async (req: Request) => {
 
   const itemId = splitItem.id
 
-  // ── Debitar de cada participante (SP-15) ──────────────────────────────────────
-  // Modelo: débito virtual — reduz blocked_amount no DB + registra split_debit TX.
-  // Asaas transfers ocorrem no fechamento do split (split_close), não aqui,
-  // porque split.type === 'variable' tem "Débito | No fechamento" no modelo base.
+  // ── Registrar split_debit de cada participante (SP-15) ───────────────────────
+  // O dinheiro já está com o dono desde o join (Asaas transfer em split-join).
+  // blocked_amount não é alterado; o consumido é derivado dos split_debit TXs.
+  // Estas TXs servem como contabilidade para cálculo de excedente no fechamento.
 
   const debits = (participants as ParticipantRow[]).map(async (p) => {
-    const newBlocked = parseFloat((Number(p.blocked_amount) - perPerson).toFixed(2))
-
-    await supabaseAdmin
-      .from('split_participants')
-      .update({ blocked_amount: newBlocked })
-      .eq('id', p.id)
-      .catch(e => console.error(`[split-launch] blocked update failed user=${p.user_id}:`, e))
-
     await supabaseAdmin.from('transactions').insert({
       user_id:        p.user_id,
       type:           'split_debit',

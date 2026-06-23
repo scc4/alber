@@ -67,6 +67,13 @@ export default function SplitDetailScreen() {
   const loading    = useSplitStore(s => s.loading)
   const launchItem = useSplitStore(s => s.launchItem)
   const fetchSplit = useSplitStore(s => s.fetchSplit)
+  const myShare    = useSplitStore(s => {
+    const sp = s.splits.find(x => x.id === id)
+    if (!sp) return 0
+    const isAccepted = sp.participants.some(p => p.id === currentUserId && p.status === 'accepted')
+    if (!isAccepted) return 0
+    return sp.items.reduce((acc, it) => acc + it.perPersonValue, 0)
+  })
 
   useEffect(() => {
     if (id && token) fetchSplit(id, token)
@@ -114,8 +121,8 @@ export default function SplitDetailScreen() {
   const isOwner    = split.ownerId === currentUserId
   const accepted   = acceptedCount(split)
   const perPerson  = accepted > 0 ? Math.ceil(split.totalValue / split.participantCount) : 0
-  const myShare    = useSplitStore.getState().getMyShare(split.id, currentUserId)
-  const myBlocked  = accepted > 0 ? Math.ceil((split.totalValue - split.totalLaunched) / accepted) : 0
+  const myParticipant = split.participants.find(p => p.id === currentUserId)
+  const myBlocked  = myParticipant?.blockedAmount ?? 0
   const remaining  = split.totalValue - split.totalLaunched
   const accent     = isFixed ? spaceSkins.tech.accent : spaceSkins.surf.accent
 

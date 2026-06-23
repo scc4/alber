@@ -7,7 +7,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
-import { cashoutPix, transferToWallet, getSubcontaBalance } from '../_shared/asaas.ts'
+import { cashoutPix, transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 
 interface DescarregarRequest {
@@ -267,7 +267,8 @@ Deno.serve(async (req: Request) => {
     await cashoutPix(netBrl, pixKeyRaw, user.pix_key_type, transactionId, subApiKey)
   } catch (e) {
     console.error('Asaas cashout failed:', e)
-    await logError(supabaseAdmin, 'financial-descarregar', e, { ...safePayload, transaction_id: transactionId })
+    const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+    await logError(supabaseAdmin, 'financial-descarregar', e, { ...safePayload, transaction_id: transactionId }, { asaas_response: asaasResponse })
     await supabaseAdmin
       .from('transactions')
       .update({ status: 'failed' })
@@ -290,7 +291,8 @@ Deno.serve(async (req: Request) => {
       await transferToWallet(fee, parentWalletId, 'Taxa descarregamento Alber', crypto.randomUUID(), subApiKey)
     } catch (e) {
       console.error('Fee transfer to parent failed (non-critical):', e)
-      await logError(supabaseAdmin, 'financial-descarregar', e, { ...safePayload, fee, transaction_id: transactionId })
+      const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
+      await logError(supabaseAdmin, 'financial-descarregar', e, { ...safePayload, fee, transaction_id: transactionId }, { asaas_response: asaasResponse })
     }
   }
 

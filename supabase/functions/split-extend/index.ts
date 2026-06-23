@@ -5,6 +5,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
+import { logError } from '../_shared/error-log.ts'
 
 interface ExtendRequest {
   split_id: string
@@ -81,7 +82,7 @@ Deno.serve(async (req: Request) => {
     .single()
 
   if (updateErr || !updated) {
-    console.error('[split-extend] update failed:', updateErr)
+    await logError(supabaseAdmin, 'split-extend', updateErr ?? new Error('update_failed'), { split_id })
     return err('DB_ERROR', 'Erro ao estender prazo', 500)
   }
 

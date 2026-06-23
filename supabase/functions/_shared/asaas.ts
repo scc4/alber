@@ -10,6 +10,17 @@ function baseUrl(): string {
     : SANDBOX_URL
 }
 
+export class AsaasError extends Error {
+  readonly code: string
+  readonly asaasResponse: Record<string, unknown>
+  constructor(code: string, response: Record<string, unknown>) {
+    super(`${code}: ${JSON.stringify(response)}`)
+    this.name = 'AsaasError'
+    this.code = code
+    this.asaasResponse = response
+  }
+}
+
 async function asaasRequest(
   method: string,
   path: string,
@@ -218,7 +229,7 @@ export async function transferToWallet(
     description,
     externalReference,
   })
-  if (!res.ok) throw new Error(`ASAAS_TRANSFER_FAILED: ${JSON.stringify(res.data)}`)
+  if (!res.ok) throw new AsaasError('ASAAS_TRANSFER_FAILED', res.data as Record<string, unknown>)
   const d = res.data as { id: string; status: string }
   return { id: d.id, status: d.status }
 }
@@ -240,7 +251,7 @@ export async function cashoutPix(
     description: 'Descarregamento Alber',
     externalReference,
   })
-  if (!res.ok) throw new Error(`ASAAS_CASHOUT_FAILED: ${JSON.stringify(res.data)}`)
+  if (!res.ok) throw new AsaasError('ASAAS_CASHOUT_FAILED', res.data as Record<string, unknown>)
   const d = res.data as { id: string; status: string }
   return { id: d.id, status: d.status }
 }

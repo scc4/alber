@@ -52,24 +52,17 @@ Deno.serve(async (req: Request) => {
   const { invite_token } = body
   if (!invite_token) return err('MISSING_FIELDS', 'invite_token é obrigatório', 400)
 
-  // ── Buscar usuário que está entrando ─────────────────────────────────────────
+  // ── Buscar usuário e split em paralelo ───────────────────────────────────────
 
-  const { data: joiner, error: joinerErr } = await supabaseAdmin
-    .from('users')
-    .select('id, handle, name, asaas_api_key_enc')
-    .eq('auth_id', authUser.id)
-    .maybeSingle()
+  const [joinerResult, splitResult] = await Promise.all([
+    supabaseAdmin.from('users').select('id, handle, name, asaas_api_key_enc').eq('auth_id', authUser.id).maybeSingle(),
+    supabaseAdmin.from('splits').select('id, name, type, target_amount, max_participants, owner_id, status, invite_expires_at').eq('invite_token', invite_token).maybeSingle(),
+  ])
+
+  const { data: joiner, error: joinerErr } = joinerResult
+  const { data: split, error: splitErr } = splitResult
 
   if (joinerErr || !joiner) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
-
-  // ── Buscar split pelo token ───────────────────────────────────────────────────
-
-  const { data: split, error: splitErr } = await supabaseAdmin
-    .from('splits')
-    .select('id, name, type, target_amount, max_participants, owner_id, status, invite_expires_at')
-    .eq('invite_token', invite_token)
-    .maybeSingle()
-
   if (splitErr || !split) return err('SPLIT_NOT_FOUND', 'Convite não encontrado', 404)
   if (split.status !== 'open')
     return err('SPLIT_CLOSED', 'Este split não está mais ativo', 422)
@@ -421,17 +414,15 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Push para o dono ─────────────────────────────────────────────────────────
+  // ── Push para o dono (fire-and-forget) ───────────────────────────────────────
 
-  await sendPush(
+  sendPush(
     split.owner_id,
     'Novo participante',
     `${joiner.handle} entrou no split "${split.name}"`,
-  )
+  ).catch(() => {})
 
-  // ── Audit log ─────────────────────────────────────────────────────────────────
-
-  await supabaseAdmin.from('audit_logs').insert({
+  supabaseAdmin.from('audit_logs').insert({
     user_id:    joiner.id,
     event_type: 'split_joined',
     metadata:   { split_id: split.id, type: split.type, amount: amountForJoiner },

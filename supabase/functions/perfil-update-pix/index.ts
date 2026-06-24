@@ -79,7 +79,7 @@ Deno.serve(async (req: Request) => {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
   }
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({

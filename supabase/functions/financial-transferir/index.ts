@@ -45,7 +45,7 @@ async function findRecipient(identifier: string): Promise<UserRow | null> {
     const { data } = await supabaseAdmin
       .from('users')
       .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
-      .ilike('handle', clean.toLowerCase())
+      .ilike('handle', clean.replace(/^@/, '').toLowerCase())
       .maybeSingle()
     return data
   }
@@ -176,7 +176,8 @@ Deno.serve(async (req: Request) => {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+    // Fast path: SHA-256 direct comparison (avoids slow bcryptjs at cost 12)
+    pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
   }
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({

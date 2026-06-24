@@ -58,24 +58,17 @@ Deno.serve(async (req: Request) => {
   if (typeof value !== 'number' || value <= 0)
     return err('INVALID_AMOUNT', 'Valor deve ser maior que zero', 400)
 
-  // ── Buscar usuário ────────────────────────────────────────────────────────────
+  // ── Buscar usuário e split em paralelo ───────────────────────────────────────
 
-  const { data: user, error: userErr } = await supabaseAdmin
-    .from('users')
-    .select('id, handle')
-    .eq('auth_id', authUser.id)
-    .maybeSingle()
+  const [userResult, splitResult] = await Promise.all([
+    supabaseAdmin.from('users').select('id, handle').eq('auth_id', authUser.id).maybeSingle(),
+    supabaseAdmin.from('splits').select('id, name, type, target_amount, owner_id, status').eq('id', split_id).maybeSingle(),
+  ])
+
+  const { data: user, error: userErr } = userResult
+  const { data: split, error: splitErr } = splitResult
 
   if (userErr || !user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
-
-  // ── Buscar e validar split ────────────────────────────────────────────────────
-
-  const { data: split, error: splitErr } = await supabaseAdmin
-    .from('splits')
-    .select('id, name, type, target_amount, owner_id, status')
-    .eq('id', split_id)
-    .maybeSingle()
-
   if (splitErr || !split) return err('SPLIT_NOT_FOUND', 'Split não encontrado', 404)
   if (split.owner_id !== user.id)
     return err('FORBIDDEN', 'Somente o dono pode lançar itens', 403)
@@ -84,12 +77,17 @@ Deno.serve(async (req: Request) => {
   if (split.type !== 'variable')
     return err('INVALID_TYPE', 'Lançamentos disponíveis apenas em splits variáveis', 422)
 
-  // ── Verificar teto (SP-17): total lançado + novo valor ≤ target_amount ────────
+  // ── Buscar itens, participantes e débitos em paralelo ────────────────────────
 
-  const { data: existingItems } = await supabaseAdmin
-    .from('split_items')
-    .select('value')
-    .eq('split_id', split_id)
+  const [itemsResult, partResult, debitResult] = await Promise.all([
+    supabaseAdmin.from('split_items').select('value').eq('split_id', split_id),
+    supabaseAdmin.from('split_participants').select('id, user_id, blocked_amount').eq('split_id', split_id).eq('status', 'accepted'),
+    supabaseAdmin.from('transactions').select('user_id, amount').eq('type', 'split_debit').eq('reference_id', split_id).eq('status', 'completed'),
+  ])
+
+  const { data: existingItems } = itemsResult
+  const { data: participants, error: partErr } = partResult
+  const { data: allDebitTxs } = debitResult
 
   const totalLaunched = parseFloat(
     (existingItems?.reduce((s, i) => s + Number(i.value), 0) ?? 0).toFixed(2),
@@ -106,14 +104,6 @@ Deno.serve(async (req: Request) => {
     )
   }
 
-  // ── Buscar participantes aceitos ──────────────────────────────────────────────
-
-  const { data: participants, error: partErr } = await supabaseAdmin
-    .from('split_participants')
-    .select('id, user_id, blocked_amount')
-    .eq('split_id', split_id)
-    .eq('status', 'accepted')
-
   if (partErr || !participants?.length) {
     await logError(supabaseAdmin, 'split-launch', partErr ?? new Error('no_participants'), { split_id })
     return err('DB_ERROR', 'Erro ao buscar participantes', 500)
@@ -124,13 +114,6 @@ Deno.serve(async (req: Request) => {
 
   // ── Verificar que todos têm saldo restante suficiente (blocked − consumido) ───
   // blocked_amount = total pago ao dono; consumido = soma de split_debit TXs.
-
-  const { data: allDebitTxs } = await supabaseAdmin
-    .from('transactions')
-    .select('user_id, amount')
-    .eq('type', 'split_debit')
-    .eq('reference_id', split_id)
-    .eq('status', 'completed')
 
   const consumedByUser = new Map<string, number>()
   for (const tx of allDebitTxs ?? []) {
@@ -215,11 +198,9 @@ Deno.serve(async (req: Request) => {
         `${user.handle} lançou R$ ${valueRounded.toFixed(2)} — sua parte: R$ ${perPerson.toFixed(2)}`,
       ),
     )
-  await Promise.allSettled(pushes)
+  Promise.allSettled(pushes).catch(() => {})
 
-  // ── Audit log ─────────────────────────────────────────────────────────────────
-
-  await supabaseAdmin.from('audit_logs').insert({
+  supabaseAdmin.from('audit_logs').insert({
     user_id:    user.id,
     event_type: 'split_launch',
     metadata:   { split_id, item_id: itemId, value: valueRounded, per_person: perPerson, participant_count: participantCount },

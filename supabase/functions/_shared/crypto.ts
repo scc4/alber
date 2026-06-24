@@ -4,7 +4,7 @@
 // CPF:  SHA-256 no banco
 // Pix/Asaas key: AES-256-GCM no banco
 
-import bcrypt from 'npm:bcryptjs@2.4.3'
+import { hash as bcryptHashFn, compare as bcryptCompareFn, genSalt } from 'https://deno.land/x/bcrypt@v0.4.1/mod.ts'
 
 const enc = new TextEncoder()
 
@@ -22,12 +22,12 @@ export async function sha256hex(text: string): Promise<string> {
 const BCRYPT_ROUNDS = 12
 
 export async function bcryptHash(value: string, rounds = BCRYPT_ROUNDS): Promise<string> {
-  const salt = await bcrypt.genSalt(rounds)
-  return bcrypt.hash(value, salt)
+  const salt = await genSalt(rounds)
+  return bcryptHashFn(value, salt)
 }
 
 export function bcryptVerify(value: string, hash: string): Promise<boolean> {
-  return bcrypt.compare(value, hash)
+  return bcryptCompareFn(value, hash)
 }
 
 // ── AES-256-GCM ──────────────────────────────────────────────────────────────

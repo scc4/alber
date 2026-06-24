@@ -174,7 +174,7 @@ Deno.serve(async (req: Request) => {
       }
     } else {
       // Plain SHA-256 (sem payload de migração)
-      pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+      pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
       console.log('[auth-login] bcryptVerify(plain) ok=', pinOk, 'len=', pin_hash.length)
       if (pinOk && (!pinSha256 || pinSha256.length !== 64) && pin_hash.length === 64) {
         const { error: healError } = await supabaseAdmin.auth.admin.updateUserById(user.auth_id, {

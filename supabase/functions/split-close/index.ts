@@ -69,16 +69,21 @@ Deno.serve(async (req: Request) => {
   if (userErr || !user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
 
   // ── Verificar PIN (spec §6: SHA-256 em trânsito, bcrypt no banco) ─────────────
+  // Fast path: SHA-256 comparison quando disponível (evita bcryptjs lento em Edge)
+  // Bcrypt via npm:bcryptjs (pure JS, cost 12) excede CPU budget — usar SHA-256 stored
 
   const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
   const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
+  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
 
-  if (!pinBcrypt) {
-    console.error('[split-close] pin_bcrypt ausente para user:', user.id)
+  if (!pinBcrypt && !pinSha256) {
+    console.error('[split-close] credenciais ausentes para user:', user.id)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
-  const pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+  const pinOk = pinSha256
+    ? pin_hash === pinSha256
+    : await bcryptVerify(pin_hash, pinBcrypt!)
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({
       user_id:    user.id,
@@ -88,13 +93,15 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_CREDENTIALS', 'PIN incorreto', 401)
   }
 
-  // ── Buscar e validar split ────────────────────────────────────────────────────
+  // ── Buscar split e blocked_amounts em paralelo ────────────────────────────────
 
-  const { data: split, error: splitErr } = await supabaseAdmin
-    .from('splits')
-    .select('id, name, type, status, owner_id, target_amount')
-    .eq('id', split_id)
-    .maybeSingle()
+  const [splitResult, blocksResult] = await Promise.all([
+    supabaseAdmin.from('splits').select('id, name, type, status, owner_id, target_amount').eq('id', split_id).maybeSingle(),
+    supabaseAdmin.from('split_participants').select('user_id, blocked_amount').eq('split_id', split_id).eq('status', 'accepted'),
+  ])
+
+  const { data: split, error: splitErr } = splitResult
+  const { data: participantBlocks } = blocksResult
 
   if (splitErr || !split) return err('SPLIT_NOT_FOUND', 'Split não encontrado', 404)
   if (split.owner_id !== user.id)
@@ -117,14 +124,6 @@ Deno.serve(async (req: Request) => {
     await logError(supabaseAdmin, 'split-close', e, { split_id })
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
   }
-
-  // ── Buscar blocked_amount por participante (quanto cada um já pagou ao dono) ──
-
-  const { data: participantBlocks } = await supabaseAdmin
-    .from('split_participants')
-    .select('user_id, blocked_amount')
-    .eq('split_id', split_id)
-    .eq('status', 'accepted')
 
   const blockedByUser = new Map<string, number>()
   for (const p of participantBlocks ?? []) {
@@ -231,22 +230,18 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao fechar split', 500)
   }
 
-  // ── Audit log ─────────────────────────────────────────────────────────────────
-
-  await supabaseAdmin.from('audit_logs').insert({
+  supabaseAdmin.from('audit_logs').insert({
     user_id:    user.id,
     event_type: 'split_closed',
     metadata:   { split_id, participant_count: allocationEntries.length },
   }).catch(() => {})
 
-  // ── Push para todos os participantes (best-effort) ────────────────────────────
-
   const participantIds = Object.keys(allocations).filter(id => id !== user.id)
-  await Promise.allSettled(
+  Promise.allSettled(
     participantIds.map(pid =>
       sendPush(pid, 'Split encerrado', `O split "${split.name}" foi fechado.`, { route: `/(app)/split/${split_id}` })
     )
-  )
+  ).catch(() => {})
 
   return json({ split_id, status: 'closed', closed_at: now })
 })

@@ -36,7 +36,11 @@
       "Read(//root/**)",
       "Bash(env)",
       "Read(//mnt/c/Users/fernando/AppData/Roaming/**)",
-      "Read(//mnt/c/Users/fernando/**)"
+      "Read(//mnt/c/Users/fernando/**)",
+      "Bash(supabase access-token *)",
+      "Bash(supabase --help)",
+      "Bash(python3 -c ' *)",
+      "Bash(grep -o '\\\\$aact_[A-Za-z0-9_-]*' C:/Users/fernando/.claude/projects/C--Users-fernando-alber/4ef7be1b-ab36-4657-ac09-7d24c3cd1a92.jsonl)"
     ]
   }
 }

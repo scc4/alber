@@ -1,7 +1,8 @@
 // Spec: /specs/06_modules/alber_lounge.md § 9.2 "Comprar ingresso"
 // POST /event-ticket
-// Gratuito: INSERT direto. Pago: verifica PIN + saldo Asaas → debita → INSERT.
-// Ao esgotar lote: ativa próximo automaticamente.
+// Gratuito: reserva atômica → INSERT ticket.
+// Pago: reserva atômica → PIN → saldo → debita Asaas → INSERT ticket.
+// Race condition tratada com UPDATE WHERE (optimistic lock) antes das ops financeiras.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
@@ -23,12 +24,16 @@ const supabaseAdmin = createClient(
 // ── Ativa próximo lote quando o atual esgota ──────────────────────────────────
 
 async function tryActivateNextBatch(eventId: string, currentBatchNumber: number): Promise<void> {
-  await supabaseAdmin
-    .from('event_batches')
-    .update({ status: 'active' })
-    .eq('event_id', eventId)
-    .eq('batch_number', currentBatchNumber + 1)
-    .eq('status', 'pending')
+  try {
+    await supabaseAdmin
+      .from('event_batches')
+      .update({ status: 'active' })
+      .eq('event_id', eventId)
+      .eq('batch_number', currentBatchNumber + 1)
+      .eq('status', 'pending')
+  } catch (e) {
+    await logError(supabaseAdmin, 'event-ticket', e, { eventId, currentBatchNumber, context: 'tryActivateNextBatch' })
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,52 +65,51 @@ Deno.serve(async (req: Request) => {
 
   if (!body.event_id) return err('MISSING_FIELDS', 'event_id é obrigatório', 400)
 
-  // ── Buscar usuário ──────────────────────────────────────────────────────────
+  // ── Buscar usuário e evento em paralelo ─────────────────────────────────────
 
-  const { data: user } = await supabaseAdmin
-    .from('users')
-    .select('id, auth_id, asaas_api_key_enc, asaas_wallet_id')
-    .eq('auth_id', authUser.id)
-    .maybeSingle()
+  const [userRes, eventRes] = await Promise.all([
+    supabaseAdmin
+      .from('users')
+      .select('id, auth_id, asaas_api_key_enc, asaas_wallet_id')
+      .eq('auth_id', authUser.id)
+      .maybeSingle(),
+    supabaseAdmin
+      .from('events')
+      .select('id, space_id, name, is_paid, status, visibility')
+      .eq('id', body.event_id)
+      .maybeSingle(),
+  ])
 
-  if (!user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
+  const user  = userRes.data
+  const event = eventRes.data
 
-  // ── Buscar evento ───────────────────────────────────────────────────────────
-
-  const { data: event } = await supabaseAdmin
-    .from('events')
-    .select('id, space_id, name, is_paid, status, visibility')
-    .eq('id', body.event_id)
-    .maybeSingle()
-
+  if (!user)  return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
   if (!event || event.status !== 'active') {
     return err('EVENT_NOT_FOUND', 'Evento não encontrado ou inativo', 404)
   }
 
-  // Verificar acesso: membro ativo do space (para eventos 'members') ou qualquer usuário (para 'public')
-  if (event.visibility === 'members') {
-    const { data: membership } = await supabaseAdmin
+  // ── Verificar acesso e duplicata em paralelo ─────────────────────────────────
+
+  const [membershipRes, duplicateRes] = await Promise.all([
+    supabaseAdmin
       .from('space_members')
       .select('status')
       .eq('space_id', event.space_id)
       .eq('user_id', user.id)
-      .maybeSingle()
+      .maybeSingle(),
+    supabaseAdmin
+      .from('event_tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('event_id', body.event_id)
+      .eq('user_id', user.id)
+      .eq('status', 'confirmed'),
+  ])
 
-    if (membership?.status !== 'active') {
-      return err('NOT_MEMBER', 'Acesso restrito a membros deste Lounge', 403)
-    }
+  if (event.visibility === 'members' && membershipRes.data?.status !== 'active') {
+    return err('NOT_MEMBER', 'Acesso restrito a membros deste Lounge', 403)
   }
 
-  // ── Verificar duplicata ─────────────────────────────────────────────────────
-
-  const { count: alreadyHas } = await supabaseAdmin
-    .from('event_tickets')
-    .select('id', { count: 'exact', head: true })
-    .eq('event_id', body.event_id)
-    .eq('user_id', user.id)
-    .eq('status', 'confirmed')
-
-  if ((alreadyHas ?? 0) > 0) {
+  if ((duplicateRes.count ?? 0) > 0) {
     return err('DUPLICATE_TICKET', 'Você já possui ingresso para este evento', 422)
   }
 
@@ -122,6 +126,38 @@ Deno.serve(async (req: Request) => {
 
   if (!batch) {
     return err('SOLD_OUT', 'Não há ingressos disponíveis para este evento', 422)
+  }
+
+  // ── Reserva atômica do lote ─────────────────────────────────────────────────
+  // UPDATE com WHERE garante que apenas uma compra concorrente vence por vaga.
+  // Para o fluxo pago, a reserva acontece ANTES das operações financeiras para
+  // evitar chamar Asaas em lote já esgotado por compra simultânea.
+
+  const { data: reservedBatch } = await supabaseAdmin
+    .from('event_batches')
+    .update({ sold: batch.sold + 1 })
+    .eq('id', batch.id)
+    .eq('sold', batch.sold)       // optimistic lock: falha se alguém comprou entre o SELECT e este UPDATE
+    .lt('sold', batch.capacity)   // impede ultrapassar capacidade
+    .select('id, sold, batch_number')
+    .maybeSingle()
+
+  if (!reservedBatch) {
+    return err('BATCH_SOLD_OUT', 'Lote esgotado. Tente novamente.', 409)
+  }
+
+  const newSold = reservedBatch.sold
+
+  // Reverte o sold em caso de falha após a reserva
+  async function rollbackBatchSold() {
+    try {
+      await supabaseAdmin
+        .from('event_batches')
+        .update({ sold: batch.sold })
+        .eq('id', batch.id)
+    } catch (e) {
+      await logError(supabaseAdmin, 'event-ticket', e, { batch_id: batch.id, context: 'rollbackBatchSold' })
+    }
   }
 
   // ── Fluxo gratuito ──────────────────────────────────────────────────────────
@@ -141,18 +177,13 @@ Deno.serve(async (req: Request) => {
       .single()
 
     if (ticketErr || !ticket) {
+      await rollbackBatchSold()
       await logError(supabaseAdmin, 'event-ticket', ticketErr ?? new Error('ticket_insert_failed'), { event_id: body.event_id })
       return err('DB_ERROR', 'Erro ao confirmar ingresso', 500)
     }
 
-    // Atualizar sold do lote
-    const newSold = batch.sold + 1
-    await supabaseAdmin
-      .from('event_batches')
-      .update({ sold: newSold, status: newSold >= batch.capacity ? 'sold_out' : 'active' })
-      .eq('id', batch.id)
-
     if (newSold >= batch.capacity) {
+      await supabaseAdmin.from('event_batches').update({ status: 'sold_out' }).eq('id', batch.id)
       await tryActivateNextBatch(body.event_id, batch.batch_number)
     }
 
@@ -173,19 +204,35 @@ Deno.serve(async (req: Request) => {
 
   // ── Fluxo pago ──────────────────────────────────────────────────────────────
 
-  if (!body.pin_hash) return err('PIN_REQUIRED', 'PIN obrigatório para ingresso pago', 400)
+  if (!body.pin_hash) {
+    await rollbackBatchSold()
+    return err('PIN_REQUIRED', 'PIN obrigatório para ingresso pago', 400)
+  }
 
   const priceBrl    = Number(batch.price_brl)
   const priceAlbers = priceBrl  // paridade 1:1 no MVP
+
+  // Buscar taxa de evento configurada no painel admin (spec AS-11)
+  const { data: rateRow } = await supabaseAdmin
+    .from('rates')
+    .select('percentage')
+    .eq('type', 'event')
+    .maybeSingle()
+  const feeRate   = rateRow?.percentage ?? 0
+  const feeAmount = parseFloat((priceBrl * feeRate).toFixed(2))
 
   // Verificar PIN
   const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
   const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
 
-  if (!pinBcrypt) return err('INVALID_CREDENTIALS', 'PIN não configurado', 401)
+  if (!pinBcrypt) {
+    await rollbackBatchSold()
+    return err('INVALID_CREDENTIALS', 'PIN não configurado', 401)
+  }
 
   const pinOk = await bcryptVerify(body.pin_hash, pinBcrypt)
   if (!pinOk) {
+    await rollbackBatchSold()
     await supabaseAdmin.from('audit_logs').insert({
       user_id: user.id, event_type: 'event_ticket_pin_failed',
       metadata: { event_id: body.event_id },
@@ -195,6 +242,7 @@ Deno.serve(async (req: Request) => {
 
   // Verificar configuração Asaas
   if (!user.asaas_api_key_enc) {
+    await rollbackBatchSold()
     return err('ACCOUNT_NOT_CONFIGURED', 'Conta financeira não configurada', 503)
   }
 
@@ -202,6 +250,7 @@ Deno.serve(async (req: Request) => {
   try {
     userApiKey = await aesDecrypt(user.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
   } catch (e) {
+    await rollbackBatchSold()
     await logError(supabaseAdmin, 'event-ticket', e, { event_id: body.event_id })
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
   }
@@ -211,11 +260,13 @@ Deno.serve(async (req: Request) => {
   try {
     balance = await getSubcontaBalance(userApiKey)
   } catch (e) {
+    await rollbackBatchSold()
     await logError(supabaseAdmin, 'event-ticket', e, { event_id: body.event_id })
     return err('ASAAS_ERROR', 'Não foi possível verificar saldo', 503)
   }
 
   if (balance < priceAlbers) {
+    await rollbackBatchSold()
     await supabaseAdmin.from('audit_logs').insert({
       user_id: user.id, event_type: 'event_ticket_insufficient',
       metadata: { event_id: body.event_id, balance, required: priceAlbers },
@@ -231,7 +282,7 @@ Deno.serve(async (req: Request) => {
       type:       'event_ticket',
       amount:     priceAlbers,
       amount_brl: priceBrl,
-      fee_amount: 0,
+      fee_amount: feeAmount,
       status:     'pending',
       metadata:   { event_id: body.event_id, event_name: event.name },
     })
@@ -239,11 +290,13 @@ Deno.serve(async (req: Request) => {
     .single()
 
   if (txErr || !txData) {
+    await rollbackBatchSold()
     await logError(supabaseAdmin, 'event-ticket', txErr ?? new Error('tx_insert_failed'), { event_id: body.event_id })
     return err('DB_ERROR', 'Erro ao registrar transação', 500)
   }
 
-  // Transferir para conta pai (ou conta do Space se configurada)
+  // Transferir para conta pai (decisão de produto MVP: ingressos consolidados na conta
+  // Alber pai; distribuição para o dono do Lounge é funcionalidade pós-MVP)
   const targetWallet = Deno.env.get('ASAAS_PARENT_WALLET_ID')!
   try {
     await transferToWallet(
@@ -254,6 +307,7 @@ Deno.serve(async (req: Request) => {
       userApiKey,
     )
   } catch (e) {
+    await rollbackBatchSold()
     await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', txData.id)
     await logError(supabaseAdmin, 'event-ticket', e, { event_id: body.event_id, tx_id: txData.id })
     return err('ASAAS_ERROR', 'Falha ao processar pagamento. Tente novamente.', 503)
@@ -280,14 +334,9 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Ingresso pago mas erro ao registrar. Entre em contato com o suporte.', 500)
   }
 
-  // Atualizar sold + ativar próximo lote se necessário
-  const newSold = batch.sold + 1
-  await supabaseAdmin
-    .from('event_batches')
-    .update({ sold: newSold, status: newSold >= batch.capacity ? 'sold_out' : 'active' })
-    .eq('id', batch.id)
-
+  // Atualizar status do lote e ativar próximo se necessário
   if (newSold >= batch.capacity) {
+    await supabaseAdmin.from('event_batches').update({ status: 'sold_out' }).eq('id', batch.id)
     await tryActivateNextBatch(body.event_id, batch.batch_number)
     await supabaseAdmin.from('audit_logs').insert({
       user_id: user.id, event_type: 'event_batch_sold_out',

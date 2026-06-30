@@ -17,6 +17,7 @@ interface EventCreateRequest {
   space_id:        string
   name:            string
   description?:    string
+  image_url?:      string | null
   date:            string               // ISO 8601
   visibility:      'members' | 'public'
   is_paid:         boolean
@@ -56,7 +57,7 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { space_id, name, description, date, visibility, is_paid, is_recurring, recurrence_freq, batches } = body
+  const { space_id, name, description, image_url, date, visibility, is_paid, is_recurring, recurrence_freq, batches } = body
 
   if (!space_id || !name?.trim() || !date || !visibility) {
     return err('MISSING_FIELDS', 'space_id, name, date e visibility são obrigatórios', 400)
@@ -73,6 +74,9 @@ Deno.serve(async (req: Request) => {
   if (isNaN(eventDate.getTime())) {
     return err('INVALID_DATE', 'Data inválida', 400)
   }
+  if (eventDate <= new Date()) {
+    return err('INVALID_DATE', 'A data do evento deve ser no futuro', 400)
+  }
 
   // Validar lotes pagos
   if (is_paid && batches) {
@@ -80,8 +84,8 @@ Deno.serve(async (req: Request) => {
       if (!['quantity', 'date'].includes(b.batch_type)) {
         return err('INVALID_BATCH_TYPE', "batch_type deve ser 'quantity' ou 'date'", 400)
       }
-      if (typeof b.price_brl !== 'number' || b.price_brl < 0) {
-        return err('INVALID_BATCH_PRICE', 'price_brl deve ser >= 0', 400)
+      if (typeof b.price_brl !== 'number' || b.price_brl <= 0) {
+        return err('INVALID_BATCH_PRICE', 'price_brl deve ser > 0 em eventos pagos', 400)
       }
       if (typeof b.capacity !== 'number' || b.capacity < 1) {
         return err('INVALID_BATCH_CAPACITY', 'capacity deve ser >= 1', 400)
@@ -128,6 +132,7 @@ Deno.serve(async (req: Request) => {
       creator_id:      user.id,
       name:            name.trim(),
       description:     description?.trim() ?? null,
+      image_url:       image_url ?? null,
       date:            eventDate.toISOString(),
       visibility,
       is_paid,

@@ -697,6 +697,8 @@
       "continue": "Continuar",
       "reviewCta": "Revisar",
       "publishCta": "Publicar evento",
+      "errorNoDate": "Informe a data do evento antes de publicar.",
+      "errorPublish": "Erro ao publicar evento. Tente novamente.",
       "nameLabel": "NOME DO EVENTO",
       "namePlaceholder": "Ex: Jantar de harmonização",
       "descLabel": "DESCRIÇÃO",

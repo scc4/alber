@@ -19,7 +19,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useLoungeStore } from '../../../../store/lounge.store'
 import { useAuthStore } from '../../../../store/auth.store'
-import type { LoungeEvent, EventBatch } from '../../../../components/lounge/EventCard'
 import { pickFromGallery, uploadImage } from '../../../../services/storage.service'
 import { Header } from '../../../../components/core/Header'
 import { Eyebrow } from '../../../../components/shared/Eyebrow'
@@ -89,6 +88,8 @@ export default function CriarEventoScreen() {
     { name: '1º Lote', priceR: '', qty: '', until: '' },
   ])
   const [batchUntilDates, setBatchUntilDates] = useState<(Date | null)[]>([null])
+  const [publishing, setPublishing]     = useState(false)
+  const [publishError, setPublishError] = useState<string | null>(null)
 
   // ── Derived ───────────────────────────────────────────────────────────────────
 
@@ -116,50 +117,61 @@ export default function CriarEventoScreen() {
     updateBatch(i, 'until', formatDateBR(d))
   }
 
+  // ── Helpers de data ───────────────────────────────────────────────────────────
+
+  function buildEventISO(d: Date | null, tm: Date | null): string | null {
+    if (!d) return null
+    const combined = new Date(d)
+    if (tm) combined.setHours(tm.getHours(), tm.getMinutes(), 0, 0)
+    else    combined.setHours(0, 0, 0, 0)
+    return combined.toISOString()
+  }
+
   // ── Publish ───────────────────────────────────────────────────────────────────
 
   async function handlePublish() {
-    if (!lounge) return
+    if (!lounge || !token) return
 
-    const uploadedImageUrl = (eventImageUri && token && userId)
-      ? await uploadImage(eventImageUri, 'event-images', `${lounge.id}/${userId}/${Date.now()}`, token)
-      : null
-
-    const eventBatches: EventBatch[] = eventType === 'paid'
-      ? batches.map((b, i) => ({
-          id:          `batch-${Date.now()}-${i}`,
-          name:        b.name,
-          batchNumber: i + 1,
-          batchType:   b.until ? 'date' : 'quantity',
-          priceBrl:    parseBRL(b.priceR),
-          priceAlbers: parseBRL(b.priceR),
-          capacity:    parseInt(b.qty) || 0,
-          sold:        0,
-          validUntil:  b.until || null,
-          status:      i === 0 ? 'active' : 'pending',
-        }))
-      : []
-
-    const event: LoungeEvent = {
-      id:             `ev-${Date.now()}`,
-      loungeId:       lounge.id,
-      name:           name.trim(),
-      description:    desc.trim(),
-      imageUri:       uploadedImageUrl,
-      date:           `${date}${time ? ` · ${time}` : ''}`,
-      visibility,
-      isPaid:         eventType === 'paid',
-      isRecurring:    recurrence === 'recurring',
-      recurrenceFreq: recurrence === 'recurring' ? freq : null,
-      batches:        eventBatches,
-      totalCapacity:  effectiveCap,
-      confirmed:      0,
-      status:         'active',
-      createdAt:      new Date().toISOString(),
+    const eventDateISO = buildEventISO(dateObj, timeObj)
+    if (!eventDateISO) {
+      setPublishError(t('lounge.criarEvento.errorNoDate'))
+      return
     }
 
-    createEvent(lounge.id, event)
-    router.replace(`/(app)/lounge/${lounge.id}`)
+    setPublishing(true)
+    setPublishError(null)
+
+    try {
+      const imageUrl = (eventImageUri && userId)
+        ? await uploadImage(eventImageUri, 'event-images', `${lounge.id}/${userId}/${Date.now()}`, token)
+        : null
+
+      await createEvent({
+        space_id:        lounge.id,
+        name:            name.trim(),
+        description:     desc.trim() || undefined,
+        image_url:       imageUrl,
+        date:            eventDateISO,
+        visibility:      visibility === 'members_only' ? 'members' : 'public',
+        is_paid:         eventType === 'paid',
+        is_recurring:    recurrence === 'recurring',
+        recurrence_freq: recurrence === 'recurring' ? freq : undefined,
+        batches: eventType === 'paid'
+          ? batches.map((b, i) => ({
+              batch_type:  batchUntilDates[i] != null ? 'date' as const : 'quantity' as const,
+              price_brl:   parseBRL(b.priceR),
+              capacity:    parseInt(b.qty) || 0,
+              valid_until: batchUntilDates[i]?.toISOString() ?? undefined,
+            }))
+          : undefined,
+      }, token)
+
+      router.replace(`/(app)/lounge/${lounge.id}`)
+    } catch (e: any) {
+      setPublishError(e?.message ?? t('lounge.criarEvento.errorPublish'))
+    } finally {
+      setPublishing(false)
+    }
   }
 
   // ── Not found ─────────────────────────────────────────────────────────────────
@@ -580,9 +592,13 @@ export default function CriarEventoScreen() {
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: Math.max(insets.bottom, spacing.md) }]}>
+        {publishError && (
+          <Text style={styles.publishErrorText}>{publishError}</Text>
+        )}
         <PrimaryButton
           label={t('lounge.criarEvento.publishCta')}
           onPress={handlePublish}
+          state={publishing ? 'loading' : 'default'}
         />
       </View>
     </View>
@@ -896,6 +912,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 0.5,
     borderTopColor: 'rgba(255,255,255,0.06)',
     backgroundColor: colors.black[100],
+  },
+  publishErrorText: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.state.error,
+    textAlign: 'center',
+    marginBottom: 8,
   },
 
   // Error state

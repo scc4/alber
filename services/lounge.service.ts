@@ -309,6 +309,7 @@ export interface CreateEventInput {
   space_id:         string
   name:             string
   description?:     string
+  image_url?:       string | null
   date:             string
   visibility:       'members' | 'public'
   is_paid:          boolean

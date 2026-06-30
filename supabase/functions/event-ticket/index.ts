@@ -255,15 +255,39 @@ Deno.serve(async (req: Request) => {
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
   }
 
-  // Verificar saldo
+  // Verificar saldo e buscar wallet do dono do Lounge em paralelo
   let balance: number
+  let ownerWalletId: string
+  let ownerId: string
+
   try {
-    balance = await getSubcontaBalance(userApiKey)
+    const [bal, spaceRes] = await Promise.all([
+      getSubcontaBalance(userApiKey),
+      supabaseAdmin.from('spaces').select('owner_id').eq('id', event.space_id).maybeSingle(),
+    ])
+    balance = bal
+    if (!spaceRes.data?.owner_id) {
+      await rollbackBatchSold()
+      return err('OWNER_NOT_FOUND', 'Organizador do evento não encontrado', 404)
+    }
+    ownerId = spaceRes.data.owner_id
   } catch (e) {
     await rollbackBatchSold()
     await logError(supabaseAdmin, 'event-ticket', e, { event_id: body.event_id })
     return err('ASAAS_ERROR', 'Não foi possível verificar saldo', 503)
   }
+
+  const { data: ownerUser } = await supabaseAdmin
+    .from('users')
+    .select('asaas_wallet_id')
+    .eq('id', ownerId)
+    .maybeSingle()
+
+  if (!ownerUser?.asaas_wallet_id) {
+    await rollbackBatchSold()
+    return err('OWNER_NOT_CONFIGURED', 'A conta do organizador não está configurada para receber pagamentos.', 503)
+  }
+  ownerWalletId = ownerUser.asaas_wallet_id
 
   if (balance < priceAlbers) {
     await rollbackBatchSold()
@@ -273,6 +297,11 @@ Deno.serve(async (req: Request) => {
     })
     return err('INSUFFICIENT_BALANCE', 'Saldo insuficiente', 422)
   }
+
+  // Valor líquido que vai ao dono do Lounge (preço total − taxa da plataforma)
+  const netAmount = feeAmount > 0
+    ? Math.max(0, parseFloat((priceAlbers - feeAmount).toFixed(2)))
+    : priceAlbers
 
   // Inserir transação pending
   const { data: txData, error: txErr } = await supabaseAdmin
@@ -284,7 +313,12 @@ Deno.serve(async (req: Request) => {
       amount_brl: priceBrl,
       fee_amount: feeAmount,
       status:     'pending',
-      metadata:   { event_id: body.event_id, event_name: event.name },
+      metadata:   {
+        event_id:        body.event_id,
+        event_name:      event.name,
+        owner_wallet_id: ownerWalletId,
+        net_amount:      netAmount,
+      },
     })
     .select('id')
     .single()
@@ -295,13 +329,11 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao registrar transação', 500)
   }
 
-  // Transferir para conta pai (decisão de produto MVP: ingressos consolidados na conta
-  // Alber pai; distribuição para o dono do Lounge é funcionalidade pós-MVP)
-  const targetWallet = Deno.env.get('ASAAS_PARENT_WALLET_ID')!
+  // ── Transferência 1: valor líquido → dono do Lounge (crítica) ────────────────
   try {
     await transferToWallet(
-      priceAlbers,
-      targetWallet,
+      netAmount,
+      ownerWalletId,
       `Ingresso — ${event.name}`,
       txData.id,
       userApiKey,
@@ -311,6 +343,24 @@ Deno.serve(async (req: Request) => {
     await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', txData.id)
     await logError(supabaseAdmin, 'event-ticket', e, { event_id: body.event_id, tx_id: txData.id })
     return err('ASAAS_ERROR', 'Falha ao processar pagamento. Tente novamente.', 503)
+  }
+
+  // ── Transferência 2: taxa → conta pai da plataforma (não crítica) ─────────────
+  // Dono já recebeu. Se a taxa falhar, é reconciliada manualmente via audit_log.
+  if (feeAmount > 0) {
+    try {
+      await transferToWallet(
+        feeAmount,
+        Deno.env.get('ASAAS_PARENT_WALLET_ID')!,
+        `Taxa ingresso — ${event.name}`,
+        `${txData.id}-fee`,
+        userApiKey,
+      )
+    } catch (e) {
+      await logError(supabaseAdmin, 'event-ticket', e, {
+        event_id: body.event_id, tx_id: txData.id, context: 'fee_transfer',
+      })
+    }
   }
 
   await supabaseAdmin.from('transactions').update({ status: 'completed' }).eq('id', txData.id)

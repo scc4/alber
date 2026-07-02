@@ -23,6 +23,8 @@ import { useLoungeStore } from '../../../../store/lounge.store'
 import type { LoungeMember, LoungeRequest } from '../../../../store/lounge.store'
 import { useAuthStore } from '../../../../store/auth.store'
 import { pickFromGallery, uploadImage } from '../../../../services/storage.service'
+import { getEventTickets } from '../../../../services/lounge.service'
+import type { EventTicketItem } from '../../../../services/lounge.service'
 import { Header } from '../../../../components/core/Header'
 import { Eyebrow } from '../../../../components/shared/Eyebrow'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
@@ -65,6 +67,10 @@ export default function GerenciarScreen() {
   const [editName, setEditName] = useState(lounge?.name ?? '')
   const [editDesc, setEditDesc] = useState(lounge?.description ?? '')
   const [processingIds, setProcessingIds] = useState<Set<string>>(new Set())
+  const [cancellingId, setCancellingId]   = useState<string | null>(null)
+  const [expandedEventId, setExpandedEventId] = useState<string | null>(null)
+  const [confirmadosMap, setConfirmadosMap]   = useState<Record<string, EventTicketItem[]>>({})
+  const [loadingConfirmados, setLoadingConfirmados] = useState<Record<string, boolean>>({})
   const inviteUrl = lounge?.inviteToken
     ? `alber://lounge/convite/${lounge.inviteToken}`
     : null
@@ -222,20 +228,48 @@ export default function GerenciarScreen() {
     Alert.alert(t('lounge.gerenciar.inviteSection'), t('lounge.gerenciar.inviteNotAvailable'))
   }
 
-  function handleCancelEvent(eventId: string, eventName: string) {
-    if (!lounge) return
+  function handleCancelEvent(eventId: string) {
+    if (!lounge || !token || cancellingId) return
+    const confirmed = lounge.events.find(e => e.id === eventId)?.confirmed ?? 0
     Alert.alert(
       t('lounge.gerenciar.cancelConfirmTitle'),
-      t('lounge.gerenciar.cancelConfirmBody', { n: lounge.events.find(e => e.id === eventId)?.confirmed ?? 0 }),
+      t('lounge.gerenciar.cancelConfirmBody', { n: confirmed }),
       [
         { text: t('lounge.gerenciar.cancelBack'), style: 'cancel' },
         {
           text: t('lounge.gerenciar.cancelConfirmCta'),
           style: 'destructive',
-          onPress: () => cancelEvent(eventId),
+          onPress: async () => {
+            setCancellingId(eventId)
+            try {
+              await cancelEvent(eventId, token)
+            } catch (e: any) {
+              Alert.alert('Erro', e?.message ?? t('lounge.gerenciar.cancelError'))
+            } finally {
+              setCancellingId(null)
+            }
+          },
         },
       ]
     )
+  }
+
+  async function handleToggleConfirmados(eventId: string) {
+    if (expandedEventId === eventId) {
+      setExpandedEventId(null)
+      return
+    }
+    setExpandedEventId(eventId)
+    if (confirmadosMap[eventId] || !token) return
+    setLoadingConfirmados(s => ({ ...s, [eventId]: true }))
+    try {
+      const res = await getEventTickets(eventId, token)
+      setConfirmadosMap(s => ({ ...s, [eventId]: res.tickets }))
+    } catch {
+      setConfirmadosMap(s => ({ ...s, [eventId]: [] }))
+    } finally {
+      setLoadingConfirmados(s => ({ ...s, [eventId]: false }))
+    }
   }
 
   // ── Tab bar ──────────────────────────────────────────────────────────────────
@@ -372,27 +406,86 @@ export default function GerenciarScreen() {
             <Text style={styles.emptyText}>{t('lounge.noEvents')}</Text>
           ) : (
             <View style={styles.eventList}>
-              {lounge.events.map(event => (
-                <View key={event.id}>
-                  <EventCard
-                    event={event}
-                    accent={lounge.accent}
-                    isManager
-                    onPress={() => router.push(`/(app)/lounge/evento/${event.id}`)}
-                  />
-                  {event.status === 'active' && isOwner && (
-                    <View style={styles.eventActions}>
-                      <TouchableOpacity
-                        onPress={() => handleCancelEvent(event.id, event.name)}
-                        style={styles.eventActionBtn}
-                      >
-                        <Text style={styles.cancelEventText}>{t('lounge.gerenciar.cancelEventCta')}</Text>
-                        <Text style={styles.cancelEventSub}>{t('lounge.gerenciar.cancelEventSub')}</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                </View>
-              ))}
+              {lounge.events.map(event => {
+                const isExpanded   = expandedEventId === event.id
+                const tickets      = confirmadosMap[event.id] ?? []
+                const isLoadingTix = loadingConfirmados[event.id] ?? false
+                const isCancelling = cancellingId === event.id
+                return (
+                  <View key={event.id}>
+                    <EventCard
+                      event={event}
+                      accent={lounge.accent}
+                      isManager
+                      onPress={() => router.push(`/(app)/lounge/evento/${event.id}`)}
+                    />
+
+                    {/* Confirmados toggle */}
+                    <TouchableOpacity
+                      onPress={() => handleToggleConfirmados(event.id)}
+                      style={styles.confirmadosToggle}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={[styles.confirmadosToggleText, { color: lounge.accent }]}>
+                        {isExpanded
+                          ? t('lounge.gerenciar.hideConfirmados')
+                          : t('lounge.gerenciar.viewConfirmados', { n: event.confirmed })}
+                      </Text>
+                    </TouchableOpacity>
+
+                    {/* Confirmados list */}
+                    {isExpanded && (
+                      <View style={styles.confirmadosList}>
+                        {isLoadingTix ? (
+                          <Text style={styles.confirmadosHint}>{t('lounge.gerenciar.loadingConfirmados')}</Text>
+                        ) : tickets.length === 0 ? (
+                          <Text style={styles.confirmadosHint}>{t('lounge.gerenciar.noConfirmados')}</Text>
+                        ) : (
+                          tickets.map((tkt, i) => (
+                            <View key={tkt.ticket_id} style={[styles.tktRow, i > 0 && styles.tktBorder]}>
+                              <View style={styles.tktInfo}>
+                                <Text style={styles.tktName}>{tkt.user_name}</Text>
+                                <Text style={styles.tktHandle}>{tkt.user_handle}</Text>
+                              </View>
+                              <View style={styles.tktMeta}>
+                                <Text style={styles.tktBatch}>{tkt.batch_name}</Text>
+                                <Text style={styles.tktPrice}>
+                                  {tkt.price_brl > 0 ? `R$ ${tkt.price_brl.toFixed(2)}` : 'Gratuito'}
+                                </Text>
+                              </View>
+                            </View>
+                          ))
+                        )}
+                      </View>
+                    )}
+
+                    {/* Event actions: edit + cancel */}
+                    {event.status === 'active' && isOwner && (
+                      <View style={styles.eventActions}>
+                        <TouchableOpacity
+                          onPress={() => router.push(`/(app)/lounge/editar-evento/${event.id}`)}
+                          style={styles.editEventBtn}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[styles.editEventText, { color: lounge.accent }]}>
+                            {t('lounge.gerenciar.editEventCta')}
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleCancelEvent(event.id)}
+                          style={[styles.eventActionBtn, isCancelling && { opacity: 0.5 }]}
+                          disabled={isCancelling}
+                        >
+                          <Text style={styles.cancelEventText}>
+                            {isCancelling ? t('lounge.gerenciar.cancelLoading') : t('lounge.gerenciar.cancelEventCta')}
+                          </Text>
+                          <Text style={styles.cancelEventSub}>{t('lounge.gerenciar.cancelEventSub')}</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                )
+              })}
             </View>
           )}
         </ScrollView>
@@ -820,6 +913,20 @@ const styles = StyleSheet.create({
   eventActions: {
     marginTop: 4,
     marginBottom: 4,
+    gap: 6,
+  },
+  editEventBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  editEventText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
   },
   eventActionBtn: {
     paddingVertical: 8,
@@ -840,6 +947,70 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(239,68,68,0.6)',
     marginTop: 2,
+  },
+  confirmadosToggle: {
+    marginTop: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  confirmadosToggleText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
+    letterSpacing: 11.5 * 0.04,
+  },
+  confirmadosList: {
+    marginTop: 2,
+    marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 10,
+  },
+  confirmadosHint: {
+    padding: 14,
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.3)',
+    textAlign: 'center',
+  },
+  tktRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  tktBorder: {
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  tktInfo: { flex: 1 },
+  tktName: {
+    fontSize: 13,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
+  },
+  tktHandle: {
+    fontSize: 10.5,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 1,
+  },
+  tktMeta: { alignItems: 'flex-end', gap: 2 },
+  tktBatch: {
+    fontSize: 10,
+    fontFamily: typography.fontFamily.primary,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.45)',
+    letterSpacing: 10 * 0.08,
+    textTransform: 'uppercase',
+  },
+  tktPrice: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.75)',
   },
 
   // Members

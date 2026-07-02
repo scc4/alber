@@ -116,7 +116,8 @@ interface LoungeState {
   removeMember:     (loungeId: string, memberId: string, token: string) => Promise<void>
   sendMessage:      (loungeId: string, content: string, token: string) => Promise<void>
   updateVisual:     (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
-  cancelEvent:      (eventId: string) => void
+  cancelEvent:      (eventId: string, token: string) => Promise<loungeService.CancelEventResponse>
+  updateEvent:      (eventId: string, data: Omit<loungeService.UpdateEventInput, 'event_id'>, token: string) => Promise<loungeService.UpdateEventResponse>
 
   updateLounge:     (loungeId: string, data: loungeService.UpdateLoungeInput, token: string) => Promise<void>
   setPrimaryLounge: (loungeId: string, token: string) => Promise<void>
@@ -440,12 +441,48 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     }
   },
 
-  cancelEvent: (eventId) => {
-    const update = (events: LoungeEvent[]) =>
-      events.map(e => e.id === eventId ? { ...e, status: 'cancelled' as const } : e)
-    set(s => ({
-      myLounges: s.myLounges.map(l => ({ ...l, events: update(l.events) })),
-      exploring: s.exploring.map(l => ({ ...l, events: update(l.events) })),
-    }))
+  cancelEvent: async (eventId, token) => {
+    set({ error: null })
+    try {
+      const res = await loungeService.cancelEvent(eventId, token)
+      const update = (events: LoungeEvent[]) =>
+        events.map(e => e.id === eventId ? { ...e, status: 'cancelled' as const } : e)
+      set(s => ({
+        myLounges: s.myLounges.map(l => ({ ...l, events: update(l.events) })),
+        exploring: s.exploring.map(l => ({ ...l, events: update(l.events) })),
+      }))
+      return res
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao cancelar evento' })
+      throw e
+    }
+  },
+
+  updateEvent: async (eventId, data, token) => {
+    set({ error: null })
+    try {
+      const res = await loungeService.updateEvent({ event_id: eventId, ...data }, token)
+      if (res.updated && res.event) {
+        const { event: updated } = res
+        set(s => ({
+          myLounges: s.myLounges.map(l => ({
+            ...l,
+            events: l.events.map(e =>
+              e.id !== eventId ? e : {
+                ...e,
+                name:        updated.name,
+                description: updated.description,
+                image_url:   updated.image_url ?? undefined,
+                date:        updated.date,
+              }
+            ),
+          })),
+        }))
+      }
+      return res
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao atualizar evento' })
+      throw e
+    }
   },
 }))

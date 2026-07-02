@@ -679,7 +679,27 @@
       "nameErrorTitle": "Nome inválido",
       "nameErrorShort": "O nome deve ter pelo menos 3 caracteres.",
       "saveError": "Não foi possível salvar as alterações.",
-      "previewHint": "SEU LOUNGE ATUAL"
+      "previewHint": "SEU LOUNGE ATUAL",
+      "viewConfirmados": "Ver confirmados ({{n}})",
+      "hideConfirmados": "Ocultar confirmados",
+      "loadingConfirmados": "Carregando lista…",
+      "noConfirmados": "Nenhum ingresso confirmado ainda",
+      "cancelError": "Não foi possível cancelar o evento.",
+      "cancelLoading": "Cancelando…"
+    },
+    "editarEvento": {
+      "title": "Editar evento",
+      "nameLabel": "NOME DO EVENTO",
+      "descLabel": "DESCRIÇÃO",
+      "descPlaceholder": "Sobre o evento…",
+      "imageLabel": "IMAGEM DO EVENTO",
+      "imageHint": "Toque para alterar · JPG/PNG até 4MB",
+      "dateLabel": "DATA",
+      "timeLabel": "HORÁRIO",
+      "saveCta": "Salvar alterações",
+      "noChanges": "Nenhuma alteração para salvar.",
+      "saveError": "Não foi possível salvar as alterações.",
+      "savedSuccess": "Evento atualizado com sucesso."
     },
     "convite": {
       "loading": "Carregando Lounge…",

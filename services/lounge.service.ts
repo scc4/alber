@@ -441,6 +441,72 @@ export async function getExploring(query: string, token: string): Promise<Lounge
   ))
 }
 
+// ── event-tickets-list ────────────────────────────────────────────────────────
+
+export interface EventTicketItem {
+  ticket_id:    string
+  user_name:    string
+  user_handle:  string
+  batch_name:   string
+  price_brl:    number
+  price_albers: number
+  purchased_at: string
+}
+
+export interface EventTicketsListResponse {
+  event_id:   string
+  event_name: string
+  tickets:    EventTicketItem[]
+  total:      number
+  total_brl:  number
+}
+
+export async function getEventTickets(event_id: string, token: string): Promise<EventTicketsListResponse> {
+  return bffPost('event-tickets-list', { event_id }, token)
+}
+
+// ── event-cancel ──────────────────────────────────────────────────────────────
+
+export interface CancelEventResponse {
+  cancelled:     boolean
+  event_id:      string
+  refunded_count: number
+  total_tickets:  number
+}
+
+export async function cancelEvent(event_id: string, token: string): Promise<CancelEventResponse> {
+  return bffPost('event-cancel', { event_id }, token)
+}
+
+// ── event-update ──────────────────────────────────────────────────────────────
+
+export interface UpdateEventInput {
+  event_id:     string
+  name?:        string
+  description?: string
+  image_url?:   string | null
+  date?:        string
+}
+
+export interface UpdateEventResponse {
+  event_id: string
+  updated:  boolean
+  changes:  string[]
+  message?: string
+  event?: {
+    id:          string
+    name:        string
+    description: string
+    image_url:   string | null
+    date:        string
+    status:      string
+  }
+}
+
+export async function updateEvent(data: UpdateEventInput, token: string): Promise<UpdateEventResponse> {
+  return bffPost('event-update', data, token)
+}
+
 // ── Preview de convite (sem membership) ──────────────────────────────────────
 
 export interface InvitePreview {

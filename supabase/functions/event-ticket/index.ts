@@ -308,7 +308,7 @@ Deno.serve(async (req: Request) => {
     .from('transactions')
     .insert({
       user_id:    user.id,
-      type:       'event_ticket',
+      type:       'event_purchase',
       amount:     priceAlbers,
       amount_brl: priceBrl,
       fee_amount: feeAmount,

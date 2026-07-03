@@ -262,9 +262,11 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Asaas: cash out via Pix externo (spec 04_api §4.5) ────────────────────────
+  // DB stores 'random' for EVP keys; Asaas API requires 'EVP'.
+  const asaasPixType = user.pix_key_type === 'random' ? 'EVP' : user.pix_key_type.toUpperCase()
 
   try {
-    await cashoutPix(netBrl, pixKeyRaw, user.pix_key_type, transactionId, subApiKey)
+    await cashoutPix(netBrl, pixKeyRaw, asaasPixType, transactionId, subApiKey)
   } catch (e) {
     console.error('Asaas cashout failed:', e)
     const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null

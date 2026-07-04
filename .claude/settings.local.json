@@ -41,7 +41,30 @@
       "Bash(supabase --help)",
       "Bash(python3 -c ' *)",
       "Bash(grep -o '\\\\$aact_[A-Za-z0-9_-]*' C:/Users/fernando/.claude/projects/C--Users-fernando-alber/4ef7be1b-ab36-4657-ac09-7d24c3cd1a92.jsonl)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(cat .env)",
+      "Bash(cat .env.local)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('ACCESS_TOKEN:', d.get\\('access_token','ERROR'\\)[:50] if d.get\\('access_token'\\) else d\\)\")",
+      "PowerShell(Get-ChildItem *)",
+      "Bash(where deno *)",
+      "PowerShell(Get-Command *)",
+      "Bash(npm --version)",
+      "PowerShell(winget install *)",
+      "PowerShell(irm https://deno.land/install.ps1 | iex 2>&1 | Select-Object -Last 15)",
+      "Bash(DENO_INSTALL=/tmp/deno-install sh)",
+      "Bash(/tmp/deno-install/bin/deno *)",
+      "PowerShell(New-Item *)",
+      "Read(//tmp/deno-install/**)",
+      "Bash(./deno test *)",
+      "PowerShell(Test-Path *)",
+      "Bash(python3 -m json.tool)",
+      "PowerShell(supabase *)",
+      "Bash(/c/Python314/python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('token_len:', len\\(d.get\\('access_token',''\\)\\)\\); print\\('error:', d.get\\('error','none'\\)\\)\")",
+      "Bash(cat)",
+      "Bash(deno run *)",
+      "Bash(/c/Users/fernando/.deno/bin/deno --version)",
+      "PowerShell(deno --version 2>&1)",
+      "Bash(/c/Users/fernando/AppData/Local/Temp/deno-install/bin/deno.exe *)"
     ]
   }
 }

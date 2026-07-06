@@ -64,7 +64,9 @@
       "Bash(deno run *)",
       "Bash(/c/Users/fernando/.deno/bin/deno --version)",
       "PowerShell(deno --version 2>&1)",
-      "Bash(/c/Users/fernando/AppData/Local/Temp/deno-install/bin/deno.exe *)"
+      "Bash(/c/Users/fernando/AppData/Local/Temp/deno-install/bin/deno.exe *)",
+      "Bash(npx expo-doctor *)",
+      "Bash(findstr splash *)"
     ]
   }
 }

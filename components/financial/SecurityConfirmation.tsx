@@ -51,9 +51,20 @@ export function SecurityConfirmation({
     setLoading(true)
     setFetchErr(false)
     setChallenge(null)
+    // [DIAG] remover antes de publicar
+    console.log('[security] EXPO_PUBLIC_SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL)
+    console.log('[security] EXPO_PUBLIC_SUPABASE_ANON_KEY length:', (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '').length)
     fetchSecurityChallenge(identifier, pinHash)
-      .then(r => { if (r && r.options.length) setChallenge(r); else setFetchErr(true) })
-      .catch(() => setFetchErr(true))
+      .then(r => {
+        // [DIAG] remover antes de publicar
+        console.log('[security] challenge result:', JSON.stringify(r))
+        if (r && r !== 'PIN_SETUP_REQUIRED' && r.options.length) setChallenge(r); else setFetchErr(true)
+      })
+      .catch((err: unknown) => {
+        // [DIAG] remover antes de publicar
+        console.log('[security] fetch error:', JSON.stringify(err))
+        setFetchErr(true)
+      })
       .finally(() => setLoading(false))
   }, [identifier, pinHash])
 

@@ -1,8 +1,8 @@
 import React, { useEffect, useRef } from 'react'
-import { View, StyleSheet } from 'react-native'
+import { AppState, View, StyleSheet } from 'react-native'
 import { Stack, usePathname, router } from 'expo-router'
 import { BottomNav, BottomNavItem } from '../../components/core/BottomNav'
-import { useAuthStore } from '../../store/auth.store'
+import { useAuthStore, isJwtExpired } from '../../store/auth.store'
 
 // Rotas onde o BottomNav deve aparecer
 const NAV_PATHS = new Set(['/', '/atividade', '/achar', '/lounge', '/perfil'])
@@ -40,6 +40,20 @@ export default function AppLayout() {
       router.replace('/(auth)/welcome')
     }
   }, [isAuthenticated, isLoadingSession])
+
+  // Recheca token ao retornar do background
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        const { token } = useAuthStore.getState()
+        if (token && isJwtExpired(token)) {
+          useAuthStore.getState().logout()
+          router.replace('/(auth)/welcome')
+        }
+      }
+    })
+    return () => subscription.remove()
+  }, [])
 
   // Setup de notificações push (expo-notifications indisponível no Expo Go SDK 53+)
   useEffect(() => {

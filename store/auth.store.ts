@@ -5,7 +5,7 @@
 import { create } from 'zustand'
 import * as authService from '../services/auth.service'
 
-function isJwtExpired(token: string): boolean {
+export function isJwtExpired(token: string): boolean {
   try {
     const payload = JSON.parse(atob(token.split('.')[1]))
     return typeof payload.exp === 'number' && payload.exp < Math.floor(Date.now() / 1000)

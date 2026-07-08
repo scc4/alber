@@ -21,7 +21,6 @@ interface HomeHeaderProps {
   onLogoPress?: () => void
   onBell?: () => void
   onAvatarPress?: () => void
-  onDebugLogout?: () => void  // DEBUG ONLY — remover antes do release
 }
 
 interface TitleHeaderProps {
@@ -89,11 +88,7 @@ export function Header(props: HeaderProps) {
             <View style={[styles.bellDot, { backgroundColor: accent }]} />
           )}
         </Pressable>
-        {props.onDebugLogout != null && (
-          <Pressable onPress={props.onDebugLogout} style={styles.debugLogout} hitSlop={8}>
-            <Text style={styles.debugLogoutText}>Sair</Text>
-          </Pressable>
-        )}
+
       </View>
     )
   }
@@ -298,22 +293,7 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
   },
-  // DEBUG ONLY — remover antes do release
-  debugLogout: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.5)',
-    backgroundColor: 'rgba(239,68,68,0.08)',
-  },
-  debugLogoutText: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#EF4444',
-    fontFamily: typography.fontFamily.primary,
-    letterSpacing: 0.3,
-  },
+
 
   // Title / Search
   titleRoot: {

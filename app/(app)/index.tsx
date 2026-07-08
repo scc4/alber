@@ -96,7 +96,7 @@ function resolveBanner(
 
 export default function HomeScreen() {
   const { t } = useTranslation()
-  const { user, kycStatus, accountStatus, logout } = useAuthStore()
+  const { user, kycStatus, accountStatus } = useAuthStore()
   const {
     balance,
     stale,
@@ -172,11 +172,6 @@ export default function HomeScreen() {
 
   const firstName = user?.name?.split(' ')[0] ?? ''
 
-  const handleDebugLogout = async () => {
-    await logout()
-    router.replace('/(auth)/welcome' as never)
-  }
-
   return (
     <View style={[styles.root, { backgroundColor: skin.bgDark }]}>
 
@@ -222,7 +217,6 @@ export default function HomeScreen() {
             console.log('[home] onAvatarPress fired, navigating to perfil')
             router.push('/(app)/perfil' as never)
           }}
-          onDebugLogout={handleDebugLogout}
         />
 
         {/* Banner contextual por prioridade (máx 1 por vez) */}

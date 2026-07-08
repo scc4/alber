@@ -70,6 +70,8 @@ export default function TransferirScreen() {
   const [recentsLoading, setRecentsLoading] = useState(true)
   const [securityWrongAnswer, setSecurityWrongAnswer] = useState(false)
   const [searching, setSearching]                     = useState(false)
+  const [autoResult, setAutoResult]                   = useState<Recipient | null>(null)
+  const [autoSearching, setAutoSearching]             = useState(false)
 
   useEffect(() => {
     if (!token) { setRecentsLoading(false); return }
@@ -101,13 +103,71 @@ export default function TransferirScreen() {
     })()
   }, [token])
 
+  // Debounce auto-search enquanto o usuário digita
+  useEffect(() => {
+    const clean = query.replace('@', '').trim()
+    if (clean.length < 2 || !token) { setAutoResult(null); return }
+    const myHandle = user?.handle?.replace('@', '').toLowerCase()
+    if (myHandle && clean.toLowerCase() === myHandle) { setAutoResult(null); return }
+
+    const timer = setTimeout(async () => {
+      setAutoSearching(true)
+      try {
+        const found = recents.find(
+          r =>
+            r.handle.replace('@', '').toLowerCase().includes(clean.toLowerCase()) ||
+            r.name.toLowerCase().includes(clean.toLowerCase()),
+        )
+        if (found) { setAutoResult(found); return }
+
+        const params = new URLSearchParams({ q: clean })
+        const res = await fetch(`${BFF_URL}/user-search?${params}`, {
+          headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` },
+        })
+        if (!res.ok) { setAutoResult(null); return }
+        const results: Array<{ id: string; name: string; handle: string }> = await res.json()
+        if (!results.length) { setAutoResult(null); return }
+        const first    = results[0]
+        const name     = first.name || first.handle.replace('@', '')
+        const initials = name.split(' ').map((p: string) => p[0]).slice(0, 2).join('').toUpperCase()
+        setAutoResult({ name, handle: first.handle, initials })
+      } catch {
+        setAutoResult(null)
+      } finally {
+        setAutoSearching(false)
+      }
+    }, 400)
+
+    return () => clearTimeout(timer)
+  }, [query, token, recents, user?.handle]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleClose = () => router.back()
 
   // ─── Handlers busca ──────────────────────────────────────────────────────────
 
+  const handleQueryChange = (v: string) => {
+    setNotFound(false)
+    setSelfError(false)
+    setAutoResult(null)
+    // Auto-prefixar @ se parece com handle (não é email, CPF nem telefone)
+    const isEmail = v.includes('@')
+    const isPhone = /^\d/.test(v) || v.startsWith('+')
+    setQuery(!isEmail && !isPhone && v.length > 0 && !v.startsWith('@') ? `@${v}` : v)
+  }
+
+  const handleSelectAutoResult = (r: Recipient) => {
+    setQuery(r.handle)
+    setRecipient(r)
+    setAutoResult(null)
+    setSelfError(false)
+    setNotFound(false)
+    setApiError(null)
+    setStep('value')
+  }
+
   const tryFind = async (q: string) => {
     const clean = q.trim()
-    if (clean.length < 2) return
+    if (clean.replace('@', '').length < 2) return
 
     const myHandle    = user?.handle?.replace('@', '').toLowerCase()
     const inputHandle = clean.replace('@', '').toLowerCase()
@@ -231,7 +291,7 @@ export default function TransferirScreen() {
         <Text style={s.eyebrow}>{t('transferir.searchLabel')}</Text>
         <TextInput
           value={query}
-          onChangeText={v => { setQuery(v); setNotFound(false); setSelfError(false) }}
+          onChangeText={handleQueryChange}
           autoFocus
           placeholder={t('transferir.searchPlaceholder')}
           placeholderTextColor="rgba(255,255,255,0.25)"
@@ -239,7 +299,7 @@ export default function TransferirScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           returnKeyType="search"
-          onSubmitEditing={() => query.length >= 2 && tryFind(query)}
+          onSubmitEditing={() => query.replace('@', '').length >= 2 && tryFind(query)}
           accessibilityLabel={t('transferir.searchLabel')}
         />
 
@@ -251,6 +311,28 @@ export default function TransferirScreen() {
         )}
         {apiError && !selfError && !notFound && (
           <Text style={s.errorText}>{apiError}</Text>
+        )}
+
+        {/* Resultado inline de busca automática */}
+        {autoSearching && (
+          <ActivityIndicator size="small" color="rgba(255,255,255,0.3)" style={s.autoSpinner} />
+        )}
+        {autoResult && !autoSearching && (
+          <Pressable
+            style={({ pressed }) => [s.autoResultCard, pressed && s.pressed]}
+            onPress={() => handleSelectAutoResult(autoResult)}
+            accessibilityRole="button"
+            accessibilityLabel={autoResult.name}
+          >
+            <View style={s.avatar}>
+              <Text style={s.avatarText}>{autoResult.initials}</Text>
+            </View>
+            <View style={s.recentInfo}>
+              <Text style={s.recentName}>{autoResult.name}</Text>
+              <Text style={s.recentHandle}>{autoResult.handle}</Text>
+            </View>
+            <Text style={s.autoResultArrow}>{'›'}</Text>
+          </Pressable>
         )}
 
         <ScrollView
@@ -287,7 +369,7 @@ export default function TransferirScreen() {
         <PrimaryButton
           label={t('transferir.searchCta')}
           onPress={() => tryFind(query)}
-          state={searching ? 'loading' : query.length >= 2 ? 'default' : 'disabled'}
+          state={searching ? 'loading' : query.replace('@', '').length >= 2 ? 'default' : 'disabled'}
         />
       </FlowShell>
     )
@@ -715,6 +797,26 @@ const s = StyleSheet.create({
     color: colors.state.error,
     fontFamily: typography.fontFamily.primary,
     marginBottom: spacing.sm,
+  },
+
+  // Auto-search inline
+  autoSpinner: { marginVertical: spacing.sm },
+  autoResultCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: spacing.radius.md,
+  },
+  autoResultArrow: {
+    fontSize: 20,
+    color: 'rgba(255,255,255,0.4)',
+    fontFamily: typography.fontFamily.primary,
   },
 
   // Recents

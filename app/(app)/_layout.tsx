@@ -29,6 +29,7 @@ export default function AppLayout() {
   const showNav         = NAV_PATHS.has(pathname)
   const active          = getActiveTab(pathname)
   const isAuthenticated = useAuthStore(s => s.isAuthenticated)
+  const user             = useAuthStore(s => s.user)
   const isLoadingSession = useAuthStore(s => s.isLoadingSession)
 
   const notifListener    = useRef<{ remove: () => void } | null>(null)
@@ -36,10 +37,10 @@ export default function AppLayout() {
 
   // Auth guard (spec 01_frontend §4)
   useEffect(() => {
-    if (!isLoadingSession && !isAuthenticated) {
+    if (!isLoadingSession && (!isAuthenticated || !user)) {
       router.replace('/(auth)/welcome')
     }
-  }, [isAuthenticated, isLoadingSession])
+  }, [isAuthenticated, user, isLoadingSession])
 
   // Recheca token ao retornar do background
   useEffect(() => {

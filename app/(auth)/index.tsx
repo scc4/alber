@@ -16,6 +16,7 @@ export default function SplashScreen() {
   const { t }          = useTranslation()
   const insets         = useSafeAreaInsets()
   const loadSession    = useAuthStore(s => s.loadSession)
+  const logout         = useAuthStore(s => s.logout)
   const scale   = useRef(new Animated.Value(0.65)).current
   const opacity = useRef(new Animated.Value(0)).current
 
@@ -35,13 +36,19 @@ export default function SplashScreen() {
     ]).start()
 
     // Restaura sessão do SecureStore; redireciona conforme resultado
-    loadSession().then(() => {
-      const { isAuthenticated, token } = useAuthStore.getState()
-      if (isAuthenticated && token) {
-        registerPushToken(token).catch(() => {})  // best-effort
+    const init = async () => {
+      await loadSession()
+      const { isAuthenticated, token, user } = useAuthStore.getState()
+      if (isAuthenticated && user) {
+        if (token) registerPushToken(token).catch(() => {})  // best-effort
+        router.replace('/(app)/')
+      } else {
+        // Qualquer outro estado (sem sessão ou sessão parcial) → logout limpo e vai para welcome
+        await logout()
+        router.replace('/(auth)/welcome')
       }
-      router.replace(isAuthenticated ? '/(app)/' : '/(auth)/welcome')
-    })
+    }
+    init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

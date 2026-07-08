@@ -88,7 +88,6 @@ export function Header(props: HeaderProps) {
             <View style={[styles.bellDot, { backgroundColor: accent }]} />
           )}
         </Pressable>
-
       </View>
     )
   }
@@ -293,7 +292,6 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
   },
-
 
   // Title / Search
   titleRoot: {

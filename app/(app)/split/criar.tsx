@@ -100,7 +100,7 @@ export default function SplitCriarScreen() {
   }
 
   async function handleCreate() {
-    if (!token) return
+    if (creating || !token) return
     const expiry = draft.linkValidity === 'custom'
       ? new Date(Date.now() + customDays * 86_400_000).toISOString()
       : null
@@ -108,12 +108,9 @@ export default function SplitCriarScreen() {
     setCreating(true)
     try {
       const res = await createSplit(token)
-      setCreatedId(res.split_id)
-      setCreatedInviteUrl(res.invite_url)
-      setStep('share')
+      router.replace(`/(app)/split/${res.split_id}`)
     } catch {
       // error já gravado no store — o usuário vê via error state
-    } finally {
       setCreating(false)
     }
   }

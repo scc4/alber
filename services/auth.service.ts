@@ -184,9 +184,6 @@ export async function fetchSecurityChallenge(
   identifier: string,
   pinHash: string,
 ): Promise<SecurityChallenge | null | 'PIN_SETUP_REQUIRED'> {
-  // [DIAG] remover antes de publicar
-  console.log('[auth-question] bff url:', `${BFF}/auth-question`)
-  console.log('[auth-question] anon_key length:', ANON_KEY.length)
   try {
     const res = await fetch(`${BFF}/auth-question`, {
       method: 'POST',
@@ -202,9 +199,7 @@ export async function fetchSecurityChallenge(
     if (data.pin_setup_required) return 'PIN_SETUP_REQUIRED'
     if (!data.question && !data.options?.length) return null
     return { question: data.question, options: data.options ?? [] }
-  } catch (err) {
-    // [DIAG] remover antes de publicar
-    console.log('[auth-question] network error:', JSON.stringify(err), String(err))
+  } catch {
     return null
   }
 }

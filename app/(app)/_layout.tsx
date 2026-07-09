@@ -30,17 +30,16 @@ export default function AppLayout() {
   const active          = getActiveTab(pathname)
   const isAuthenticated = useAuthStore(s => s.isAuthenticated)
   const user             = useAuthStore(s => s.user)
-  const isLoadingSession = useAuthStore(s => s.isLoadingSession)
 
   const notifListener    = useRef<{ remove: () => void } | null>(null)
   const responseListener = useRef<{ remove: () => void } | null>(null)
 
-  // Auth guard (spec 01_frontend §4)
+  // Auth guard (spec 01_frontend §4) — verifica isAuthenticated e user em tempo real
   useEffect(() => {
-    if (!isLoadingSession && (!isAuthenticated || !user)) {
+    if (!isAuthenticated || !user) {
       router.replace('/(auth)/welcome')
     }
-  }, [isAuthenticated, user, isLoadingSession])
+  }, [isAuthenticated, user])
 
   // Recheca token ao retornar do background
   useEffect(() => {

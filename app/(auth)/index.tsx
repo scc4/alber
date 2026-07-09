@@ -1,22 +1,17 @@
 // Design: /design/auth.jsx — SplashScreen
-// Verifica sessão e redireciona: válida → (app) | sem sessão → welcome
+// Tela puramente visual — a decisão de navegação é feita por app/index.tsx (árbitro único)
 
 import { useEffect, useRef } from 'react'
 import { Animated, StyleSheet, Text, View } from 'react-native'
-import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { AlberLogo } from '../../components/core/AlberLogo'
-import { useAuthStore } from '../../store/auth.store'
-import { registerPushToken } from '../../services/notifications.service'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 
 export default function SplashScreen() {
   const { t }          = useTranslation()
   const insets         = useSafeAreaInsets()
-  const loadSession    = useAuthStore(s => s.loadSession)
-  const logout         = useAuthStore(s => s.logout)
   const scale   = useRef(new Animated.Value(0.65)).current
   const opacity = useRef(new Animated.Value(0)).current
 
@@ -34,21 +29,6 @@ export default function SplashScreen() {
         useNativeDriver: true,
       }),
     ]).start()
-
-    // Restaura sessão do SecureStore; redireciona conforme resultado
-    const init = async () => {
-      await loadSession()
-      const { isAuthenticated, token, user } = useAuthStore.getState()
-      if (isAuthenticated && user) {
-        if (token) registerPushToken(token).catch(() => {})  // best-effort
-        router.replace('/(app)/')
-      } else {
-        // Qualquer outro estado (sem sessão ou sessão parcial) → logout limpo e vai para welcome
-        await logout()
-        router.replace('/(auth)/welcome')
-      }
-    }
-    init()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

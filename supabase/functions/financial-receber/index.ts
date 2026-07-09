@@ -36,23 +36,17 @@ const supabaseAdmin = createClient(
 )
 
 // ── Localizar pagador por @handle, CPF ou telefone ───────────────────────────
+// Handles são persistidos de forma inconsistente entre fluxos (auth-register
+// grava sem "@", perfil-update-handle grava com "@") — o match precisa
+// aceitar identificador com ou sem "@", comparando com o valor com ou sem
+// "@" armazenado no banco (spec §6).
 
 async function findPayer(identifier: string): Promise<UserRow | null> {
-  const clean = identifier.trim()
-
-  if (clean.startsWith('@')) {
-    const { data } = await supabaseAdmin
-      .from('users')
-      .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
-      .ilike('handle', clean.toLowerCase())
-      .maybeSingle()
-    return data
-  }
-
+  const clean  = identifier.trim()
   const digits = clean.replace(/\D/g, '')
 
-  if (digits.length === 11) {
-    // CPF — comparado como SHA-256 (spec §6)
+  // CPF — 11 dígitos e não é e-mail
+  if (digits.length === 11 && !clean.includes('@')) {
     const cpfHash = await sha256hex(normalizeCpf(digits))
     const { data } = await supabaseAdmin
       .from('users')
@@ -62,8 +56,8 @@ async function findPayer(identifier: string): Promise<UserRow | null> {
     return data
   }
 
-  if (digits.length >= 10) {
-    // Telefone — armazenado como dígitos na coluna phone
+  // Telefone — armazenado como dígitos na coluna phone
+  if (digits.length >= 10 && !clean.includes('@')) {
     const { data } = await supabaseAdmin
       .from('users')
       .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
@@ -72,7 +66,14 @@ async function findPayer(identifier: string): Promise<UserRow | null> {
     return data
   }
 
-  return null
+  // Handle — aceita com ou sem "@", independente de como foi persistido
+  const handleNoAt = clean.replace(/^@/, '').toLowerCase()
+  const { data } = await supabaseAdmin
+    .from('users')
+    .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
+    .or(`handle.ilike.${handleNoAt},handle.ilike.@${handleNoAt}`)
+    .maybeSingle()
+  return data
 }
 
 // ── Rate limiting do pagador ─────────────────────────────────────────────────

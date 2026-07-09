@@ -37,23 +37,17 @@ const supabaseAdmin = createClient(
 )
 
 // ── Localizar destinatário por @handle, CPF ou e-mail ────────────────────────
+// Handles são persistidos de forma inconsistente entre fluxos (auth-register
+// grava sem "@", perfil-update-handle grava com "@") — o match precisa
+// aceitar identificador com ou sem "@", comparando com o valor com ou sem
+// "@" armazenado no banco (spec §6).
 
 async function findRecipient(identifier: string): Promise<UserRow | null> {
-  const clean = identifier.trim()
-
-  if (clean.startsWith('@')) {
-    const { data } = await supabaseAdmin
-      .from('users')
-      .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
-      .ilike('handle', clean.toLowerCase())
-      .maybeSingle()
-    return data
-  }
-
+  const clean  = identifier.trim()
   const digits = clean.replace(/\D/g, '')
 
-  if (digits.length === 11) {
-    // CPF — comparado como SHA-256 (spec §6)
+  // CPF — 11 dígitos e não é e-mail
+  if (digits.length === 11 && !clean.includes('@')) {
     const cpfHash = await sha256hex(normalizeCpf(digits))
     const { data } = await supabaseAdmin
       .from('users')
@@ -63,11 +57,22 @@ async function findRecipient(identifier: string): Promise<UserRow | null> {
     return data
   }
 
-  // E-mail (fallback)
+  // E-mail — formato claro usuario@dominio.tld
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+    const { data } = await supabaseAdmin
+      .from('users')
+      .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
+      .ilike('email', clean.toLowerCase())
+      .maybeSingle()
+    return data
+  }
+
+  // Handle — aceita com ou sem "@", independente de como foi persistido
+  const handleNoAt = clean.replace(/^@/, '').toLowerCase()
   const { data } = await supabaseAdmin
     .from('users')
     .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
-    .ilike('email', clean.toLowerCase())
+    .or(`handle.ilike.${handleNoAt},handle.ilike.@${handleNoAt}`)
     .maybeSingle()
   return data
 }

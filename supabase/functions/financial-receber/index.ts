@@ -44,7 +44,7 @@ async function findPayer(identifier: string): Promise<UserRow | null> {
     const { data } = await supabaseAdmin
       .from('users')
       .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
-      .ilike('handle', clean.replace(/^@/, '').toLowerCase())
+      .ilike('handle', clean.toLowerCase())
       .maybeSingle()
     return data
   }

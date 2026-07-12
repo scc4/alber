@@ -30,7 +30,7 @@ import { typography } from '../../../tokens/typography'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-type Step = 1 | 2 | 3 | 'share'
+type Step = 1 | 2 | 'participants' | 3 | 'share'
 
 const VALIDITY_OPTIONS: { id: LinkValidity; key: string }[] = [
   { id: '1h',     key: 'split.criar.validity1h'     },
@@ -38,6 +38,15 @@ const VALIDITY_OPTIONS: { id: LinkValidity; key: string }[] = [
   { id: '7d',     key: 'split.criar.validity7d'     },
   { id: 'custom', key: 'split.criar.validityCustom' },
 ]
+
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
+interface ParticipantResult {
+  id:     string
+  name:   string
+  handle: string
+}
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -73,10 +82,38 @@ export default function SplitCriarScreen() {
   const [copied, setCopied]                 = useState(false)
   const copiedTimer                         = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Convidar participantes (opcional, antes de confirmar a criação)
+  const [participantQuery, setParticipantQuery]     = useState('')
+  const [participantSearching, setParticipantSearching] = useState(false)
+  const [participantResults, setParticipantResults] = useState<ParticipantResult[]>([])
+  const [selectedParticipants, setSelectedParticipants] = useState<ParticipantResult[]>([])
+
   useEffect(() => {
     resetDraft()
     setValueStr('')
+    setSelectedParticipants([])
   }, [])
+
+  useEffect(() => {
+    const clean = participantQuery.trim()
+    if (clean.length < 2 || !token) { setParticipantResults([]); return }
+    setParticipantSearching(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${BFF}/user-search?q=${encodeURIComponent(clean.replace('@', ''))}`,
+          { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } },
+        )
+        const results = await res.json()
+        setParticipantResults(Array.isArray(results) ? results : [])
+      } catch {
+        setParticipantResults([])
+      } finally {
+        setParticipantSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [participantQuery, token])
 
   useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current) }, [])
 
@@ -94,9 +131,28 @@ export default function SplitCriarScreen() {
     setStep(2)
   }
 
-  function goToStep3() {
+  function goToParticipants() {
     updateDraft({ totalValue: parsedValue })
+    setStep('participants')
+  }
+
+  function goToStep3() {
+    updateDraft({ participantHandles: selectedParticipants.map(p => p.handle) })
     setStep(3)
+  }
+
+  const maxInvitable = Math.max(0, draft.participantCount - 1)
+
+  function addParticipant(p: ParticipantResult) {
+    if (selectedParticipants.some(sp => sp.id === p.id)) return
+    if (selectedParticipants.length >= maxInvitable) return
+    setSelectedParticipants(prev => [...prev, p])
+    setParticipantQuery('')
+    setParticipantResults([])
+  }
+
+  function removeParticipant(id: string) {
+    setSelectedParticipants(prev => prev.filter(p => p.id !== id))
   }
 
   async function handleCreate() {
@@ -287,8 +343,101 @@ export default function SplitCriarScreen() {
           <View style={styles.actionArea}>
             <PrimaryButton
               label={t('split.criar.continue')}
-              onPress={goToStep3}
+              onPress={goToParticipants}
               state={parsedValue > 0 ? 'default' : 'disabled'}
+            />
+          </View>
+        </KeyboardAvoidingView>
+      </WizardShell>
+    )
+  }
+
+  if (step === 'participants') {
+    return (
+      <WizardShell
+        title={t('split.criar.title')}
+        subtitle={t('split.criar.participantsStepLabel')}
+        onBack={() => setStep(2)}
+        onClose={() => router.back()}
+        insets={insets}
+      >
+        <KeyboardAvoidingView
+          style={styles.flex}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <ScrollView
+            style={styles.flex}
+            contentContainerStyle={styles.stepContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Eyebrow>{t('split.criar.participantsSearchLabel')}</Eyebrow>
+            <TextInput
+              style={styles.nameInput}
+              value={participantQuery}
+              onChangeText={setParticipantQuery}
+              placeholder={t('split.criar.participantsSearchPlaceholder')}
+              placeholderTextColor="rgba(255,255,255,0.25)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoFocus
+            />
+            <Text style={styles.participantsHint}>
+              {maxInvitable > 0
+                ? t('split.criar.participantsSlotHint', { n: selectedParticipants.length, max: maxInvitable })
+                : t('split.criar.participantsNoSlots')}
+            </Text>
+
+            {participantSearching && (
+              <Text style={styles.participantsHint}>{t('split.criar.participantsSearching')}</Text>
+            )}
+
+            {participantResults.length > 0 && (
+              <View style={styles.resultsList}>
+                {participantResults.map(r => {
+                  const alreadySelected = selectedParticipants.some(sp => sp.id === r.id)
+                  const disabled = alreadySelected || selectedParticipants.length >= maxInvitable
+                  return (
+                    <TouchableOpacity
+                      key={r.id}
+                      onPress={() => addParticipant(r)}
+                      disabled={disabled}
+                      style={[styles.resultRow, disabled && styles.resultRowDisabled]}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.resultInfo}>
+                        <Text style={styles.resultName}>{r.name}</Text>
+                        <Text style={styles.resultHandle}>{r.handle}</Text>
+                      </View>
+                      <Text style={styles.resultAction}>
+                        {alreadySelected ? t('split.criar.participantsAdded') : t('split.criar.participantsAddCta')}
+                      </Text>
+                    </TouchableOpacity>
+                  )
+                })}
+              </View>
+            )}
+
+            {selectedParticipants.length > 0 && (
+              <View style={styles.selectedSection}>
+                <Eyebrow>{t('split.criar.participantsSelectedLabel')}</Eyebrow>
+                <View style={styles.chipsRow}>
+                  {selectedParticipants.map(p => (
+                    <View key={p.id} style={styles.chip}>
+                      <Text style={styles.chipText} numberOfLines={1}>{p.handle}</Text>
+                      <TouchableOpacity onPress={() => removeParticipant(p.id)} hitSlop={8}>
+                        <Text style={styles.chipRemove}>✕</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+          </ScrollView>
+
+          <View style={styles.actionArea}>
+            <PrimaryButton
+              label={t('split.criar.continue')}
+              onPress={goToStep3}
             />
           </View>
         </KeyboardAvoidingView>
@@ -301,7 +450,7 @@ export default function SplitCriarScreen() {
       <WizardShell
         title={t('split.criar.validityLabel')}
         subtitle={t('split.criar.step3Label')}
-        onBack={() => setStep(2)}
+        onBack={() => setStep('participants')}
         onClose={() => router.back()}
         insets={insets}
       >
@@ -699,6 +848,84 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
     lineHeight: 15,
     marginTop: 2,
+  },
+
+  // Step participants — Convidar
+  participantsHint: {
+    fontSize: 11.5,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: spacing.sm,
+  },
+  resultsList: {
+    marginTop: spacing.md,
+    borderRadius: spacing.radius.md,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  resultRowDisabled: {
+    opacity: 0.4,
+  },
+  resultInfo: { flex: 1 },
+  resultName: {
+    fontSize: 13,
+    fontWeight: '500',
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
+  },
+  resultHandle: {
+    fontSize: 11.5,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 1,
+  },
+  resultAction: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
+    color: TEAL,
+  },
+  selectedSection: {
+    marginTop: 24,
+  },
+  chipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: TEAL_BG,
+    borderWidth: 0.5,
+    borderColor: TEAL_BORDER,
+    maxWidth: 160,
+  },
+  chipText: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
+    flexShrink: 1,
+  },
+  chipRemove: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.5)',
   },
 
   // Step 3 — Validity

@@ -1,10 +1,12 @@
 // Spec: /specs/06_modules/achar.md
 // GET /user-search?q={query}
-// Busca usuários por @handle (ILIKE) ou nome (ILIKE).
+// Busca usuários por @handle (ILIKE), nome (ILIKE) ou CPF (match exato via hash).
 // Exclui o próprio usuário. Mínimo 2 chars. Máximo 10 resultados.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
+import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
+import { sha256hex } from '../_shared/crypto.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -41,8 +43,31 @@ Deno.serve(async (req: Request) => {
 
   // ── Query param ─────────────────────────────────────────────────────────────
 
-  const url = new URL(req.url)
-  const raw = (url.searchParams.get('q') ?? '').trim().replace(/^@/, '').toLowerCase()
+  const url      = new URL(req.url)
+  const rawQuery = url.searchParams.get('q') ?? ''
+  const digits   = rawQuery.replace(/\D/g, '')
+
+  // CPF — 11 dígitos válidos → match exato via hash (CPF nunca é ILIKE-buscável)
+  if (digits.length === 11 && validateCpf(digits)) {
+    const cpfHash = await sha256hex(normalizeCpf(digits))
+    const { data: user, error: cpfErr } = await supabaseAdmin
+      .from('users')
+      .select('id, name, handle, kyc_status, created_at')
+      .eq('cpf', cpfHash)
+      .neq('id', caller.id)
+      .maybeSingle()
+
+    if (cpfErr) return err('DB_ERROR', 'Erro ao buscar usuários', 500)
+    return json(user ? [{
+      id:           user.id,
+      name:         user.name,
+      handle:       user.handle,
+      kyc_status:   user.kyc_status,
+      member_since: formatMemberSince(user.created_at),
+    }] : [])
+  }
+
+  const raw = rawQuery.trim().replace(/^@/, '').toLowerCase()
 
   if (raw.length < 2) {
     return json([])

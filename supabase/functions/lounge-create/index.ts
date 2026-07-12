@@ -1,6 +1,6 @@
 // Spec: /specs/06_modules/alber_lounge.md § 4 "Criar Lounge"
 // POST /lounge-create
-// Autentica JWT → verifica limite 1 lounge ativo → INSERT spaces + space_members
+// Autentica JWT → INSERT spaces + space_members (usuário pode ter múltiplos lounges como dono)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
@@ -61,18 +61,6 @@ Deno.serve(async (req: Request) => {
     .maybeSingle()
 
   if (!user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
-
-  // ── Verificar limite: 1 lounge ativo por usuário ────────────────────────────
-
-  const { count } = await supabaseAdmin
-    .from('spaces')
-    .select('id', { count: 'exact', head: true })
-    .eq('owner_id', user.id)
-    .eq('status', 'active')
-
-  if ((count ?? 0) > 0) {
-    return err('LIMIT_REACHED', 'Você já possui um Lounge ativo', 422)
-  }
 
   // ── Gerar invite_token para lounges privados ─────────────────────────────────
 

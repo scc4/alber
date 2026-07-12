@@ -37,13 +37,9 @@ export default function LoungeIndexScreen() {
   const error              = useLoungeStore(s => s.error)
   const fetchMyLounges     = useLoungeStore(s => s.fetchMyLounges)
   const fetchExploring     = useLoungeStore(s => s.fetchExploring)
-  const hasActiveLoungeAsOwner = useLoungeStore(s => s.hasActiveLoungeAsOwner)
 
   const [tab, setTab]           = useState<Tab>('mine')
   const [query, setQuery]       = useState('')
-  const [tooltip, setTooltip]   = useState(false)
-
-  const isOwner = hasActiveLoungeAsOwner()
 
   useEffect(() => {
     if (token) fetchMyLounges(token)
@@ -54,13 +50,8 @@ export default function LoungeIndexScreen() {
   }, [tab, query, token])
 
   const handleCreate = useCallback(() => {
-    if (isOwner) {
-      setTooltip(true)
-      setTimeout(() => setTooltip(false), 2500)
-    } else {
-      router.push('/(app)/lounge/criar')
-    }
-  }, [isOwner])
+    router.push('/(app)/lounge/criar')
+  }, [])
 
   const openLounge = useCallback((id: string) => {
     router.push(`/(app)/lounge/${id}`)
@@ -118,22 +109,15 @@ export default function LoungeIndexScreen() {
             <TouchableOpacity
               onPress={handleCreate}
               activeOpacity={0.8}
-              style={[styles.createBtn, isOwner && styles.createBtnDisabled]}
+              style={styles.createBtn}
               accessibilityRole="button"
               accessibilityLabel={t('lounge.createCta')}
             >
-              <PlusIcon disabled={isOwner} />
-              <Text style={[styles.createBtnText, isOwner && styles.createBtnTextDisabled]}>
+              <PlusIcon />
+              <Text style={styles.createBtnText}>
                 {t('lounge.createCta')}
               </Text>
-              {isOwner && <LockIcon />}
             </TouchableOpacity>
-
-            {tooltip && (
-              <View style={styles.tooltip}>
-                <Text style={styles.tooltipText}>{t('lounge.createDisabledTooltip')}</Text>
-              </View>
-            )}
           </View>
         )}
 
@@ -223,21 +207,11 @@ const sectionLabelStyle: import('react-native').TextStyle = {
 
 // ─── Inline icons (SVG-free RN equivalents) ───────────────────────────────────
 
-function PlusIcon({ disabled }: { disabled: boolean }) {
-  const color = disabled ? 'rgba(255,255,255,0.3)' : colors.white[100]
+function PlusIcon() {
   return (
     <View style={{ width: 14, height: 14, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ position: 'absolute', width: 14, height: 1.4, backgroundColor: color, borderRadius: 1 }} />
-      <View style={{ position: 'absolute', width: 1.4, height: 14, backgroundColor: color, borderRadius: 1 }} />
-    </View>
-  )
-}
-
-function LockIcon() {
-  return (
-    <View style={{ width: 12, height: 12, alignItems: 'center', justifyContent: 'center', opacity: 0.5 }}>
-      <View style={[lockStyles.shackle]} />
-      <View style={lockStyles.body} />
+      <View style={{ position: 'absolute', width: 14, height: 1.4, backgroundColor: colors.white[100], borderRadius: 1 }} />
+      <View style={{ position: 'absolute', width: 1.4, height: 14, backgroundColor: colors.white[100], borderRadius: 1 }} />
     </View>
   )
 }
@@ -250,23 +224,6 @@ function SearchIcon() {
     </View>
   )
 }
-
-const lockStyles = StyleSheet.create({
-  shackle: {
-    width: 7, height: 5,
-    borderTopLeftRadius: 4, borderTopRightRadius: 4,
-    borderWidth: 1.1,
-    borderBottomWidth: 0,
-    borderColor: 'rgba(255,255,255,0.5)',
-    marginBottom: -1,
-  },
-  body: {
-    width: 9, height: 5.5,
-    borderRadius: 1.5,
-    borderWidth: 1.1,
-    borderColor: 'rgba(255,255,255,0.5)',
-  },
-})
 
 const searchIconStyles = StyleSheet.create({
   circle: {
@@ -367,41 +324,12 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     borderColor: 'rgba(255,255,255,0.25)',
   },
-  createBtnDisabled: {
-    backgroundColor: 'rgba(255,255,255,0.025)',
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
   createBtnText: {
     fontSize: 13.5,
     fontFamily: typography.fontFamily.primary,
     fontWeight: '500',
     color: colors.white[100],
     letterSpacing: 13.5 * 0.01,
-  },
-  createBtnTextDisabled: {
-    color: 'rgba(255,255,255,0.35)',
-  },
-
-  // Tooltip
-  tooltip: {
-    position: 'absolute',
-    top: '100%',
-    left: 0,
-    right: 0,
-    marginTop: 6,
-    padding: 10,
-    backgroundColor: '#1a1a1a',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 8,
-    zIndex: 10,
-  },
-  tooltipText: {
-    fontSize: 11.5,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.85)',
-    textAlign: 'center',
-    lineHeight: 16,
   },
 
   // States

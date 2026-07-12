@@ -78,6 +78,7 @@ function PinStep({ eyebrow, title, mode = 'secure', error, onComplete }: PinStep
 // ── PixInputStep ──────────────────────────────────────────────────────────────
 
 interface PixInputStepProps {
+  error?:    string | null
   onConfirm: (pixKey: string, pixKeyType: PixKeyType) => void
 }
 
@@ -88,14 +89,25 @@ const PIX_TYPES: { type: PixKeyType; label: string }[] = [
   { type: 'random', label: 'Chave aleatória' },
 ]
 
-function PixInputStep({ onConfirm }: PixInputStepProps) {
+// Espelha a validação de supabase/functions/perfil-update-pix/index.ts (isValidPixKey)
+// para não deixar o usuário passar por PIN + segurança só pra ser rejeitado no fim.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const PHONE_RE = /^\+?[\d\s()-]{10,15}$/
+
+function PixInputStep({ error, onConfirm }: PixInputStepProps) {
   const { t }                    = useTranslation()
   const [pixKey, setPixKey]      = useState('')
   const [pixType, setPixType]    = useState<PixKeyType>('cpf')
 
-  const canSubmit = pixType === 'cpf'
-    ? validateCPF(pixKey) && pixKey.replace(/\D/g, '').length === 11
-    : pixKey.trim().length >= 5
+  const canSubmit = (() => {
+    const trimmed = pixKey.trim()
+    switch (pixType) {
+      case 'cpf':    return validateCPF(pixKey) && pixKey.replace(/\D/g, '').length === 11
+      case 'email':  return EMAIL_RE.test(trimmed)
+      case 'phone':  return PHONE_RE.test(trimmed)
+      case 'random': return trimmed.length > 10
+    }
+  })()
 
   const handleTypeChange = (type: PixKeyType) => {
     setPixType(type)
@@ -120,6 +132,8 @@ function PixInputStep({ onConfirm }: PixInputStepProps) {
         <Text style={styles.stepEyebrow}>{t('perfil.seguranca.sectionPix')}</Text>
         <Text style={styles.stepTitle}>{t('perfil.seguranca.pixNewTitle')}</Text>
         <Text style={styles.pixWithdrawalNote}>{t('perfil.seguranca.pixWithdrawalNote')}</Text>
+
+        {error && <Text style={styles.errorText}>{error}</Text>}
 
         <Text style={styles.fieldLabel}>{t('perfil.seguranca.pixKeyType')}</Text>
         <View style={styles.pixTypeRow}>
@@ -317,6 +331,7 @@ export default function SegurancaScreen() {
   const [pixKey, setPixKey]                     = useState('')
   const [pixKeyType, setPixKeyType]             = useState<PixKeyType>('cpf')
   const [pixPinHash, setPixPinHash]             = useState('')
+  const [pixInputError, setPixInputError]       = useState<string | null>(null)
   const [pixSecurityError, setPixSecurityError] = useState<string | null>(null)
   const [pixWrongAnswer, setPixWrongAnswer]     = useState(false)
 
@@ -448,6 +463,7 @@ export default function SegurancaScreen() {
   const handlePixInput = (key: string, type: PixKeyType) => {
     setPixKey(key)
     setPixKeyType(type)
+    setPixInputError(null)
     setMode('pix_pin')
   }
 
@@ -471,6 +487,7 @@ export default function SegurancaScreen() {
         }),
       })
       const data = await res.json()
+      console.log(`[perfil-update-pix] HTTP ${res.status}`, JSON.stringify(data))
 
       if (!res.ok) {
         if (data.code === 'WRONG_SECURITY_ANSWER' || data.code === 'INVALID_CREDENTIALS') {
@@ -480,6 +497,9 @@ export default function SegurancaScreen() {
           }
           setPixWrongAnswer(true)
           setTimeout(() => setPixWrongAnswer(false), 1800)
+        } else if (data.code === 'INVALID_PIX_KEY' || data.code === 'INVALID_PIX_TYPE') {
+          setPixInputError(data.message ?? t('common.genericError'))
+          setMode('pix_input')
         } else {
           setPixSecurityError(data.message ?? t('common.genericError'))
         }
@@ -487,7 +507,8 @@ export default function SegurancaScreen() {
       }
 
       setMode('pix_success')
-    } catch {
+    } catch (e) {
+      console.log('[perfil-update-pix] network error', e)
       setPixSecurityError(t('common.genericError'))
     } finally {
       setSubmitting(false)
@@ -567,7 +588,7 @@ export default function SegurancaScreen() {
       )}
 
       {mode === 'pix_input' && (
-        <PixInputStep onConfirm={handlePixInput} />
+        <PixInputStep error={pixInputError} onConfirm={handlePixInput} />
       )}
 
       {mode === 'pix_pin' && (
@@ -581,6 +602,7 @@ export default function SegurancaScreen() {
 
       {mode === 'pix_security' && (
         <View style={styles.flex}>
+          {pixSecurityError && <Text style={[styles.errorText, styles.pixSecurityErrorSpacing]}>{pixSecurityError}</Text>}
           <SecurityConfirmation
             identifier={`@${user.handle}`}
             pinHash={pixPinHash}
@@ -803,6 +825,10 @@ const styles = StyleSheet.create({
     ...typography.size.caption,
     color: colors.state.error,
     marginBottom: spacing.sm,
+  },
+  pixSecurityErrorSpacing: {
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.lg,
   },
   successWrap: {
     flex: 1,

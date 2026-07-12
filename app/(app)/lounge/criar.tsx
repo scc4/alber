@@ -44,7 +44,6 @@ export default function LoungeCreateScreen() {
   const userId                 = useAuthStore(s => s.user?.id ?? '')
   const createLounge           = useLoungeStore(s => s.createLounge)
   const fetchLounge            = useLoungeStore(s => s.fetchLounge)
-  const hasActiveLoungeAsOwner = useLoungeStore(s => s.hasActiveLoungeAsOwner)
 
   const [step, setStep]             = useState<Step>(1)
   const [name, setName]             = useState('')
@@ -54,8 +53,6 @@ export default function LoungeCreateScreen() {
   const [imageUri, setImageUri]       = useState<string | null>(null)
   const [creating, setCreating]       = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
-
-  const isOwner = hasActiveLoungeAsOwner()
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
 
@@ -104,13 +101,6 @@ export default function LoungeCreateScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {/* Disabled banner */}
-            {isOwner && (
-              <View style={styles.disabledBanner}>
-                <Text style={styles.disabledBannerText}>{t('lounge.createDisabledTooltip')}</Text>
-              </View>
-            )}
-
             <Eyebrow>{t('lounge.criar.nameLabel')}</Eyebrow>
             <TextInput
               style={styles.nameInput}
@@ -119,8 +109,7 @@ export default function LoungeCreateScreen() {
               placeholder={t('lounge.criar.namePlaceholder')}
               placeholderTextColor="rgba(255,255,255,0.25)"
               maxLength={40}
-              autoFocus={!isOwner}
-              editable={!isOwner}
+              autoFocus
               returnKeyType="next"
             />
             <Text style={styles.counter}>{t('lounge.criar.nameCounter', { n: name.length })}</Text>
@@ -135,7 +124,6 @@ export default function LoungeCreateScreen() {
                 placeholderTextColor="rgba(255,255,255,0.25)"
                 maxLength={240}
                 multiline
-                editable={!isOwner}
                 textAlignVertical="top"
               />
               <Text style={styles.counter}>{t('lounge.criar.descCounter', { n: desc.length })}</Text>
@@ -146,7 +134,7 @@ export default function LoungeCreateScreen() {
             <PrimaryButton
               label={t('lounge.criar.continue')}
               onPress={() => setStep(2)}
-              state={isOwner || name.trim().length < 3 ? 'disabled' : 'default'}
+              state={name.trim().length < 3 ? 'disabled' : 'default'}
             />
           </View>
         </KeyboardAvoidingView>
@@ -325,20 +313,6 @@ const styles = StyleSheet.create({
   },
 
   // Step 1
-  disabledBanner: {
-    padding: 12,
-    backgroundColor: 'rgba(239,68,68,0.07)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(239,68,68,0.25)',
-    borderRadius: 10,
-    marginBottom: spacing.md,
-  },
-  disabledBannerText: {
-    fontSize: 12.5,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(239,68,68,0.85)',
-    lineHeight: 18,
-  },
   nameInput: {
     marginTop: 8,
     paddingVertical: 10,

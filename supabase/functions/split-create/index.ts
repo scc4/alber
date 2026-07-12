@@ -8,13 +8,15 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt } from '../_shared/crypto.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface CreateRequest {
-  name:              string
-  type:              'fixed' | 'variable'
-  target_amount:     number
-  max_participants:  number   // inclui o dono; mínimo 2
-  invite_expires_at: string   // ISO timestamp
+  name:                string
+  type:                'fixed' | 'variable'
+  target_amount:       number
+  max_participants:    number   // inclui o dono; mínimo 2
+  invite_expires_at:   string   // ISO timestamp
+  participant_handles?: string[] // pré-convite opcional — só dispara notificação, não registra participante
 }
 
 const supabaseAdmin = createClient(
@@ -47,7 +49,7 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { name, type, target_amount, max_participants, invite_expires_at } = body
+  const { name, type, target_amount, max_participants, invite_expires_at, participant_handles } = body
 
   if (!name?.trim())
     return err('MISSING_FIELDS', 'Nome do split é obrigatório', 400)
@@ -177,5 +179,51 @@ Deno.serve(async (req: Request) => {
 
   const inviteUrl = `alber://split/convite/${inviteToken}`
 
-  return json({ split_id: splitId, invite_token: inviteToken, invite_url: inviteUrl }, 201)
+  // ── Pré-convite por handle (opcional) ─────────────────────────────────────────
+  // Só notifica — não insere em split_participants, pois split-join rejeita
+  // qualquer usuário que já tenha uma linha ali (qualquer status), o que travaria
+  // o convidado de verdade entrar depois.
+
+  const invitedHandles:  string[] = []
+  const notFoundHandles: string[] = []
+
+  if (Array.isArray(participant_handles) && participant_handles.length > 0) {
+    const ownerHandleNoAt = (owner.handle ?? '').replace(/^@/, '').toLowerCase()
+    const seen = new Set<string>([ownerHandleNoAt])
+    const cap = Math.max(0, max_participants - 1)
+
+    const uniqueHandles = participant_handles
+      .map(h => (h ?? '').replace(/^@/, '').toLowerCase().trim())
+      .filter(h => h.length > 0 && !seen.has(h) && seen.add(h))
+      .slice(0, cap)
+
+    for (const handleNoAt of uniqueHandles) {
+      const { data: invitee } = await supabaseAdmin
+        .from('users')
+        .select('id, handle')
+        .or(`handle.ilike.${handleNoAt},handle.ilike.@${handleNoAt}`)
+        .maybeSingle()
+
+      if (!invitee) {
+        notFoundHandles.push(handleNoAt)
+        continue
+      }
+
+      invitedHandles.push(invitee.handle)
+      sendPush(
+        invitee.id,
+        'Convite para Split',
+        `${owner.handle} te convidou pro split "${name.trim()}"`,
+        { route: `/(app)/split/convite/${inviteToken}` },
+      ).catch(() => {})
+    }
+  }
+
+  return json({
+    split_id:           splitId,
+    invite_token:       inviteToken,
+    invite_url:         inviteUrl,
+    invited_handles:    invitedHandles,
+    not_found_handles:  notFoundHandles,
+  }, 201)
 })

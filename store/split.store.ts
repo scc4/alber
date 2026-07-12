@@ -52,12 +52,13 @@ export interface Split {
 }
 
 export interface SplitDraft {
-  name:             string
-  type:             SplitType | null
-  totalValue:       number
-  participantCount: number
-  linkValidity:     LinkValidity
-  customExpiry:     string | null
+  name:                string
+  type:                SplitType | null
+  totalValue:          number
+  participantCount:    number
+  linkValidity:        LinkValidity
+  customExpiry:        string | null
+  participantHandles:  string[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -80,12 +81,13 @@ function errorMessage(e: unknown, fallback: string): string {
 // ─── Estado inicial ───────────────────────────────────────────────────────────
 
 const DRAFT_INITIAL: SplitDraft = {
-  name:             '',
-  type:             null,
-  totalValue:       0,
-  participantCount: 2,
-  linkValidity:     '24h',
-  customExpiry:     null,
+  name:                '',
+  type:                null,
+  totalValue:          0,
+  participantCount:    2,
+  linkValidity:        '24h',
+  customExpiry:        null,
+  participantHandles:  [],
 }
 
 // ─── Interface ────────────────────────────────────────────────────────────────
@@ -204,11 +206,12 @@ export const useSplitStore = create<SplitState>((set, get) => ({
     try {
       const res = await splitService.createSplit(
         {
-          name:              draft.name.trim(),
-          type:              draft.type ?? 'fixed',
-          target_amount:     draft.totalValue,
-          max_participants:  draft.participantCount,
-          invite_expires_at: expiryFromValidity(draft.linkValidity, draft.customExpiry),
+          name:                draft.name.trim(),
+          type:                draft.type ?? 'fixed',
+          target_amount:       draft.totalValue,
+          max_participants:    draft.participantCount,
+          invite_expires_at:   expiryFromValidity(draft.linkValidity, draft.customExpiry),
+          participant_handles: draft.participantHandles,
         },
         token,
       )

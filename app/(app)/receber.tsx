@@ -18,12 +18,12 @@ import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { PINInput } from '../../components/financial/PINInput'
+import { SecurityConfirmation } from '../../components/financial/SecurityConfirmation'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
 import { receber, ReceberResponse } from '../../services/financial.service'
 import { BffError } from '../../services/auth.service'
-import { sha256Hex, normalizeSecurityAnswer } from '../../utils/crypto'
 import { formatAlbers } from '../../utils/format'
 import { maskAlbers, parseAlbers } from '../../utils/currency'
 import { colors } from '../../tokens/colors'
@@ -32,9 +32,8 @@ import { typography } from '../../tokens/typography'
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const BFF          = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
-const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
-const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -45,11 +44,6 @@ interface Payer {
   handle: string
   maskedCpf: string
   initials: string
-}
-
-interface PayerQuestion {
-  id:       string
-  question: string
 }
 
 const MAX_ATTEMPTS = 3
@@ -71,12 +65,7 @@ export default function ReceberScreen() {
   const [apiError, setApiError]       = useState<string | null>(null)
   const [pinAttempts, setPinAttempts] = useState(0)
   const [receberResult, setReceberResult] = useState<ReceberResponse | null>(null)
-
-  // Perguntas de segurança do pagador (somente texto — answer_hash nunca exposto)
-  const [payerQuestions, setPayerQuestions]   = useState<PayerQuestion[]>([])
-  const [pickedQuestion, setPickedQuestion]   = useState<PayerQuestion | null>(null)
-  const [securityAnswer, setSecurityAnswer]   = useState('')
-  const [securitySubmitting, setSecuritySubmitting] = useState(false)
+  const [securityWrongAnswer, setSecurityWrongAnswer] = useState(false)
 
   const [recents, setRecents]               = useState<{ name: string; handle: string; initials: string }[]>([])
   const [recentsLoading, setRecentsLoading] = useState(true)
@@ -146,14 +135,6 @@ export default function ReceberScreen() {
         (u: { handle?: string }) => u.handle?.replace('@', '').toLowerCase() === cleanLower,
       ) ?? results[0]
 
-      // Buscar perguntas de segurança do pagador (answer_hash inacessível por RLS)
-      const qRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/security_questions?user_id=eq.${found.id}&select=id,question,position`,
-        { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } },
-      )
-      const questions = await qRes.json()
-      setPayerQuestions(Array.isArray(questions) ? questions : [])
-
       const initials = (found.name as string)
         .split(' ')
         .map((w: string) => w[0] ?? '')
@@ -176,11 +157,6 @@ export default function ReceberScreen() {
     setPayerPinHash(hash)
     setPinError(null)
     setApiError(null)
-    // Sorteia uma pergunta aleatória do pagador para o passo de segurança
-    if (payerQuestions.length > 0) {
-      setPickedQuestion(payerQuestions[Math.floor(Math.random() * payerQuestions.length)])
-    }
-    setSecurityAnswer('')
     setTimeout(() => setStep('security'), 300)
   }
 
@@ -199,6 +175,10 @@ export default function ReceberScreen() {
           setStep('identify')
         } else if (e.code === 'INSUFFICIENT_BALANCE') {
           setStep('insufficient')
+        } else if (e.code === 'WRONG_SECURITY_ANSWER') {
+          setSecurityWrongAnswer(true)
+          setTimeout(() => setSecurityWrongAnswer(false), 1800)
+          setStep('security')
         } else if (e.code === 'INVALID_CREDENTIALS') {
           setPinError(t('receber.errorInvalidCredentials'))
           setPayerPinHash(null)
@@ -422,20 +402,7 @@ export default function ReceberScreen() {
 
   // ─── Etapa 5: Confirmação de segurança (pergunta real do pagador) ─────────────
 
-  if (step === 'security') {
-    const canSubmit = securityAnswer.trim().length >= 2 && !securitySubmitting
-
-    const handleSubmitSecurity = async () => {
-      if (!securityAnswer.trim() || !payerPinHash || !token) return
-      setSecuritySubmitting(true)
-      try {
-        const hash = await sha256Hex(normalizeSecurityAnswer(securityAnswer))
-        await handleSecurityPass(hash)
-      } finally {
-        setSecuritySubmitting(false)
-      }
-    }
-
+  if (step === 'security' && payer && payerPinHash) {
     return (
       <KeyboardAvoidingView
         style={s.flex}
@@ -447,34 +414,13 @@ export default function ReceberScreen() {
           onClose={() => setStep('pin')}
           closeLabel={t('receber.back')}
         >
-          <Text style={s.pinContext}>{t('auth.security.header')}</Text>
-          <Text style={s.pinSubtitle}>{t('auth.security.title')}</Text>
-
-          {pickedQuestion ? (
-            <>
-              <Text style={s.securityQuestion}>{pickedQuestion.question}</Text>
-              <TextInput
-                style={s.securityInput}
-                value={securityAnswer}
-                onChangeText={setSecurityAnswer}
-                placeholder={t('auth.login.securityAnswerPlaceholder')}
-                placeholderTextColor="rgba(255,255,255,0.25)"
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="done"
-                onSubmitEditing={canSubmit ? handleSubmitSecurity : undefined}
-              />
-              <Text style={s.securityHint}>{t('auth.login.securityHint')}</Text>
-            </>
-          ) : (
-            <Text style={s.notFoundText}>Perguntas de segurança não disponíveis.</Text>
-          )}
-
-          <View style={s.spacer} />
-          <PrimaryButton
-            label={securitySubmitting ? t('receber.processing') : t('receber.requestCta')}
-            onPress={handleSubmitSecurity}
-            state={canSubmit ? 'default' : 'disabled'}
+          <SecurityConfirmation
+            identifier={payer.handle}
+            pinHash={payerPinHash}
+            eyebrow={t('receber.securityContext')}
+            title={t('receber.securitySubtitle', { name: payer.name })}
+            wrongAnswer={securityWrongAnswer}
+            onPass={handleSecurityPass}
           />
         </FlowShell>
       </KeyboardAvoidingView>
@@ -923,31 +869,6 @@ const s = StyleSheet.create({
     color: colors.warning[500],
     fontFamily: typography.fontFamily.primary,
     marginBottom: spacing.md,
-  },
-
-  // Security step
-  securityQuestion: {
-    fontSize: typography.size.body.fontSize,
-    color: colors.white[100],
-    fontFamily: typography.fontFamily.primary,
-    lineHeight: typography.size.body.lineHeight,
-    marginBottom: spacing.lg,
-  },
-  securityInput: {
-    width: '100%',
-    borderBottomWidth: 0.5,
-    borderBottomColor: 'rgba(255,255,255,0.18)',
-    paddingVertical: spacing.sm + 2,
-    fontSize: 18,
-    color: colors.white[100],
-    fontFamily: typography.fontFamily.primary,
-    marginBottom: spacing.sm,
-  },
-  securityHint: {
-    fontSize: typography.size.caption.fontSize,
-    color: 'rgba(255,255,255,0.35)',
-    fontFamily: typography.fontFamily.primary,
-    lineHeight: typography.size.caption.lineHeight,
   },
 
   // Insufficient

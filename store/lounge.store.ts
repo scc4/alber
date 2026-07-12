@@ -96,7 +96,6 @@ interface LoungeState {
   // Queries
   getLoungeById:          (id: string) => Lounge | undefined
   getEventById:           (id: string) => { event: LoungeEvent; lounge: Lounge } | undefined
-  hasActiveLoungeAsOwner: () => boolean
 
   // Fetch
   fetchMyLounges:  (token: string) => Promise<void>
@@ -150,9 +149,6 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     }
     return undefined
   },
-
-  hasActiveLoungeAsOwner: () =>
-    get().myLounges.some(l => l.role === 'owner'),
 
   // ── Fetch ─────────────────────────────────────────────────────────────────────
 

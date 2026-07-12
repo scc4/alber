@@ -53,6 +53,7 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!isValidPixKey(pix_key, pix_key_type as PixKeyType)) {
+    console.error('[perfil-update-pix] INVALID_PIX_KEY', { pix_key_type, pix_key_len: pix_key.length })
     return err('INVALID_PIX_KEY', 'Chave Pix inválida para o tipo informado', 400)
   }
 

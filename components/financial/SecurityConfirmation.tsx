@@ -25,6 +25,9 @@ export interface SecurityConfirmationProps {
   pinHash: string
   /** Texto do eyebrow opcional acima da pergunta. */
   eyebrow?: string
+  /** Sobrescreve o título padrão ("Confirme sua identidade") — usar quando quem confirma
+   *  não é o usuário logado (ex.: pagador em Receber). */
+  title?: string
   /** Passa true enquanto o caller está submetendo ao backend — desabilita opções. */
   submitting?: boolean
   /** Passa true brevemente quando o backend rejeita a resposta (WRONG_SECURITY_ANSWER). */
@@ -37,6 +40,7 @@ export function SecurityConfirmation({
   identifier,
   pinHash,
   eyebrow,
+  title,
   submitting,
   wrongAnswer,
   onPass,
@@ -47,16 +51,30 @@ export function SecurityConfirmation({
   const [fetchErr, setFetchErr]   = useState(false)
   const shakeX = React.useRef(new Animated.Value(0)).current
 
+  // auth-question sorteia 1 das 4 perguntas a cada chamada — duas requisições em
+  // paralelo (ex.: retry duplo por rede lenta) podem trazer perguntas/opções
+  // diferentes. Sem esse guard, a resposta mais lenta podia sobrescrever a mais
+  // rápida e trocar as opções embaixo do dedo do usuário no meio do toque.
+  const requestId = React.useRef(0)
+
   const load = useCallback(() => {
+    const myRequestId = ++requestId.current
     setLoading(true)
     setFetchErr(false)
     setChallenge(null)
     fetchSecurityChallenge(identifier, pinHash)
       .then(r => {
+        if (myRequestId !== requestId.current) return // resposta obsoleta — ignorar
         if (r && r !== 'PIN_SETUP_REQUIRED' && r.options.length) setChallenge(r); else setFetchErr(true)
       })
-      .catch(() => setFetchErr(true))
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (myRequestId !== requestId.current) return
+        setFetchErr(true)
+      })
+      .finally(() => {
+        if (myRequestId !== requestId.current) return
+        setLoading(false)
+      })
   }, [identifier, pinHash])
 
   useEffect(() => { load() }, [load])
@@ -98,7 +116,7 @@ export function SecurityConfirmation({
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
       {eyebrow && <Text style={styles.eyebrow}>{eyebrow}</Text>}
-      <Text style={styles.title}>{t('auth.security.title')}</Text>
+      <Text style={styles.title}>{title ?? t('auth.security.title')}</Text>
       <Text style={styles.question}>{challenge.question}</Text>
       <Text style={styles.hint}>{t('auth.login.securityChooseHint')}</Text>
 

@@ -8,6 +8,7 @@ import {
   Alert,
   Image,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -115,7 +116,11 @@ export default function LoungeDetailScreen() {
   }
 
   async function handleSetPrimary(val: boolean) {
-    if (!lounge || !token || !val) return
+    if (!lounge || !token) return
+    if (!val) {
+      Alert.alert(t('lounge.primaryUnsetTitle'), t('lounge.primaryUnsetBody'))
+      return
+    }
     try {
       await setPrimaryLounge(lounge.id, token)
     } catch (e: any) {
@@ -167,6 +172,14 @@ export default function LoungeDetailScreen() {
         },
       ],
     )
+  }
+
+  function handleInvite() {
+    if (!lounge) return
+    const message = lounge.inviteToken
+      ? t('lounge.inviteShareMessage', { name: lounge.name, url: `alber://lounge/convite/${lounge.inviteToken}` })
+      : t('lounge.inviteShareMessagePublic', { name: lounge.name })
+    Share.share({ message, title: lounge.name })
   }
 
   function handleEventPress(eventId: string) {
@@ -247,7 +260,7 @@ export default function LoungeDetailScreen() {
         {/* CTA block */}
         <View style={styles.ctaBlock}>
           {isOwner ? (
-            /* Owner: Gerenciar + Excluir */
+            /* Owner: Gerenciar + Convidar + Excluir */
             <>
               <TouchableOpacity
                 onPress={() => router.push(`/(app)/lounge/gerenciar/${lounge.id}`)}
@@ -255,6 +268,13 @@ export default function LoungeDetailScreen() {
                 activeOpacity={0.8}
               >
                 <Text style={styles.ctaPrimaryText}>{t('lounge.manageCta')}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={handleInvite}
+                style={[styles.ctaInvite, { borderColor: `${lounge.accent}55` }]}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.ctaInviteText, { color: lounge.accent }]}>{t('lounge.inviteCta')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={handleDelete}
@@ -265,7 +285,7 @@ export default function LoungeDetailScreen() {
               </TouchableOpacity>
             </>
           ) : isNonOwnerMember ? (
-            /* Manager or member: Gerenciar (if manager) + Principal switch + Sair */
+            /* Manager or member: Gerenciar (if manager) + Convidar (se manager) + Principal switch + Sair */
             <>
               {lounge.role === 'manager' && (
                 <TouchableOpacity
@@ -274,6 +294,15 @@ export default function LoungeDetailScreen() {
                   activeOpacity={0.8}
                 >
                   <Text style={styles.ctaPrimaryText}>{t('lounge.manageCta')}</Text>
+                </TouchableOpacity>
+              )}
+              {lounge.role === 'manager' && (
+                <TouchableOpacity
+                  onPress={handleInvite}
+                  style={[styles.ctaInvite, { borderColor: `${lounge.accent}55` }]}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.ctaInviteText, { color: lounge.accent }]}>{t('lounge.inviteCta')}</Text>
                 </TouchableOpacity>
               )}
               <View style={styles.ctaPrimaryRow}>
@@ -522,6 +551,20 @@ const styles = StyleSheet.create({
     borderRadius: spacing.radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  ctaInvite: {
+    height: spacing.buttonHeight,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 0.5,
+    borderRadius: spacing.radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ctaInviteText: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
+    letterSpacing: 12.5 * 0.03,
   },
   ctaDelete: {
     height: spacing.buttonHeight,

@@ -62,11 +62,12 @@ async function restRpc<T>(fn: string, args: unknown, token: string): Promise<T> 
 // ── Interfaces de entrada ─────────────────────────────────────────────────────
 
 export interface CreateSplitInput {
-  name:              string
-  type:              'fixed' | 'variable'
-  target_amount:     number
-  max_participants:  number
-  invite_expires_at: string
+  name:                 string
+  type:                 'fixed' | 'variable'
+  target_amount:        number
+  max_participants:     number
+  invite_expires_at:    string
+  participant_handles?: string[]
 }
 
 export interface LaunchItemInput {
@@ -79,9 +80,11 @@ export interface LaunchItemInput {
 // ── Interfaces de saída ───────────────────────────────────────────────────────
 
 export interface CreateSplitResponse {
-  split_id:     string
-  invite_token: string
-  invite_url:   string
+  split_id:           string
+  invite_token:       string
+  invite_url:         string
+  invited_handles?:   string[]
+  not_found_handles?: string[]
 }
 
 export interface JoinSplitResponse {

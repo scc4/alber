@@ -108,8 +108,13 @@ export default function LoungeDetailScreen() {
     if (!lounge || !token) return
     setJoinError(null)
     try {
-      await joinLounge({ space_id: lounge.id }, token)
-      setJoinSent(true)
+      const res = await joinLounge({ space_id: lounge.id }, token)
+      if (res.status === 'active') {
+        // Convite por handle aceito direto (sem aprovação) — recarrega como membro
+        await fetchLounge(lounge.id, userId, token)
+      } else {
+        setJoinSent(true)
+      }
     } catch (e: any) {
       setJoinError(e?.message ?? 'Erro ao entrar no Lounge')
     }

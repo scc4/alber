@@ -338,6 +338,7 @@ Deno.serve(async (req: Request) => {
     'Transferência recebida',
     `${sender.name} transferiu ${amount_albers} Albers para você`,
     { route: '/(app)/atividade' },
+    'transaction',
   )
 
   // ── Audit log ────────────────────────────────────────────────────────────────

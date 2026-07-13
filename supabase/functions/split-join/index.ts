@@ -72,15 +72,17 @@ Deno.serve(async (req: Request) => {
     return err('ALREADY_PARTICIPANT', 'Você já é o dono deste split', 422)
 
   // ── Verificar duplicidade ─────────────────────────────────────────────────────
+  // Uma linha "pending" (pré-convite por handle na criação — split-create) não
+  // bloqueia: entrar aqui promove essa linha para "accepted".
 
   const { data: existing } = await supabaseAdmin
     .from('split_participants')
-    .select('id')
+    .select('id, status')
     .eq('split_id', split.id)
     .eq('user_id', joiner.id)
     .maybeSingle()
 
-  if (existing) return err('ALREADY_PARTICIPANT', 'Você já é participante deste split', 422)
+  if (existing?.status === 'accepted') return err('ALREADY_PARTICIPANT', 'Você já é participante deste split', 422)
 
   // ── Buscar participantes aceitos ──────────────────────────────────────────────
 
@@ -165,22 +167,49 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Registrar participante ────────────────────────────────────────────────────
+  // Se já existia uma linha "pending" (pré-convite), promove para "accepted"
+  // em vez de inserir uma nova — evita duplicidade e mantém o histórico do convite.
 
   const now = new Date().toISOString()
 
-  const { error: insertErr } = await supabaseAdmin
-    .from('split_participants')
-    .insert({
-      split_id:       split.id,
-      user_id:        joiner.id,
-      status:         'accepted',
-      blocked_amount: split.type === 'variable' ? amountForJoiner : 0,
-      joined_at:      now,
-    })
+  const { error: insertErr } = existing
+    ? await supabaseAdmin
+        .from('split_participants')
+        .update({
+          status:         'accepted',
+          blocked_amount: split.type === 'variable' ? amountForJoiner : 0,
+          joined_at:      now,
+        })
+        .eq('id', existing.id)
+    : await supabaseAdmin
+        .from('split_participants')
+        .insert({
+          split_id:       split.id,
+          user_id:        joiner.id,
+          status:         'accepted',
+          blocked_amount: split.type === 'variable' ? amountForJoiner : 0,
+          joined_at:      now,
+        })
 
   if (insertErr) {
     await logError(supabaseAdmin, 'split-join', insertErr, { split_id: split.id, joiner_id: joiner.id })
     return err('DB_ERROR', 'Erro ao registrar participante', 500)
+  }
+
+  // Rollback em caso de falha no pagamento abaixo: se a linha já existia como
+  // "pending" (pré-convite), volta pra "pending" em vez de apagar o convite.
+  async function rollbackParticipant() {
+    if (existing) {
+      await supabaseAdmin
+        .from('split_participants')
+        .update({ status: 'pending', blocked_amount: 0, joined_at: null })
+        .eq('id', existing.id)
+    } else {
+      await supabaseAdmin
+        .from('split_participants')
+        .delete()
+        .eq('split_id', split.id).eq('user_id', joiner.id)
+    }
   }
 
   // ── Fixed: Asaas transfer imediato participante → dono ────────────────────────
@@ -193,8 +222,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle()
 
     if (!ownerUser?.asaas_wallet_id) {
-      await supabaseAdmin.from('split_participants').delete()
-        .eq('split_id', split.id).eq('user_id', joiner.id)
+      await rollbackParticipant()
       return err('ACCOUNT_NOT_CONFIGURED', 'Conta do dono não configurada', 503)
     }
 
@@ -229,8 +257,7 @@ Deno.serve(async (req: Request) => {
     } catch (e) {
       await logError(supabaseAdmin, 'split-join', e, { split_id: split.id, joiner_id: joiner.id })
       await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', txId)
-      await supabaseAdmin.from('split_participants').delete()
-        .eq('split_id', split.id).eq('user_id', joiner.id)
+      await rollbackParticipant()
       return err('ASAAS_ERROR', 'Falha ao processar pagamento. Tente novamente.', 503)
     }
 
@@ -256,8 +283,7 @@ Deno.serve(async (req: Request) => {
       .maybeSingle()
 
     if (!ownerUser?.asaas_wallet_id) {
-      await supabaseAdmin.from('split_participants').delete()
-        .eq('split_id', split.id).eq('user_id', joiner.id)
+      await rollbackParticipant()
       return err('ACCOUNT_NOT_CONFIGURED', 'Conta do dono não configurada', 503)
     }
 
@@ -297,8 +323,7 @@ Deno.serve(async (req: Request) => {
         { asaas_response: asaasResponse },
       )
       await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', txId)
-      await supabaseAdmin.from('split_participants').delete()
-        .eq('split_id', split.id).eq('user_id', joiner.id)
+      await rollbackParticipant()
       return err('ASAAS_ERROR', 'Falha ao processar pagamento. Tente novamente.', 503)
     }
 
@@ -408,6 +433,8 @@ Deno.serve(async (req: Request) => {
           p.user_id,
           'Novo participante no split',
           'Um novo participante entrou. Seu valor foi recalculado.',
+          undefined,
+          'invite',
         ),
       )
       await Promise.allSettled(recalcPushes)
@@ -420,6 +447,8 @@ Deno.serve(async (req: Request) => {
     split.owner_id,
     'Novo participante',
     `${joiner.handle} entrou no split "${split.name}"`,
+    undefined,
+    'invite',
   ).catch(() => {})
 
   supabaseAdmin.from('audit_logs').insert({

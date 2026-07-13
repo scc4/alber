@@ -7,6 +7,7 @@ export async function sendPush(
   title:   string,
   body:    string,
   data?:   Record<string, string>,
+  type?:   'transaction' | 'invite' | 'other',
 ): Promise<void> {
   try {
     const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/push-send`
@@ -16,7 +17,7 @@ export async function sendPush(
         'Content-Type': 'application/json',
         Authorization:  `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`,
       },
-      body: JSON.stringify({ user_id: userId, title, body, data }),
+      body: JSON.stringify({ user_id: userId, title, body, data, type }),
     })
   } catch (e) {
     console.warn('[push] sendPush failed for user', userId, e)

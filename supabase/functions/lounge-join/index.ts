@@ -103,9 +103,11 @@ Deno.serve(async (req: Request) => {
     return err('REQUEST_PENDING', 'Solicitação já enviada. Aguarde aprovação.', 422)
   }
 
-  // ── Via invite_token → entrada imediata (link é a autorização) ───────────────
+  // ── Ativação direta: via invite_token (link é a autorização) OU quando já
+  // existe um convite por handle ('invited' — dono convidou, não precisa de
+  // aprovação, ver lounge-invite-handle) ────────────────────────────────────────
 
-  if (body.invite_token) {
+  if (body.invite_token || existing?.status === 'invited') {
     const { error: insertErr } = await supabaseAdmin
       .from('space_members')
       .upsert(
@@ -121,13 +123,13 @@ Deno.serve(async (req: Request) => {
     await supabaseAdmin.from('audit_logs').insert({
       user_id:    user.id,
       event_type: 'lounge_joined',
-      metadata:   { space_id: space.id, via: 'invite_token' },
+      metadata:   { space_id: space.id, via: body.invite_token ? 'invite_token' : 'handle_invite' },
     })
 
     return json({ status: 'active', space_id: space.id })
   }
 
-  // ── Via space_id → solicitar entrada (apenas lounges abertos) ────────────────
+  // ── Via space_id, sem convite prévio → solicitar entrada (apenas lounges abertos)
 
   if (space.type !== 'open') {
     return err('INVITE_REQUIRED', 'Este Lounge é privado. Use um link de convite.', 403)
@@ -157,6 +159,7 @@ Deno.serve(async (req: Request) => {
       'Nova solicitação no Lounge',
       `${user.name ?? user.handle} quer entrar no seu Lounge.`,
       { route: `/(app)/lounge/${space.id}` },
+      'invite',
     ),
   ])
 

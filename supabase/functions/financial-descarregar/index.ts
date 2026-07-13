@@ -9,6 +9,7 @@ import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsP
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { cashoutPix, transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface DescarregarRequest {
   amount_albers: number
@@ -265,8 +266,9 @@ Deno.serve(async (req: Request) => {
   // DB stores 'random' for EVP keys; Asaas API requires 'EVP'.
   const asaasPixType = user.pix_key_type === 'random' ? 'EVP' : user.pix_key_type.toUpperCase()
 
+  let transfer: { id: string; status: string }
   try {
-    await cashoutPix(netBrl, pixKeyRaw, asaasPixType, transactionId, subApiKey)
+    transfer = await cashoutPix(netBrl, pixKeyRaw, asaasPixType, transactionId, subApiKey)
   } catch (e) {
     console.error('Asaas cashout failed:', e)
     const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
@@ -300,11 +302,12 @@ Deno.serve(async (req: Request) => {
 
   // ── Atualizar status das transações ──────────────────────────────────────────
   // descarregar → 'processing' (webhook TRANSFER_CONFIRMED atualizará para 'completed')
+  // asaas_payment_id guarda o id do transfer Asaas para reconciliação no webhook.
   // fee → 'completed' imediatamente (foi debitado da subconta com sucesso)
 
   await supabaseAdmin
     .from('transactions')
-    .update({ status: 'processing' })
+    .update({ status: 'processing', asaas_payment_id: transfer.id })
     .eq('id', transactionId)
 
   if (feeTxId) {
@@ -327,6 +330,16 @@ Deno.serve(async (req: Request) => {
       pix_key:  user.pix_key,
     },
   })
+
+  // ── Push notification (best-effort) ──────────────────────────────────────────
+
+  await sendPush(
+    user.id,
+    'Pix enviado para processamento',
+    `${amount_albers} Albers serão enviados para sua chave Pix`,
+    { route: '/(app)/atividade' },
+    'transaction',
+  )
 
   return json({
     transaction_id: transactionId,

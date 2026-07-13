@@ -9,7 +9,8 @@ import { refundPayment } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 
-const HANDLED_EVENTS = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
+const HANDLED_EVENTS  = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
+const TRANSFER_EVENTS = new Set(['TRANSFER_CONFIRMED', 'TRANSFER_FAILED'])
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -37,7 +38,7 @@ Deno.serve(async (req: Request) => {
 
   let payload: {
     event: string
-    payment: {
+    payment?: {
       id: string
       status: string
       value: number
@@ -49,6 +50,11 @@ Deno.serve(async (req: Request) => {
         }
       }
     }
+    transfer?: {
+      id: string
+      status: string
+      value: number
+    }
   }
 
   try {
@@ -58,7 +64,51 @@ Deno.serve(async (req: Request) => {
     return new Response('Bad Request', { status: 400 })
   }
 
-  const { event, payment } = payload
+  const { event, transfer } = payload
+
+  // ── TRANSFER_CONFIRMED / TRANSFER_FAILED — conclusão do Descarregar ──────────
+  // Descarregar fica 'processing' até este webhook confirmar (ou falhar) o Pix
+  // de saída. Não há saldo local a estornar: o saldo em Albers é lido ao vivo
+  // da subconta Asaas (ver financial-descarregar), então uma falha de transfer
+  // já é refletida automaticamente assim que o Asaas devolve o valor.
+
+  if (transfer && TRANSFER_EVENTS.has(event)) {
+    const { data: tx, error: transferTxErr } = await supabaseAdmin
+      .from('transactions')
+      .select('id, user_id, status, amount')
+      .eq('asaas_payment_id', transfer.id)
+      .maybeSingle()
+
+    if (transferTxErr || !tx || tx.status !== 'processing') {
+      // Idempotência / evento não pertence a uma transação nossa em andamento.
+      return new Response('OK', { status: 200 })
+    }
+
+    const newStatus = event === 'TRANSFER_CONFIRMED' ? 'completed' : 'failed'
+
+    await supabaseAdmin.from('transactions').update({ status: newStatus }).eq('id', tx.id)
+
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    tx.user_id,
+      event_type: `descarregar_${newStatus}`,
+      metadata:   { transaction_id: tx.id, asaas_transfer_id: transfer.id, value: transfer.value },
+    })
+
+    await sendPush(
+      tx.user_id,
+      newStatus === 'completed' ? 'Pix enviado com sucesso!' : 'Falha no envio do Pix',
+      newStatus === 'completed'
+        ? `${Number(tx.amount ?? 0)} Albers foram enviados via Pix.`
+        : 'Não foi possível concluir o envio do seu Pix. Tente novamente.',
+      { route: '/(app)/atividade' },
+      'transaction',
+    )
+
+    return new Response('OK', { status: 200 })
+  }
+
+  const { payment } = payload
+  if (!payment) return new Response('OK', { status: 200 })
 
   // ── PAYMENT_REFUNDED — atualizar status ──────────────────────────────────────
   // Para QR estático, pixQrCodeId identifica a transação; para dinâmico, payment.id.
@@ -179,7 +229,8 @@ Deno.serve(async (req: Request) => {
     userData.id,
     'Albers carregados!',
     `Seus ${amountAlbers} Albers foram carregados com sucesso.`,
-    { type: 'carregar_completed', transaction_id: tx.id },
+    { route: '/(app)/atividade' },
+    'transaction',
   )
 
   return new Response('OK', { status: 200 })

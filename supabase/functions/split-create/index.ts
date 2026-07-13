@@ -180,9 +180,9 @@ Deno.serve(async (req: Request) => {
   const inviteUrl = `alber://split/convite/${inviteToken}`
 
   // ── Pré-convite por handle (opcional) ─────────────────────────────────────────
-  // Só notifica — não insere em split_participants, pois split-join rejeita
-  // qualquer usuário que já tenha uma linha ali (qualquer status), o que travaria
-  // o convidado de verdade entrar depois.
+  // Registra o convidado como participante "pending" (spec §5 — ⏳ aguardando)
+  // e notifica. split-join trata uma linha "pending" existente como upgrade
+  // para "accepted" em vez de rejeitar (ver split-join/index.ts).
 
   const invitedHandles:  string[] = []
   const notFoundHandles: string[] = []
@@ -209,12 +209,29 @@ Deno.serve(async (req: Request) => {
         continue
       }
 
+      const { error: pendingErr } = await supabaseAdmin
+        .from('split_participants')
+        .insert({
+          split_id:       splitId,
+          user_id:        invitee.id,
+          status:         'pending',
+          blocked_amount: 0,
+          joined_at:      null,
+        })
+
+      if (pendingErr) {
+        await logError(supabaseAdmin, 'split-create', pendingErr, { split_id: splitId, invitee_id: invitee.id })
+        notFoundHandles.push(handleNoAt)
+        continue
+      }
+
       invitedHandles.push(invitee.handle)
       sendPush(
         invitee.id,
         'Convite para Split',
         `${owner.handle} te convidou pro split "${name.trim()}"`,
         { route: `/(app)/split/convite/${inviteToken}` },
+        'invite',
       ).catch(() => {})
     }
   }

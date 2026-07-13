@@ -2,7 +2,7 @@
 // Spec: /specs/06_modules/alber_lounge.md § 7 "Painel de gestão"
 // Tabs: Visão geral | Membros | Mensagens | Visual
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Alert,
   Image,
@@ -38,6 +38,15 @@ import { typography } from '../../../../tokens/typography'
 const PALETTE = ['#5BCEC9', '#C9B06A', '#E07D7D', '#7DA3E0', '#B58FE0', '#7AB87A', '#E0B05B', '#9B6B82']
 type Tab = 'overview' | 'members' | 'messages' | 'visual'
 
+const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
+const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
+
+interface HandleSearchResult {
+  id:     string
+  name:   string
+  handle: string
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function GerenciarScreen() {
@@ -45,14 +54,16 @@ export default function GerenciarScreen() {
   const { t }   = useTranslation()
   const insets  = useSafeAreaInsets()
 
-  const lounge         = useLoungeStore(s => s.myLounges.find(l => l.id === id) ?? s.exploring.find(l => l.id === id))
-  const approveRequest = useLoungeStore(s => s.approveRequest)
-  const fetchLounge    = useLoungeStore(s => s.fetchLounge)
-  const removeMember   = useLoungeStore(s => s.removeMember)
-  const sendMessage    = useLoungeStore(s => s.sendMessage)
-  const updateVisual   = useLoungeStore(s => s.updateVisual)
-  const updateLounge   = useLoungeStore(s => s.updateLounge)
-  const cancelEvent    = useLoungeStore(s => s.cancelEvent)
+  const lounge             = useLoungeStore(s => s.myLounges.find(l => l.id === id) ?? s.exploring.find(l => l.id === id))
+  const approveRequest     = useLoungeStore(s => s.approveRequest)
+  const fetchLounge        = useLoungeStore(s => s.fetchLounge)
+  const removeMember       = useLoungeStore(s => s.removeMember)
+  const cancelInvite       = useLoungeStore(s => s.cancelInvite)
+  const sendMessage        = useLoungeStore(s => s.sendMessage)
+  const updateVisual       = useLoungeStore(s => s.updateVisual)
+  const updateLounge       = useLoungeStore(s => s.updateLounge)
+  const cancelEvent        = useLoungeStore(s => s.cancelEvent)
+  const inviteMemberByHandle = useLoungeStore(s => s.inviteMemberByHandle)
 
   const token     = useAuthStore(s => s.token)
   const user      = useAuthStore(s => s.user)
@@ -71,9 +82,37 @@ export default function GerenciarScreen() {
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null)
   const [confirmadosMap, setConfirmadosMap]   = useState<Record<string, EventTicketItem[]>>({})
   const [loadingConfirmados, setLoadingConfirmados] = useState<Record<string, boolean>>({})
+  const [inviteQuery, setInviteQuery]     = useState('')
+  const [inviteSearching, setInviteSearching] = useState(false)
+  const [inviteResults, setInviteResults] = useState<HandleSearchResult[]>([])
+  const [invitingId, setInvitingId]       = useState<string | null>(null)
+  const [inviteFeedback, setInviteFeedback] = useState<{ ok: boolean; text: string } | null>(null)
   const inviteUrl = lounge?.inviteToken
     ? `alber://lounge/convite/${lounge.inviteToken}`
     : null
+
+  // ── Buscar por handle (debounced) ──────────────────────────────────────────────
+
+  useEffect(() => {
+    const clean = inviteQuery.trim()
+    if (clean.length < 2 || !token) { setInviteResults([]); return }
+    setInviteSearching(true)
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(
+          `${BFF}/user-search?q=${encodeURIComponent(clean.replace('@', ''))}`,
+          { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } },
+        )
+        const results = await res.json()
+        setInviteResults(Array.isArray(results) ? results : [])
+      } catch {
+        setInviteResults([])
+      } finally {
+        setInviteSearching(false)
+      }
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [inviteQuery, token])
 
   // ── Not found / unauthorised ──────────────────────────────────────────────────
 
@@ -143,6 +182,31 @@ export default function GerenciarScreen() {
     )
   }
 
+  function handleCancelInvite(inv: LoungeRequest) {
+    if (!lounge || !token || processingIds.has(inv.userId)) return
+    Alert.alert(
+      t('lounge.gerenciar.cancelInviteConfirmTitle'),
+      t('lounge.gerenciar.cancelInviteConfirmBody', { name: inv.name || inv.handle }),
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: t('lounge.gerenciar.cancelInviteConfirmCta'),
+          style: 'destructive',
+          onPress: async () => {
+            setProcessingIds(s => new Set(s).add(inv.userId))
+            try {
+              await cancelInvite(lounge.id, inv.userId, token)
+            } catch (e: any) {
+              Alert.alert(t('lounge.gerenciar.approveErrorTitle'), e?.message ?? t('lounge.gerenciar.cancelInviteErrorBody'))
+            } finally {
+              setProcessingIds(s => { const n = new Set(s); n.delete(inv.userId); return n })
+            }
+          },
+        },
+      ],
+    )
+  }
+
   async function handleSendMessage() {
     if (!lounge || !token || !msgText.trim()) return
     setSending(true)
@@ -171,6 +235,23 @@ export default function GerenciarScreen() {
   function handleShare() {
     if (!inviteUrl || !lounge) return
     Share.share({ message: inviteUrl, title: lounge.name })
+  }
+
+  async function handleInviteByHandle(result: HandleSearchResult) {
+    if (!lounge || !token || invitingId) return
+    setInvitingId(result.id)
+    setInviteFeedback(null)
+    try {
+      await inviteMemberByHandle(lounge.id, result.handle, token)
+      setInviteFeedback({ ok: true, text: t('lounge.gerenciar.inviteHandleSuccess', { handle: result.handle }) })
+      setInviteQuery('')
+      setInviteResults([])
+      if (user) await fetchLounge(lounge.id, user.id, token)
+    } catch (e: any) {
+      setInviteFeedback({ ok: false, text: e?.message ?? t('lounge.gerenciar.inviteHandleError') })
+    } finally {
+      setInvitingId(null)
+    }
   }
 
   const nameChanged   = isOwner && editName.trim() !== lounge.name
@@ -392,6 +473,49 @@ export default function GerenciarScreen() {
             </TouchableOpacity>
           )}
 
+          {/* Convidar por handle */}
+          <View style={styles.sectionGap}>
+            <Eyebrow>{t('lounge.gerenciar.inviteHandleSection')}</Eyebrow>
+          </View>
+          <TextInput
+            style={styles.inviteHandleInput}
+            value={inviteQuery}
+            onChangeText={setInviteQuery}
+            placeholder={t('lounge.gerenciar.inviteHandlePlaceholder')}
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {inviteSearching && (
+            <Text style={styles.inviteHandleHint}>{t('lounge.gerenciar.inviteHandleSearching')}</Text>
+          )}
+          {inviteResults.length > 0 && (
+            <View style={styles.inviteResultsList}>
+              {inviteResults.map(r => (
+                <TouchableOpacity
+                  key={r.id}
+                  onPress={() => handleInviteByHandle(r)}
+                  disabled={invitingId === r.id}
+                  style={[styles.inviteResultRow, invitingId === r.id && styles.inviteResultRowDisabled]}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.inviteResultInfo}>
+                    <Text style={styles.inviteResultName}>{r.name}</Text>
+                    <Text style={styles.inviteResultHandle}>{r.handle}</Text>
+                  </View>
+                  <Text style={[styles.inviteResultAction, { color: lounge.accent }]}>
+                    {invitingId === r.id ? t('lounge.gerenciar.inviteHandleSending') : t('lounge.gerenciar.inviteHandleCta')}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          {inviteFeedback && (
+            <Text style={[styles.inviteFeedbackText, !inviteFeedback.ok && styles.inviteFeedbackError]}>
+              {inviteFeedback.text}
+            </Text>
+          )}
+
           {/* Events */}
           <View style={styles.sectionGap}>
             <View style={styles.rowBetween}>
@@ -536,6 +660,36 @@ export default function GerenciarScreen() {
                   </View>
                 )
               })}
+            </View>
+          )}
+
+          {/* Convidados (convite por handle, aguardando aceite) */}
+          <View style={styles.sectionGap}>
+            <Eyebrow>{t('lounge.gerenciar.invitedSection')}</Eyebrow>
+          </View>
+          {lounge.invitedMembers.length === 0 ? (
+            <Text style={styles.emptyText}>{t('lounge.gerenciar.noInvited')}</Text>
+          ) : (
+            <View style={styles.memberList}>
+              {lounge.invitedMembers.map((inv, i) => (
+                <View key={inv.id} style={[styles.memberRow, i > 0 && styles.memberRowBorder]}>
+                  <View style={[styles.avatar, { backgroundColor: avatarHue(inv.handle) }]}>
+                    <Text style={styles.avatarText}>{inv.initials[0] ?? '?'}</Text>
+                  </View>
+                  <View style={styles.memberInfo}>
+                    <Text style={styles.memberName}>{inv.name || inv.handle}</Text>
+                    <Text style={styles.memberHandle}>{inv.handle}</Text>
+                    <Text style={styles.invitedBadgeText}>{t('lounge.gerenciar.invitedBadge')}</Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => handleCancelInvite(inv)}
+                    style={[styles.removeBtn, processingIds.has(inv.userId) && { opacity: 0.45 }]}
+                    disabled={processingIds.has(inv.userId)}
+                  >
+                    <Text style={styles.removeBtnText}>{t('lounge.gerenciar.cancelInviteBtn')}</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
             </View>
           )}
 
@@ -892,6 +1046,80 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontFamily: typography.fontFamily.primary,
     fontWeight: '600',
+  },
+
+  // Invite by handle
+  inviteHandleInput: {
+    marginTop: 10,
+    padding: 13,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 10,
+    fontSize: 14,
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
+  },
+  inviteHandleHint: {
+    marginTop: 6,
+    fontSize: 11.5,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.4)',
+  },
+  inviteResultsList: {
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  inviteResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  inviteResultRowDisabled: {
+    opacity: 0.45,
+  },
+  inviteResultInfo: { flex: 1 },
+  inviteResultName: {
+    fontSize: 13,
+    fontWeight: '500',
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
+  },
+  inviteResultHandle: {
+    fontSize: 11.5,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 1,
+  },
+  inviteResultAction: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
+  },
+  inviteFeedbackText: {
+    marginTop: 8,
+    fontSize: 11.5,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(34,197,94,0.9)',
+  },
+  inviteFeedbackError: {
+    color: colors.state.error,
+  },
+  invitedBadgeText: {
+    fontSize: 9,
+    fontWeight: '600',
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 9 * 0.1,
+    textTransform: 'uppercase',
   },
 
   // Events

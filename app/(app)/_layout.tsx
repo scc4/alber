@@ -3,6 +3,7 @@ import { AppState, View, StyleSheet } from 'react-native'
 import { Stack, usePathname, router } from 'expo-router'
 import { BottomNav, BottomNavItem } from '../../components/core/BottomNav'
 import { useAuthStore, isJwtExpired } from '../../store/auth.store'
+import { useNotificationsStore } from '../../store/notifications.store'
 
 // Rotas onde o BottomNav deve aparecer
 const NAV_PATHS = new Set(['/', '/atividade', '/achar', '/lounge', '/perfil'])
@@ -30,6 +31,8 @@ export default function AppLayout() {
   const active          = getActiveTab(pathname)
   const isAuthenticated = useAuthStore(s => s.isAuthenticated)
   const user             = useAuthStore(s => s.user)
+  const token             = useAuthStore(s => s.token)
+  const subscribeRealtime = useNotificationsStore(s => s.subscribeRealtime)
 
   const notifListener    = useRef<{ remove: () => void } | null>(null)
   const responseListener = useRef<{ remove: () => void } | null>(null)
@@ -54,6 +57,13 @@ export default function AppLayout() {
     })
     return () => subscription.remove()
   }, [])
+
+  // Realtime do sino — assina novas notificações da sessão autenticada
+  useEffect(() => {
+    if (!user || !token) return
+    const unsubscribe = subscribeRealtime(user.id, token)
+    return unsubscribe
+  }, [user, token])
 
   // Setup de notificações push (expo-notifications indisponível no Expo Go SDK 53+)
   useEffect(() => {
@@ -112,6 +122,7 @@ export default function AppLayout() {
         <Stack.Screen name="carregar" />
         <Stack.Screen name="receber" />
         <Stack.Screen name="transferir" />
+        <Stack.Screen name="notificacoes" />
 
         {/* Split */}
         <Stack.Screen name="split/index" />

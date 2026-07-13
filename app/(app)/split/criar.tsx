@@ -79,6 +79,7 @@ export default function SplitCriarScreen() {
   const [createdId, setCreatedId]           = useState<string | null>(null)
   const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null)
   const [creating, setCreating]             = useState(false)
+  const [createError, setCreateError]       = useState<string | null>(null)
   const [copied, setCopied]                 = useState(false)
   const copiedTimer                         = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -162,11 +163,12 @@ export default function SplitCriarScreen() {
       : null
     updateDraft({ totalValue: parsedValue, customExpiry: expiry })
     setCreating(true)
+    setCreateError(null)
     try {
       const res = await createSplit(token)
       router.replace(`/(app)/split/${res.split_id}`)
-    } catch {
-      // error já gravado no store — o usuário vê via error state
+    } catch (e) {
+      setCreateError(e instanceof Error ? e.message : t('split.criar.createError'))
       setCreating(false)
     }
   }
@@ -500,6 +502,9 @@ export default function SplitCriarScreen() {
         </ScrollView>
 
         <View style={styles.actionArea}>
+          {createError && (
+            <Text style={styles.createErrorText}>{createError}</Text>
+          )}
           <PrimaryButton
             label={t('split.criar.createCta')}
             onPress={handleCreate}
@@ -989,6 +994,13 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily.primary,
     color: TEAL,
     fontVariant: ['tabular-nums'],
+  },
+  createErrorText: {
+    fontSize: 12,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(239,68,68,0.9)',
+    textAlign: 'center',
+    marginBottom: 8,
   },
 
   // Share screen

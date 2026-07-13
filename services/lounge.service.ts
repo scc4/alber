@@ -82,7 +82,7 @@ interface DbSpaceMember {
   id:         string
   user_id:    string
   role:       'owner' | 'admin' | 'member'
-  status:     'pending' | 'active' | 'banned' | 'left'
+  status:     'pending' | 'active' | 'banned' | 'invited' | 'left'
   is_primary: boolean
   joined_at:  string | null
   created_at: string
@@ -214,6 +214,7 @@ function mapSpaceFull(s: DbSpace, myUserId: string): Lounge {
   const allMembers         = s.space_members ?? []
   const activeMembers      = allMembers.filter(m => m.status === 'active')
   const pending            = allMembers.filter(m => m.status === 'pending')
+  const invited            = allMembers.filter(m => m.status === 'invited')
   const myActiveMembership = allMembers.find(m => m.user_id === myUserId && m.status === 'active')
   const myAnyMembership    = allMembers.find(m => m.user_id === myUserId)
 
@@ -239,6 +240,14 @@ function mapSpaceFull(s: DbSpace, myUserId: string): Lounge {
       joinedAt: m.joined_at ?? m.created_at,
     })),
     pendingRequests: pending.map<LoungeRequest>(m => ({
+      id:          m.id,
+      userId:      m.user_id,
+      name:        m.member?.name ?? '',
+      handle:      m.member?.handle ?? '',
+      initials:    getInitials(m.member?.name ?? '?'),
+      requestedAt: m.created_at,
+    })),
+    invitedMembers: invited.map<LoungeRequest>(m => ({
       id:          m.id,
       userId:      m.user_id,
       name:        m.member?.name ?? '',
@@ -276,6 +285,7 @@ function mapLoungeListItem(sm: DbMyMembership): Lounge {
     isPrimary:       sm.is_primary ?? false,
     members:         [],
     pendingRequests: [],
+    invitedMembers:  [],
     events:          [],
     messages:        [],
     inviteToken:     s.invite_token ?? null,
@@ -347,6 +357,10 @@ export async function approveMember(member_id: string, approved: boolean, token:
   await bffPost('lounge-approve', { member_id, approved }, token)
 }
 
+export async function inviteByHandle(space_id: string, handle: string, token: string): Promise<void> {
+  await bffPost('lounge-invite-handle', { space_id, handle }, token)
+}
+
 export async function createEvent(data: CreateEventInput, token: string): Promise<{ event_id: string }> {
   return bffPost('event-create', data, token)
 }
@@ -361,6 +375,10 @@ export async function buyTicket(
 
 export async function removeMember(space_id: string, user_id: string, token: string): Promise<void> {
   await bffPost('lounge-remove-member', { space_id, user_id }, token)
+}
+
+export async function cancelInvite(space_id: string, user_id: string, token: string): Promise<void> {
+  await bffPost('lounge-invite-cancel', { space_id, user_id }, token)
 }
 
 export async function setPrimaryLounge(space_id: string, token: string): Promise<void> {

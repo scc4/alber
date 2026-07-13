@@ -7,6 +7,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
 import { createPixAddressKey, createPixStaticQrCode } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
 
 interface CarregarRequest {
   amount_albers: number
@@ -204,6 +205,16 @@ Deno.serve(async (req: Request) => {
     event_type: 'carregar_initiated',
     metadata:   { transaction_id: txData.id, amount_brl: amountBrl, qr_code_id: qrCodeId },
   })
+
+  // ── Push notification (best-effort) ──────────────────────────────────────────
+
+  await sendPush(
+    userData.id,
+    'Cobrança Pix gerada',
+    `Escaneie o QR Code para carregar ${amount_albers} Albers`,
+    { route: '/(app)/atividade' },
+    'transaction',
+  )
 
   // ── ETAPA 4 — Retornar ao app ────────────────────────────────────────────────
   // Mantém campos da CarregarResponse que o app já consome.

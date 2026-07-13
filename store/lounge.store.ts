@@ -64,11 +64,13 @@ export interface Lounge {
   visibility:      'public' | 'private'
   memberCount:     number
   role:            LoungeRole
-  memberStatus:    'pending' | 'active' | 'banned' | 'left' | null
+  memberStatus:    'pending' | 'active' | 'banned' | 'invited' | 'left' | null
   ownerId:         string
   isPrimary:       boolean
   members:         LoungeMember[]
   pendingRequests: LoungeRequest[]
+  /** Convidados por @handle, aguardando aceite (não pediram entrada — ver space_members.status='invited') */
+  invitedMembers:  LoungeRequest[]
   events:          LoungeEvent[]
   messages:        LoungeMessage[]
   inviteToken:     string | null
@@ -107,12 +109,14 @@ interface LoungeState {
   createLounge:   (input: CreateLoungeInput, token: string) => Promise<loungeService.CreateLoungeResponse>
   joinLounge:     (params: { space_id?: string; invite_token?: string }, token: string) => Promise<loungeService.JoinLoungeResponse>
   approveRequest: (memberId: string, approved: boolean, token: string) => Promise<void>
+  inviteMemberByHandle: (spaceId: string, handle: string, token: string) => Promise<void>
   createEvent:    (data: loungeService.CreateEventInput, token: string) => Promise<void>
   buyTicket:      (eventId: string, pinHash: string | undefined, token: string) => Promise<loungeService.BuyTicketResponse>
 
   // Local-only (sem EF definida no MVP)
   promoteMember:    (loungeId: string, memberId: string) => void
   removeMember:     (loungeId: string, memberId: string, token: string) => Promise<void>
+  cancelInvite:     (loungeId: string, userId: string, token: string) => Promise<void>
   sendMessage:      (loungeId: string, content: string, token: string) => Promise<void>
   updateVisual:     (loungeId: string, accent: string, imageUri: string | null | undefined, token: string) => Promise<void>
   cancelEvent:      (eventId: string, token: string) => Promise<loungeService.CancelEventResponse>
@@ -259,6 +263,17 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
     }
   },
 
+  inviteMemberByHandle: async (spaceId, handle, token) => {
+    set({ error: null })
+    try {
+      await loungeService.inviteByHandle(spaceId, handle, token)
+      // Lista de convidados é recarregada pela tela via fetchLounge
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao convidar usuário' })
+      throw e
+    }
+  },
+
   createEvent: async (data, token) => {
     set({ error: null })
     try {
@@ -340,6 +355,22 @@ export const useLoungeStore = create<LoungeState>((set, get) => ({
       }))
     } catch (e) {
       set({ error: e instanceof BffError ? e.message : 'Erro ao remover membro' })
+      throw e
+    }
+  },
+
+  cancelInvite: async (loungeId, userId, token) => {
+    try {
+      await loungeService.cancelInvite(loungeId, userId, token)
+      set(s => ({
+        myLounges: s.myLounges.map(l =>
+          l.id === loungeId
+            ? { ...l, invitedMembers: l.invitedMembers.filter(m => m.userId !== userId) }
+            : l
+        ),
+      }))
+    } catch (e) {
+      set({ error: e instanceof BffError ? e.message : 'Erro ao cancelar convite' })
       throw e
     }
   },

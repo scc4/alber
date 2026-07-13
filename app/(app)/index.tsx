@@ -21,6 +21,7 @@ import { Eyebrow } from '../../components/shared/Eyebrow'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { useLoungeStore } from '../../store/lounge.store'
+import { useNotificationsStore } from '../../store/notifications.store'
 import { spaceSkins } from '../../tokens/colors'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -96,7 +97,7 @@ function resolveBanner(
 
 export default function HomeScreen() {
   const { t } = useTranslation()
-  const { user, kycStatus, accountStatus } = useAuthStore()
+  const { user, kycStatus, accountStatus, token } = useAuthStore()
   const {
     balance,
     stale,
@@ -106,7 +107,9 @@ export default function HomeScreen() {
     toggleHidden,
     loadHiddenPreference,
   } = useBalanceStore()
-  const myLounges = useLoungeStore(s => s.myLounges)
+  const myLounges    = useLoungeStore(s => s.myLounges)
+  const unreadCount  = useNotificationsStore(s => s.unreadCount)
+  const fetchNotifications = useNotificationsStore(s => s.fetchNotifications)
 
   const [refreshing, setRefreshing]         = useState(false)
   const [dismissedBanner, setDismissedBanner] = useState(false)
@@ -141,7 +144,8 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchBalance()
-    }, []), // eslint-disable-line react-hooks/exhaustive-deps
+      if (token) fetchNotifications(token)
+    }, [token]), // eslint-disable-line react-hooks/exhaustive-deps
   )
 
   const onRefresh = async () => {
@@ -210,9 +214,9 @@ export default function HomeScreen() {
           variant="home"
           userName={firstName}
           accentColor={skin.accent}
-          hasNotification={kycStatus !== 'approved'}
+          hasNotification={kycStatus !== 'approved' || unreadCount > 0}
           onLogoPress={() => router.replace('/(app)/')}
-          onBell={() => { /* Sprint 6: notificações */ }}
+          onBell={() => router.push('/(app)/notificacoes' as never)}
           onAvatarPress={() => {
             console.log('[home] onAvatarPress fired, navigating to perfil')
             router.push('/(app)/perfil' as never)

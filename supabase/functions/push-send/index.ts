@@ -20,6 +20,7 @@ interface PushSendRequest {
   title:   string
   body:    string
   data?:   Record<string, string>
+  type?:   'transaction' | 'invite' | 'other'
 }
 
 interface ExpoReceipt {
@@ -48,10 +49,23 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { user_id, title, body: msgBody, data } = body
+  const { user_id, title, body: msgBody, data, type } = body
   if (!user_id || !title || !msgBody) {
     return err('MISSING_FIELDS', 'user_id, title e body são obrigatórios', 400)
   }
+
+  // ── Registrar notificação in-app (independe de haver token ativo) ────────────
+
+  await supabaseAdmin.from('notifications').insert({
+    user_id,
+    type:     type ?? 'other',
+    title,
+    body:     msgBody,
+    route:    data?.route ?? null,
+    metadata: data ?? {},
+  }).then(({ error }) => {
+    if (error) console.error('[push-send] notification insert failed:', error)
+  })
 
   // ── Buscar tokens ativos do usuário ──────────────────────────────────────────
 

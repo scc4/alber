@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from 'react'
 import {
+  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -21,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useSplitStore } from '../../../store/split.store'
 import { useAuthStore } from '../../../store/auth.store'
+import { BffError } from '../../../services/auth.service'
 import { pickFromCamera, uploadImage } from '../../../services/storage.service'
 import { LaunchItem } from '../../../components/split/LaunchItem'
 import { ParticipantRow } from '../../../components/split/ParticipantRow'
@@ -58,10 +60,11 @@ export default function SplitDetailScreen() {
   const token         = useAuthStore(s => s.token)
   const currentUserId = useAuthStore(s => s.user?.id ?? '')
 
-  const split      = useSplitStore(s => s.getSplitById(id))
-  const loading    = useSplitStore(s => s.loading)
-  const launchItem = useSplitStore(s => s.launchItem)
-  const fetchSplit = useSplitStore(s => s.fetchSplit)
+  const split           = useSplitStore(s => s.getSplitById(id))
+  const loading         = useSplitStore(s => s.loading)
+  const launchItem      = useSplitStore(s => s.launchItem)
+  const fetchSplit      = useSplitStore(s => s.fetchSplit)
+  const respondToInvite = useSplitStore(s => s.respondToInvite)
   const myShare    = useSplitStore(s => {
     const sp = s.splits.find(x => x.id === id)
     if (!sp) return 0
@@ -77,6 +80,7 @@ export default function SplitDetailScreen() {
   const [recalcDismissed, setRecalcDismissed] = useState(false)
   const [showLaunchSheet, setShowLaunchSheet] = useState(false)
   const [lightboxUri, setLightboxUri]         = useState<string | null>(null)
+  const [responding, setResponding]           = useState(false)
 
   // ── Loading / not found ───────────────────────────────────────────────────────
 
@@ -119,6 +123,59 @@ export default function SplitDetailScreen() {
 
   // Show recalc banner for active variable splits that have launched items
   const showRecalc = !isFixed && isActive && split.totalLaunched > 0 && !recalcDismissed
+
+  const isPendingInvite = !isOwner && myParticipant?.status === 'pending'
+  const myAmount = split.participantCount > 0
+    ? Math.ceil(split.totalValue / split.participantCount)
+    : 0
+
+  // ── Handlers ─────────────────────────────────────────────────────────────────
+
+  async function handleAcceptInvite() {
+    if (!token || !currentUserId || !split || responding) return
+    setResponding(true)
+    try {
+      await respondToInvite(split.id, currentUserId, true, token)
+    } catch (e: any) {
+      const message = e instanceof BffError ? e.message : t('split.detalhe.inviteAcceptError')
+      if (e instanceof BffError && e.code === 'INSUFFICIENT_BALANCE') {
+        Alert.alert(t('split.detalhe.inviteAcceptErrorTitle'), message, [
+          { text: 'OK', style: 'cancel' },
+          { text: t('split.detalhe.inviteLoadCta'), onPress: () => router.push('/(app)/carregar') },
+        ])
+      } else {
+        Alert.alert(t('split.detalhe.inviteAcceptErrorTitle'), message)
+      }
+    } finally {
+      setResponding(false)
+    }
+  }
+
+  function handleDeclineInvite() {
+    if (!token || !currentUserId || !split || responding) return
+    Alert.alert(
+      t('split.detalhe.inviteDeclineConfirmTitle'),
+      t('split.detalhe.inviteDeclineConfirmBody', { name: split.ownerHandle }),
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: t('split.detalhe.inviteDeclineConfirmCta'),
+          style: 'destructive',
+          onPress: async () => {
+            setResponding(true)
+            try {
+              await respondToInvite(split.id, currentUserId, false, token)
+              router.back()
+            } catch (e: any) {
+              const message = e instanceof BffError ? e.message : t('split.detalhe.inviteDeclineError')
+              Alert.alert(t('split.detalhe.inviteDeclineErrorTitle'), message)
+              setResponding(false)
+            }
+          },
+        },
+      ],
+    )
+  }
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -270,13 +327,42 @@ export default function SplitDetailScreen() {
         )}
       </ScrollView>
 
-      {/* Bottom CTA */}
+      {/* Bottom CTA — dono fecha split */}
       {isActive && isOwner && (
         <View style={styles.bottomBar}>
           <PrimaryButton
             label={t(isFixed ? 'split.detalhe.closeSplitFixed' : 'split.detalhe.closeSplitVariable')}
             onPress={() => router.push(`/(app)/split/fechar/${split.id}`)}
           />
+        </View>
+      )}
+
+      {/* Bottom CTA — convite pendente do participante */}
+      {isActive && isPendingInvite && (
+        <View style={styles.bottomBar}>
+          <View style={styles.inviteCard}>
+            <Text style={styles.inviteCardTitle}>{t('split.detalhe.inviteCardTitle')}</Text>
+            <Text style={styles.inviteCardAmount}>
+              {formatAlbers(myAmount)} <Text style={styles.inviteCardUnit}>{t('split.detalhe.amountUnit')}</Text>
+            </Text>
+          </View>
+          <View style={styles.inviteActions}>
+            <TouchableOpacity
+              onPress={handleDeclineInvite}
+              disabled={responding}
+              style={[styles.ghostBtn, responding && { opacity: 0.45 }]}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.ghostBtnText}>{t('split.detalhe.inviteDeclineCta')}</Text>
+            </TouchableOpacity>
+            <View style={styles.inviteAcceptWrap}>
+              <PrimaryButton
+                label={t('split.detalhe.inviteAcceptCta')}
+                onPress={handleAcceptInvite}
+                state={responding ? 'loading' : 'default'}
+              />
+            </View>
+          </View>
         </View>
       )}
 
@@ -731,6 +817,52 @@ const styles = StyleSheet.create({
     borderTopWidth: 0.5,
     borderTopColor: 'rgba(255,255,255,0.06)',
     backgroundColor: colors.black[100],
+  },
+
+  // Invite response card
+  inviteCard: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  inviteCardTitle: {
+    fontSize: 12.5,
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.5)',
+    marginBottom: 4,
+  },
+  inviteCardAmount: {
+    fontSize: 22,
+    fontWeight: '700',
+    fontFamily: typography.fontFamily.primary,
+    color: colors.white[100],
+  },
+  inviteCardUnit: {
+    fontSize: 13,
+    fontWeight: '400',
+    color: 'rgba(255,255,255,0.4)',
+  },
+  inviteActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    alignItems: 'stretch',
+  },
+  inviteAcceptWrap: {
+    flex: 1,
+  },
+  ghostBtn: {
+    paddingHorizontal: 20,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.09)',
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  ghostBtnText: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    fontFamily: typography.fontFamily.primary,
+    color: 'rgba(255,255,255,0.85)',
   },
 
   // Modal overlay

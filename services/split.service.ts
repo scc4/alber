@@ -185,6 +185,16 @@ export async function launchItem(data: LaunchItemInput, token: string): Promise<
   return bffPost<LaunchItemResponse>('split-launch', data, token)
 }
 
+export async function respondToSplitInvite(
+  splitId:  string,
+  approved: boolean,
+  token:    string,
+): Promise<void> {
+  await bffPost<{ split_id: string; status: string }>(
+    'split-invite-respond', { split_id: splitId, approved }, token,
+  )
+}
+
 export async function closeSplit(
   splitId:     string,
   allocations: Record<string, number>,

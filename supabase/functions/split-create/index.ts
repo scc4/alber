@@ -1,19 +1,13 @@
-// Spec: /specs/06_modules/split.md §3, §6
-// Cria split fixo ou variável. Participantes são escolhidos e fixados na
-// criação — não há mais convite por link/entrada depois (spec atualizada).
-// Cada participante selecionado paga sua quota via transfer Asaas real para
-// a carteira do dono no momento da criação (mesma regra que antes vivia em
-// split-join, agora executada para todos de uma vez, atomicamente):
-//   Fixed:    débito imediato participante → dono (dono não paga, é recebedor).
-//   Variable: débito imediato participante → dono; quota do dono é bloqueada
-//             virtualmente (sem TX Asaas — dinheiro já está na subconta dele).
-// Para evitar cobrar alguns participantes e falhar nos demais, o saldo de
-// TODOS é validado antes de qualquer transferência ser disparada.
+// Spec: /specs/06_modules/split.md §3, §5, §6
+// Cria split fixo ou variável. Participantes são escolhidos na criação — não há
+// convite por link/entrada depois — mas entram como 'pending': ninguém é cobrado
+// aqui. Cada participante aprova (ou recusa) individualmente em split-invite-respond,
+// e é só na aprovação que a transferência Asaas real acontece.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt } from '../_shared/crypto.ts'
-import { getSubcontaBalance, transferToWallet, AsaasError } from '../_shared/asaas.ts'
+import { getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 
@@ -26,9 +20,8 @@ interface CreateRequest {
 }
 
 interface ResolvedParticipant {
-  id:            string
-  handle:        string
-  apiKey:        string
+  id:     string
+  handle: string
 }
 
 const supabaseAdmin = createClient(
@@ -86,9 +79,10 @@ Deno.serve(async (req: Request) => {
   if (!owner.asaas_wallet_id)
     return err('ACCOUNT_NOT_CONFIGURED', 'Conta financeira não configurada', 503)
 
-  // ── Resolver participantes ANTES de criar/cobrar qualquer coisa ──────────────
-  // Nada é gravado no banco e nenhum Asaas transfer é disparado até que todos
-  // os handles selecionados sejam resolvidos e tenham saldo suficiente.
+  // ── Resolver participantes ANTES de criar qualquer coisa ─────────────────────
+  // Aqui só validamos que os handles existem e têm conta financeira configurada
+  // (estado estático). Saldo é checado só na aprovação — não faz sentido validar
+  // agora um valor que pode mudar até lá, e ninguém é cobrado nesta etapa.
 
   const ownerHandleNoAt = (owner.handle ?? '').replace(/^@/, '').toLowerCase()
   const normalizedHandles = participant_handles.map(h => (h ?? '').replace(/^@/, '').toLowerCase().trim())
@@ -104,7 +98,6 @@ Deno.serve(async (req: Request) => {
   const resolvedParticipants: ResolvedParticipant[] = []
   const notFoundHandles:      string[] = []
   const noAccountHandles:     string[] = []
-  const insufficientHandles:  string[] = []
 
   try {
     for (const handleNoAt of normalizedHandles) {
@@ -123,14 +116,7 @@ Deno.serve(async (req: Request) => {
         continue
       }
 
-      const apiKey = await aesDecrypt(invitee.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
-      const balance = await getSubcontaBalance(apiKey)
-      if (balance < amountPerPerson) {
-        insufficientHandles.push(invitee.handle)
-        continue
-      }
-
-      resolvedParticipants.push({ id: invitee.id, handle: invitee.handle, apiKey })
+      resolvedParticipants.push({ id: invitee.id, handle: invitee.handle })
     }
   } catch (e) {
     await logError(supabaseAdmin, 'split-create', e, { owner_id: owner.id, step: 'resolve_participants' })
@@ -151,14 +137,6 @@ Deno.serve(async (req: Request) => {
       `Conta financeira não configurada: ${noAccountHandles.join(', ')}`,
       422,
       { no_account_handles: noAccountHandles },
-    )
-  }
-  if (insufficientHandles.length > 0) {
-    return err(
-      'PARTICIPANTS_INSUFFICIENT_BALANCE',
-      `Saldo insuficiente: ${insufficientHandles.join(', ')}`,
-      422,
-      { insufficient_handles: insufficientHandles },
     )
   }
   if (new Set(resolvedParticipants.map(p => p.id)).size !== resolvedParticipants.length)
@@ -197,13 +175,11 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Criar split ───────────────────────────────────────────────────────────────
+  // Nasce sempre 'open' — mesmo fixed, já que ninguém foi cobrado ainda.
+  // Fecha (fixed) quando o último participante pendente aprovar — ver
+  // split-invite-respond.
 
   const nowIso = new Date().toISOString()
-
-  // Fixed: todos os participantes já entram pagos — não há mais uma fase de
-  // "aguardando adesão", então o split nasce fechado (antes isso acontecia
-  // via auto-close em split-join quando o último participante entrava).
-  // Variable: continua 'open' — segue o fluxo de lançamentos + fechamento manual.
 
   const { data: split, error: splitErr } = await supabaseAdmin
     .from('splits')
@@ -213,8 +189,7 @@ Deno.serve(async (req: Request) => {
       type,
       target_amount,
       max_participants,
-      status:        type === 'fixed' ? 'closed' : 'open',
-      closed_at:     type === 'fixed' ? nowIso : null,
+      status:        'open',
     })
     .select('id')
     .single()
@@ -227,9 +202,9 @@ Deno.serve(async (req: Request) => {
   const splitId = split.id
 
   // ── Registrar dono + participantes selecionados, com rollback em falha ───────
-  // Fixed: dono é recebedor — blocked_amount = 0, não paga via split.
-  // Variable: quota do dono bloqueada virtualmente.
-  // Todos entram como 'accepted' — não há mais estado "aguardando aceite".
+  // Dono: 'accepted' de cara (fixed: blocked_amount 0, é recebedor; variable:
+  // quota bloqueada virtualmente). Convidados: 'pending' — sem cobrança, sem
+  // blocked_amount, até aprovarem individualmente.
 
   const participantRows = [
     {
@@ -242,9 +217,9 @@ Deno.serve(async (req: Request) => {
     ...resolvedParticipants.map(p => ({
       split_id:       splitId,
       user_id:        p.id,
-      status:         'accepted',
-      blocked_amount: type === 'variable' ? amountPerPerson : 0,
-      joined_at:      nowIso,
+      status:         'pending',
+      blocked_amount: 0,
+      joined_at:      null,
     })),
   ]
 
@@ -276,57 +251,6 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // ── Cobrar cada participante: transfer Asaas real → carteira do dono ─────────
-  // Saldo já foi pré-validado para todos; uma falha aqui é rara (erro
-  // transiente do Asaas). Sem estorno automático: se acontecer, o split é
-  // desfeito e o incidente fica registrado em detalhe para reconciliação
-  // manual (algum participante pode já ter sido debitado).
-
-  const debitType = type === 'fixed' ? 'split_debit' : 'split_block'
-  const chargedSoFar: { participant_id: string; amount: number }[] = []
-
-  for (const p of resolvedParticipants) {
-    const { data: txRow } = await supabaseAdmin
-      .from('transactions')
-      .insert({
-        user_id:        p.id,
-        type:           debitType,
-        amount:         amountPerPerson,
-        amount_brl:     amountPerPerson,
-        fee_amount:     0,
-        status:         'pending',
-        reference_id:   splitId,
-        reference_type: 'split',
-        metadata:       { split_id: splitId, split_name: name.trim(), owner_id: owner.id },
-      })
-      .select('id')
-      .single()
-
-    const txId = txRow?.id ?? crypto.randomUUID()
-
-    try {
-      await transferToWallet(amountPerPerson, owner.asaas_wallet_id, `Split: ${name.trim()}`, txId, p.apiKey)
-      await supabaseAdmin.from('transactions').update({ status: 'completed' }).eq('id', txId)
-      chargedSoFar.push({ participant_id: p.id, amount: amountPerPerson })
-    } catch (e) {
-      const asaasResponse = e instanceof AsaasError ? e.asaasResponse : null
-      await supabaseAdmin.from('transactions').update({ status: 'failed' }).eq('id', txId)
-      await logError(supabaseAdmin, 'split-create', e,
-        {
-          split_id: splitId, failed_participant_id: p.id,
-          already_charged: chargedSoFar, // precisa de reconciliação manual se não-vazio
-        },
-        { asaas_response: asaasResponse },
-      )
-      await supabaseAdmin.from('splits').delete().eq('id', splitId)
-      return err(
-        'ASAAS_ERROR',
-        'Falha ao processar pagamento de um dos participantes. Tente novamente. Se algum valor foi debitado, contate o suporte.',
-        503,
-      )
-    }
-  }
-
   // ── Audit log ─────────────────────────────────────────────────────────────────
 
   try {
@@ -337,13 +261,13 @@ Deno.serve(async (req: Request) => {
     })
   } catch { /* best-effort */ }
 
-  // ── Notificar participantes adicionados (best-effort) ─────────────────────────
+  // ── Notificar participantes convidados (best-effort) ─────────────────────────
 
   for (const p of resolvedParticipants) {
     sendPush(
       p.id,
-      'Você entrou em um Split',
-      `${owner.handle} adicionou você ao split "${name.trim()}"`,
+      'Você foi convidado para um Split',
+      `${owner.handle} te convidou pro split "${name.trim()}" — aprove para entrar`,
       { route: `/(app)/split/${splitId}` },
       'invite',
     ).catch(() => {})

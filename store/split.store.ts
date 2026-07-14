@@ -120,6 +120,12 @@ interface SplitState {
     token:       string,
   ) => Promise<void>
 
+  /**
+   * Participante aprova ou recusa o próprio convite pendente.
+   * Aprovar dispara cobrança Asaas real no backend.
+   */
+  respondToInvite: (splitId: string, userId: string, approved: boolean, token: string) => Promise<void>
+
   // ── Ações locais (UX / sem Edge Function no MVP) ─────────────────────────
 
   /** Atualiza URI da foto de um item após upload confirmar. */
@@ -251,6 +257,41 @@ export const useSplitStore = create<SplitState>((set, get) => ({
       }))
     } catch (e) {
       set({ error: errorMessage(e, 'Erro ao fechar split'), loading: false })
+      throw e
+    }
+  },
+
+  // ── Responder convite ──────────────────────────────────────────────────────
+
+  respondToInvite: async (splitId, userId, approved, token) => {
+    set({ error: null })
+    try {
+      await splitService.respondToSplitInvite(splitId, approved, token)
+      const nowIso = new Date().toISOString()
+      set(s => ({
+        splits: s.splits.map(sp => {
+          if (sp.id !== splitId) return sp
+          if (!approved) {
+            return { ...sp, participants: sp.participants.filter(p => p.id !== userId) }
+          }
+          const amountPerPerson = sp.participantCount > 0 ? sp.totalValue / sp.participantCount : 0
+          return {
+            ...sp,
+            participants: sp.participants.map(p =>
+              p.id === userId
+                ? {
+                    ...p,
+                    status:        'accepted' as ParticipantStatus,
+                    blockedAmount: sp.type === 'variable' ? amountPerPerson : 0,
+                    joinedAt:      nowIso,
+                  }
+                : p,
+            ),
+          }
+        }),
+      }))
+    } catch (e) {
+      set({ error: errorMessage(e, 'Erro ao responder convite') })
       throw e
     }
   },

@@ -472,7 +472,18 @@
       "closeSplitFixed": "Encerrar split",
       "closedBanner": "Split encerrado",
       "amountUnit": "Albers",
-      "eachSuffix": "cada"
+      "eachSuffix": "cada",
+      "inviteCardTitle": "Sua parte no split",
+      "inviteAcceptCta": "Aceitar",
+      "inviteAcceptErrorTitle": "Erro ao aceitar",
+      "inviteAcceptError": "Não foi possível aceitar o convite. Tente novamente.",
+      "inviteLoadCta": "Carregar Albers",
+      "inviteDeclineCta": "Recusar",
+      "inviteDeclineConfirmTitle": "Recusar convite",
+      "inviteDeclineConfirmBody": "Tem certeza que deseja recusar o convite de {{name}}?",
+      "inviteDeclineConfirmCta": "Recusar",
+      "inviteDeclineErrorTitle": "Erro ao recusar",
+      "inviteDeclineError": "Não foi possível recusar o convite. Tente novamente."
     },
     "lancar": {
       "title": "Lançar item",

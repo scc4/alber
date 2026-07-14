@@ -259,17 +259,21 @@ Deno.serve(async (req: Request) => {
   // ── Registrar split_block do dono (variável, sem transfer Asaas) ─────────────
 
   if (type === 'variable' && amountPerPerson > 0) {
-    await supabaseAdmin.from('transactions').insert({
-      user_id:        owner.id,
-      type:           'split_block',
-      amount:         amountPerPerson,
-      amount_brl:     amountPerPerson,
-      fee_amount:     0,
-      status:         'completed',
-      reference_id:   splitId,
-      reference_type: 'split',
-      metadata:       { split_id: splitId, split_name: name.trim() },
-    }).catch(e => console.error('[split-create] split_block tx failed (non-critical):', e))
+    try {
+      await supabaseAdmin.from('transactions').insert({
+        user_id:        owner.id,
+        type:           'split_block',
+        amount:         amountPerPerson,
+        amount_brl:     amountPerPerson,
+        fee_amount:     0,
+        status:         'completed',
+        reference_id:   splitId,
+        reference_type: 'split',
+        metadata:       { split_id: splitId, split_name: name.trim() },
+      })
+    } catch (e) {
+      console.error('[split-create] split_block tx failed (non-critical):', e)
+    }
   }
 
   // ── Cobrar cada participante: transfer Asaas real → carteira do dono ─────────
@@ -325,11 +329,13 @@ Deno.serve(async (req: Request) => {
 
   // ── Audit log ─────────────────────────────────────────────────────────────────
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    owner.id,
-    event_type: 'split_created',
-    metadata:   { split_id: splitId, type, target_amount, max_participants },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    owner.id,
+      event_type: 'split_created',
+      metadata:   { split_id: splitId, type, target_amount, max_participants },
+    })
+  } catch { /* best-effort */ }
 
   // ── Notificar participantes adicionados (best-effort) ─────────────────────────
 

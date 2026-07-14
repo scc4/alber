@@ -85,11 +85,13 @@ Deno.serve(async (req: Request) => {
     ? pin_hash === pinSha256
     : await bcryptVerify(pin_hash, pinBcrypt!)
   if (!pinOk) {
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id:    user.id,
-      event_type: 'split_close_pin_failed',
-      metadata:   { split_id },
-    }).catch(() => {})
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id:    user.id,
+        event_type: 'split_close_pin_failed',
+        metadata:   { split_id },
+      })
+    } catch { /* best-effort */ }
     return err('INVALID_CREDENTIALS', 'PIN incorreto', 401)
   }
 
@@ -139,25 +141,32 @@ Deno.serve(async (req: Request) => {
     if (typeof finalAmount !== 'number' || finalAmount < 0) return
 
     // Atualizar final_amount e status do participante
-    await supabaseAdmin
-      .from('split_participants')
-      .update({ final_amount: finalAmount, status: 'settled' })
-      .eq('split_id', split_id)
-      .eq('user_id', userId)
-      .catch(e => console.error(`[split-close] final_amount update failed user=${userId}:`, e))
+    try {
+      await supabaseAdmin
+        .from('split_participants')
+        .update({ final_amount: finalAmount, status: 'settled' })
+        .eq('split_id', split_id)
+        .eq('user_id', userId)
+    } catch (e) {
+      console.error(`[split-close] final_amount update failed user=${userId}:`, e)
+    }
 
     // TX de liquidação (contabilidade do valor final cobrado)
-    await supabaseAdmin.from('transactions').insert({
-      user_id:        userId,
-      type:           'split_settle',
-      amount:         finalAmount,
-      amount_brl:     finalAmount,
-      fee_amount:     0,
-      status:         'completed',
-      reference_id:   split_id,
-      reference_type: 'split',
-      metadata:       { split_id, split_name: split.name, final_amount: finalAmount },
-    }).catch(e => console.error(`[split-close] split_settle tx failed user=${userId}:`, e))
+    try {
+      await supabaseAdmin.from('transactions').insert({
+        user_id:        userId,
+        type:           'split_settle',
+        amount:         finalAmount,
+        amount_brl:     finalAmount,
+        fee_amount:     0,
+        status:         'completed',
+        reference_id:   split_id,
+        reference_type: 'split',
+        metadata:       { split_id, split_name: split.name, final_amount: finalAmount },
+      })
+    } catch (e) {
+      console.error(`[split-close] split_settle tx failed user=${userId}:`, e)
+    }
 
     // Calcular excedente: o que o participante pagou além do valor final definido
     const blocked   = blockedByUser.get(userId) ?? 0
@@ -230,11 +239,13 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao fechar split', 500)
   }
 
-  supabaseAdmin.from('audit_logs').insert({
-    user_id:    user.id,
-    event_type: 'split_closed',
-    metadata:   { split_id, participant_count: allocationEntries.length },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    user.id,
+      event_type: 'split_closed',
+      metadata:   { split_id, participant_count: allocationEntries.length },
+    })
+  } catch { /* best-effort */ }
 
   const participantIds = Object.keys(allocations).filter(id => id !== user.id)
   Promise.allSettled(

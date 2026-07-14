@@ -166,23 +166,27 @@ Deno.serve(async (req: Request) => {
   // Estas TXs servem como contabilidade para cálculo de excedente no fechamento.
 
   const debits = (participants as ParticipantRow[]).map(async (p) => {
-    await supabaseAdmin.from('transactions').insert({
-      user_id:        p.user_id,
-      type:           'split_debit',
-      amount:         perPerson,
-      amount_brl:     perPerson,
-      fee_amount:     0,
-      status:         'completed',
-      reference_id:   split_id,
-      reference_type: 'split',
-      metadata: {
-        split_id,
-        split_item_id:    itemId,
-        description:      description.trim(),
-        item_total_value: valueRounded,
-        participant_count: participantCount,
-      },
-    }).catch(e => console.error(`[split-launch] split_debit tx failed user=${p.user_id}:`, e))
+    try {
+      await supabaseAdmin.from('transactions').insert({
+        user_id:        p.user_id,
+        type:           'split_debit',
+        amount:         perPerson,
+        amount_brl:     perPerson,
+        fee_amount:     0,
+        status:         'completed',
+        reference_id:   split_id,
+        reference_type: 'split',
+        metadata: {
+          split_id,
+          split_item_id:    itemId,
+          description:      description.trim(),
+          item_total_value: valueRounded,
+          participant_count: participantCount,
+        },
+      })
+    } catch (e) {
+      console.error(`[split-launch] split_debit tx failed user=${p.user_id}:`, e)
+    }
   })
 
   await Promise.allSettled(debits)
@@ -200,11 +204,13 @@ Deno.serve(async (req: Request) => {
     )
   Promise.allSettled(pushes).catch(() => {})
 
-  supabaseAdmin.from('audit_logs').insert({
-    user_id:    user.id,
-    event_type: 'split_launch',
-    metadata:   { split_id, item_id: itemId, value: valueRounded, per_person: perPerson, participant_count: participantCount },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    user.id,
+      event_type: 'split_launch',
+      metadata:   { split_id, item_id: itemId, value: valueRounded, per_person: perPerson, participant_count: participantCount },
+    })
+  } catch { /* best-effort */ }
 
   const remainingBudget = parseFloat((Number(split.target_amount) - newTotal).toFixed(2))
 

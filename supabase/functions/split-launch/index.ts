@@ -161,7 +161,7 @@ Deno.serve(async (req: Request) => {
   const itemId = splitItem.id
 
   // ── Registrar split_debit de cada participante (SP-15) ───────────────────────
-  // O dinheiro já está com o dono desde o join (Asaas transfer em split-join).
+  // O dinheiro já está com o dono desde a criação do split (Asaas transfer em split-create).
   // blocked_amount não é alterado; o consumido é derivado dos split_debit TXs.
   // Estas TXs servem como contabilidade para cálculo de excedente no fechamento.
 

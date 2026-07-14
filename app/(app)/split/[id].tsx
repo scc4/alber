@@ -10,7 +10,6 @@ import {
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -32,10 +31,6 @@ import { formatAlbers } from '../../../utils/format'
 import { colors, spaceSkins } from '../../../tokens/colors'
 import { spacing } from '../../../tokens/spacing'
 import { typography } from '../../../tokens/typography'
-
-const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '')
-const BFF_URL      = SUPABASE_URL + '/functions/v1'
-const ANON_KEY     = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -81,10 +76,6 @@ export default function SplitDetailScreen() {
 
   const [recalcDismissed, setRecalcDismissed] = useState(false)
   const [showLaunchSheet, setShowLaunchSheet] = useState(false)
-  const [showExtend, setShowExtend]           = useState(false)
-  const [extendDays, setExtendDays]           = useState(7)
-  const [extending, setExtending]             = useState(false)
-  const [extendError, setExtendError]         = useState<string | null>(null)
   const [lightboxUri, setLightboxUri]         = useState<string | null>(null)
 
   // ── Loading / not found ───────────────────────────────────────────────────────
@@ -128,40 +119,6 @@ export default function SplitDetailScreen() {
 
   // Show recalc banner for active variable splits that have launched items
   const showRecalc = !isFixed && isActive && split.totalLaunched > 0 && !recalcDismissed
-
-  async function handleResend() {
-    if (!split) return
-    try { await Share.share({ message: split.inviteDeepLink, title: split.name }) } catch { /* ignore */ }
-  }
-
-  async function handleExtendConfirm() {
-    if (!token || !split || extending) return
-    setExtending(true)
-    setExtendError(null)
-    try {
-      const res = await fetch(`${BFF_URL}/split-extend`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          apikey: ANON_KEY,
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ split_id: split.id, days: extendDays }),
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        setExtendError(body?.message ?? t('split.detalhe.extendError'))
-        return
-      }
-      setShowExtend(false)
-      setExtendError(null)
-      fetchSplit(split.id, token)
-    } catch {
-      setExtendError(t('split.detalhe.extendError'))
-    } finally {
-      setExtending(false)
-    }
-  }
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -305,22 +262,6 @@ export default function SplitDetailScreen() {
           />
         ))}
 
-        {/* Owner actions */}
-        {isActive && isOwner && (
-          <View style={styles.ownerActions}>
-            <TouchableOpacity onPress={handleResend} style={styles.ghostBtn} activeOpacity={0.75}>
-              <Text style={styles.ghostBtnText}>{t('split.detalhe.resendLink')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={() => setShowExtend(true)}
-              style={styles.ghostBtn}
-              activeOpacity={0.75}
-            >
-              <Text style={styles.ghostBtnText}>{t('split.detalhe.extendDeadline')}</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
         {/* Closed banner */}
         {!isActive && (
           <View style={styles.closedBanner}>
@@ -392,49 +333,6 @@ export default function SplitDetailScreen() {
           </Pressable>
         </Modal>
       )}
-
-      {/* Extend expiry modal */}
-      <Modal
-        visible={showExtend}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowExtend(false)}
-      >
-        <Pressable style={styles.modalOverlay} onPress={() => setShowExtend(false)}>
-          <Pressable style={[styles.extendSheet, { paddingBottom: insets.bottom + 20 }]}>
-            <Text style={styles.extendTitle}>{t('split.detalhe.extendDeadline')}</Text>
-            <View style={styles.stepper}>
-              <TouchableOpacity
-                onPress={() => setExtendDays(d => Math.max(1, d - 1))}
-                style={styles.stepBtn}
-                activeOpacity={0.7}
-                disabled={extending}
-              >
-                <Text style={styles.stepBtnText}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.stepCount}>
-                {extendDays} {t('split.criar.customDaysUnit')}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setExtendDays(d => Math.min(90, d + 1))}
-                style={styles.stepBtn}
-                activeOpacity={0.7}
-                disabled={extending}
-              >
-                <Text style={styles.stepBtnText}>+</Text>
-              </TouchableOpacity>
-            </View>
-            {extendError ? (
-              <Text style={styles.extendErrorText}>{extendError}</Text>
-            ) : null}
-            <PrimaryButton
-              label={t('split.detalhe.extendConfirmCta')}
-              onPress={handleExtendConfirm}
-              state={extending ? 'loading' : 'default'}
-            />
-          </Pressable>
-        </Pressable>
-      </Modal>
     </View>
   )
 }
@@ -810,29 +708,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // Owner actions
-  ownerActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: 24,
-  },
-  ghostBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ghostBtnText: {
-    fontSize: 12.5,
-    fontWeight: '500',
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.85)',
-  },
-
   // Closed banner
   closedBanner: {
     marginTop: 24,
@@ -1035,56 +910,4 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.4)',
   },
 
-  // Extend modal
-  extendSheet: {
-    backgroundColor: colors.black[90],
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.lg,
-    gap: spacing.md,
-  },
-  extendTitle: {
-    fontSize: 17,
-    fontWeight: '600',
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-  },
-  extendErrorText: {
-    fontSize: 12,
-    fontFamily: typography.fontFamily.primary,
-    color: colors.state.error,
-    textAlign: 'center',
-  },
-  stepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  stepBtn: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepBtnText: {
-    fontSize: 20,
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-  },
-  stepCount: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    fontWeight: '600',
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-    fontVariant: ['tabular-nums'],
-  },
 })

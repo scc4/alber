@@ -46,28 +46,14 @@ async function restGet<T>(endpoint: string, token: string): Promise<T> {
   return res.json() as Promise<T>
 }
 
-async function restRpc<T>(fn: string, args: unknown, token: string): Promise<T> {
-  const res = await fetch(`${REST}/rpc/${fn}`, {
-    method:  'POST',
-    headers: { ...restHeaders(token), 'Content-Type': 'application/json' },
-    body:    JSON.stringify(args),
-  })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({})) as Record<string, unknown>
-    throw new BffError('REST_ERROR', String(data.message ?? 'Erro'), res.status)
-  }
-  return res.json() as Promise<T>
-}
-
 // ── Interfaces de entrada ─────────────────────────────────────────────────────
 
 export interface CreateSplitInput {
-  name:                 string
-  type:                 'fixed' | 'variable'
-  target_amount:        number
-  max_participants:     number
-  invite_expires_at:    string
-  participant_handles?: string[]
+  name:                string
+  type:                'fixed' | 'variable'
+  target_amount:       number
+  max_participants:    number
+  participant_handles: string[]
 }
 
 export interface LaunchItemInput {
@@ -80,22 +66,7 @@ export interface LaunchItemInput {
 // ── Interfaces de saída ───────────────────────────────────────────────────────
 
 export interface CreateSplitResponse {
-  split_id:           string
-  invite_token:       string
-  invite_url:         string
-  invited_handles?:   string[]
-  not_found_handles?: string[]
-}
-
-export interface JoinSplitResponse {
-  split_id:          string
-  name:              string
-  type:              'fixed' | 'variable'
-  target_amount:     number
-  status:            string
-  your_amount:       number
-  participants:      Array<{ user_id: string; status: string; blocked_amount: number; joined_at: string }>
-  invite_expires_at: string
+  split_id: string
 }
 
 export interface LaunchItemResponse {
@@ -136,8 +107,6 @@ interface DbSplit {
   owner_id:          string
   target_amount:     string
   max_participants:  number
-  invite_token:      string
-  invite_expires_at: string
   created_at:        string
   closed_at:         string | null
   owner:             { handle: string } | null
@@ -191,63 +160,15 @@ function mapSplit(db: DbSplit): Split {
     participants,
     items,
     totalLaunched,
-    inviteToken:      db.invite_token,
-    inviteDeepLink:   `alber://split/convite/${db.invite_token}`,
-    expiresAt:        db.invite_expires_at,
     createdAt:        db.created_at,
     closedAt:         db.closed_at,
-  }
-}
-
-// Resposta da RPC get_split_preview (migration 014)
-interface DbSplitPreview {
-  id:                string
-  name:              string
-  type:              string
-  target_amount:     string
-  max_participants:  number
-  invite_expires_at: string
-  invite_token:      string
-  total_launched:    string
-  owner_handle:      string
-  participants:      Array<{ user_id: string; status: string; handle: string; name: string }> | null
-}
-
-function mapSplitPreview(db: DbSplitPreview): Split {
-  const participants: SplitParticipant[] = (db.participants ?? []).map(p => ({
-    id:            p.user_id,
-    name:          p.name,
-    handle:        p.handle,
-    initials:      p.name.substring(0, 2).toUpperCase(),
-    status:        'accepted' as const,
-    blockedAmount: 0,
-    joinedAt:      null,
-  }))
-
-  return {
-    id:               db.id,
-    name:             db.name,
-    type:             db.type as 'fixed' | 'variable',
-    status:           'active',
-    ownerId:          '',  // não retornado no preview
-    ownerHandle:      db.owner_handle,
-    totalValue:       Number(db.target_amount),
-    participantCount: db.max_participants,
-    participants,
-    items:            [],
-    totalLaunched:    Number(db.total_launched),
-    inviteToken:      db.invite_token,
-    inviteDeepLink:   `alber://split/convite/${db.invite_token}`,
-    expiresAt:        db.invite_expires_at,
-    createdAt:        '',
-    closedAt:         null,
   }
 }
 
 // Campos selecionados em todas as queries REST de split
 const SPLIT_SELECT = [
   'id', 'name', 'type', 'status', 'owner_id', 'target_amount',
-  'max_participants', 'invite_token', 'invite_expires_at', 'created_at', 'closed_at',
+  'max_participants', 'created_at', 'closed_at',
   'owner:users!splits_owner_id_fkey(handle)',
   'split_participants(user_id,status,blocked_amount,joined_at,' +
     'participant_user:users!split_participants_user_id_fkey(name,handle))',
@@ -258,10 +179,6 @@ const SPLIT_SELECT = [
 
 export async function createSplit(data: CreateSplitInput, token: string): Promise<CreateSplitResponse> {
   return bffPost<CreateSplitResponse>('split-create', data, token)
-}
-
-export async function joinSplit(inviteToken: string, token: string): Promise<JoinSplitResponse> {
-  return bffPost<JoinSplitResponse>('split-join', { invite_token: inviteToken }, token)
 }
 
 export async function launchItem(data: LaunchItemInput, token: string): Promise<LaunchItemResponse> {
@@ -295,12 +212,3 @@ export async function getSplit(splitId: string, token: string): Promise<Split | 
   return rows[0] ? mapSplit(rows[0]) : null
 }
 
-export async function getSplitByToken(inviteToken: string, token: string): Promise<Split | null> {
-  // Usa RPC SECURITY DEFINER para visualizar o preview sem ser participante (migration 014)
-  const rows = await restRpc<DbSplitPreview[]>(
-    'get_split_preview',
-    { p_invite_token: inviteToken },
-    token,
-  )
-  return rows[0] ? mapSplitPreview(rows[0]) : null
-}

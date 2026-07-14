@@ -1,14 +1,15 @@
 // Design: /design/flows-split.jsx — SplitCreateScreen
 // Spec: /specs/06_modules/split.md
-// Wizard de 3 etapas + tela de compartilhar.
+// Wizard de 3 etapas: nome/tipo → valor/vagas → participantes (obrigatório
+// preencher todas as vagas). Participantes ficam fixados na criação — não há
+// convite por link nem etapa de compartilhar.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
-  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -18,7 +19,7 @@ import {
 import { router } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
-import { useSplitStore, SplitType, LinkValidity } from '../../../store/split.store'
+import { useSplitStore, SplitType } from '../../../store/split.store'
 import { useAuthStore } from '../../../store/auth.store'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { Eyebrow } from '../../../components/shared/Eyebrow'
@@ -30,14 +31,7 @@ import { typography } from '../../../tokens/typography'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-type Step = 1 | 2 | 'participants' | 3 | 'share'
-
-const VALIDITY_OPTIONS: { id: LinkValidity; key: string }[] = [
-  { id: '1h',     key: 'split.criar.validity1h'     },
-  { id: '24h',    key: 'split.criar.validity24h'    },
-  { id: '7d',     key: 'split.criar.validity7d'     },
-  { id: 'custom', key: 'split.criar.validityCustom' },
-]
+type Step = 1 | 2 | 'participants'
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
@@ -54,36 +48,14 @@ export default function SplitCriarScreen() {
   const { t } = useTranslation()
   const insets = useSafeAreaInsets()
   const token    = useAuthStore(s => s.token)
-  const user     = useAuthStore(s => s.user)
-  const { draft, updateDraft, resetDraft, createSplit, setActiveSplitId } = useSplitStore()
-  const splits = useSplitStore(s => s.splits)
-
-  const recentContacts = useMemo(() => {
-    const seen     = new Set<string>()
-    const myHandle = user?.handle ?? ''
-    const list: { name: string; handle: string }[] = []
-    for (const split of splits.filter(sp => sp.status === 'active')) {
-      for (const p of split.participants) {
-        if (!p.handle || p.handle === myHandle || seen.has(p.handle)) continue
-        seen.add(p.handle)
-        list.push({ name: p.name, handle: p.handle })
-        if (list.length >= 5) return list
-      }
-    }
-    return list
-  }, [splits, user?.handle])
+  const { draft, updateDraft, resetDraft, createSplit } = useSplitStore()
 
   const [step, setStep]                     = useState<Step>(1)
   const [valueStr, setValueStr]             = useState('')
-  const [customDays, setCustomDays]         = useState(7)
-  const [createdId, setCreatedId]           = useState<string | null>(null)
-  const [createdInviteUrl, setCreatedInviteUrl] = useState<string | null>(null)
   const [creating, setCreating]             = useState(false)
   const [createError, setCreateError]       = useState<string | null>(null)
-  const [copied, setCopied]                 = useState(false)
-  const copiedTimer                         = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Convidar participantes (opcional, antes de confirmar a criação)
+  // Participantes (obrigatório preencher todas as vagas antes de criar)
   const [participantQuery, setParticipantQuery]     = useState('')
   const [participantSearching, setParticipantSearching] = useState(false)
   const [participantResults, setParticipantResults] = useState<ParticipantResult[]>([])
@@ -116,8 +88,6 @@ export default function SplitCriarScreen() {
     return () => clearTimeout(timer)
   }, [participantQuery, token])
 
-  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current) }, [])
-
   // ── Computed ─────────────────────────────────────────────────────────────────
 
   const isFixed     = draft.type === 'fixed'
@@ -125,6 +95,9 @@ export default function SplitCriarScreen() {
   const perPerson   = draft.participantCount > 0
     ? Math.ceil(parsedValue / draft.participantCount)
     : 0
+
+  const maxInvitable = Math.max(0, draft.participantCount - 1)
+  const slotsFilled  = selectedParticipants.length === maxInvitable
 
   // ── Actions ───────────────────────────────────────────────────────────────────
 
@@ -136,13 +109,6 @@ export default function SplitCriarScreen() {
     updateDraft({ totalValue: parsedValue })
     setStep('participants')
   }
-
-  function goToStep3() {
-    updateDraft({ participantHandles: selectedParticipants.map(p => p.handle) })
-    setStep(3)
-  }
-
-  const maxInvitable = Math.max(0, draft.participantCount - 1)
 
   function addParticipant(p: ParticipantResult) {
     if (selectedParticipants.some(sp => sp.id === p.id)) return
@@ -157,11 +123,8 @@ export default function SplitCriarScreen() {
   }
 
   async function handleCreate() {
-    if (creating || !token) return
-    const expiry = draft.linkValidity === 'custom'
-      ? new Date(Date.now() + customDays * 86_400_000).toISOString()
-      : null
-    updateDraft({ totalValue: parsedValue, customExpiry: expiry })
+    if (creating || !token || !slotsFilled) return
+    updateDraft({ participantHandles: selectedParticipants.map(p => p.handle) })
     setCreating(true)
     setCreateError(null)
     try {
@@ -170,35 +133,6 @@ export default function SplitCriarScreen() {
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : t('split.criar.createError'))
       setCreating(false)
-    }
-  }
-
-  function handleDone() {
-    if (createdId) {
-      setActiveSplitId(createdId)
-      router.replace(`/(app)/split/${createdId}`)
-    } else {
-      router.back()
-    }
-  }
-
-  async function handleCopy() {
-    if (!createdInviteUrl) return
-    try {
-      await Share.share({ message: createdInviteUrl })
-    } catch {
-      /* ignore */
-    }
-    setCopied(true)
-    copiedTimer.current = setTimeout(() => setCopied(false), 2000)
-  }
-
-  async function handleShare() {
-    if (!createdInviteUrl) return
-    try {
-      await Share.share({ message: createdInviteUrl, title: draft.name })
-    } catch {
-      /* ignore */
     }
   }
 
@@ -308,7 +242,11 @@ export default function SplitCriarScreen() {
               <Eyebrow>{t('split.criar.participantsLabel')}</Eyebrow>
               <View style={styles.stepper}>
                 <TouchableOpacity
-                  onPress={() => updateDraft({ participantCount: Math.max(2, draft.participantCount - 1) })}
+                  onPress={() => {
+                    const nextCount = Math.max(2, draft.participantCount - 1)
+                    updateDraft({ participantCount: nextCount })
+                    setSelectedParticipants(prev => prev.slice(0, Math.max(0, nextCount - 1)))
+                  }}
                   style={styles.stepBtn}
                   activeOpacity={0.7}
                 >
@@ -354,149 +292,85 @@ export default function SplitCriarScreen() {
     )
   }
 
-  if (step === 'participants') {
-    return (
-      <WizardShell
-        title={t('split.criar.title')}
-        subtitle={t('split.criar.participantsStepLabel')}
-        onBack={() => setStep(2)}
-        onClose={() => router.back()}
-        insets={insets}
-      >
-        <KeyboardAvoidingView
-          style={styles.flex}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <ScrollView
-            style={styles.flex}
-            contentContainerStyle={styles.stepContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Eyebrow>{t('split.criar.participantsSearchLabel')}</Eyebrow>
-            <TextInput
-              style={styles.nameInput}
-              value={participantQuery}
-              onChangeText={setParticipantQuery}
-              placeholder={t('split.criar.participantsSearchPlaceholder')}
-              placeholderTextColor="rgba(255,255,255,0.25)"
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoFocus
-            />
-            <Text style={styles.participantsHint}>
-              {maxInvitable > 0
-                ? t('split.criar.participantsSlotHint', { n: selectedParticipants.length, max: maxInvitable })
-                : t('split.criar.participantsNoSlots')}
-            </Text>
+  // step === 'participants' — etapa final: seleção obrigatória + criar
 
-            {participantSearching && (
-              <Text style={styles.participantsHint}>{t('split.criar.participantsSearching')}</Text>
-            )}
-
-            {participantResults.length > 0 && (
-              <View style={styles.resultsList}>
-                {participantResults.map(r => {
-                  const alreadySelected = selectedParticipants.some(sp => sp.id === r.id)
-                  const disabled = alreadySelected || selectedParticipants.length >= maxInvitable
-                  return (
-                    <TouchableOpacity
-                      key={r.id}
-                      onPress={() => addParticipant(r)}
-                      disabled={disabled}
-                      style={[styles.resultRow, disabled && styles.resultRowDisabled]}
-                      activeOpacity={0.7}
-                    >
-                      <View style={styles.resultInfo}>
-                        <Text style={styles.resultName}>{r.name}</Text>
-                        <Text style={styles.resultHandle}>{r.handle}</Text>
-                      </View>
-                      <Text style={styles.resultAction}>
-                        {alreadySelected ? t('split.criar.participantsAdded') : t('split.criar.participantsAddCta')}
-                      </Text>
-                    </TouchableOpacity>
-                  )
-                })}
-              </View>
-            )}
-
-            {selectedParticipants.length > 0 && (
-              <View style={styles.selectedSection}>
-                <Eyebrow>{t('split.criar.participantsSelectedLabel')}</Eyebrow>
-                <View style={styles.chipsRow}>
-                  {selectedParticipants.map(p => (
-                    <View key={p.id} style={styles.chip}>
-                      <Text style={styles.chipText} numberOfLines={1}>{p.handle}</Text>
-                      <TouchableOpacity onPress={() => removeParticipant(p.id)} hitSlop={8}>
-                        <Text style={styles.chipRemove}>✕</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            )}
-          </ScrollView>
-
-          <View style={styles.actionArea}>
-            <PrimaryButton
-              label={t('split.criar.continue')}
-              onPress={goToStep3}
-            />
-          </View>
-        </KeyboardAvoidingView>
-      </WizardShell>
-    )
-  }
-
-  if (step === 3) {
-    return (
-      <WizardShell
-        title={t('split.criar.validityLabel')}
-        subtitle={t('split.criar.step3Label')}
-        onBack={() => setStep('participants')}
-        onClose={() => router.back()}
-        insets={insets}
+  return (
+    <WizardShell
+      title={t('split.criar.title')}
+      subtitle={t('split.criar.participantsStepLabel')}
+      onBack={() => setStep(2)}
+      onClose={() => router.back()}
+      insets={insets}
+    >
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
           style={styles.flex}
           contentContainerStyle={styles.stepContent}
+          keyboardShouldPersistTaps="handled"
         >
-          {VALIDITY_OPTIONS.map(opt => {
-            const selected = draft.linkValidity === opt.id
-            return (
-              <TouchableOpacity
-                key={opt.id}
-                onPress={() => updateDraft({ linkValidity: opt.id })}
-                style={[styles.validityCard, selected && styles.validityCardSelected]}
-                activeOpacity={0.75}
-              >
-                <View style={[styles.radio, selected && styles.radioSelected]}>
-                  {selected && <View style={styles.radioDot} />}
-                </View>
-                <Text style={styles.validityLabel}>{t(opt.key)}</Text>
-              </TouchableOpacity>
-            )
-          })}
+          <Eyebrow>{t('split.criar.participantsSearchLabel')}</Eyebrow>
+          <TextInput
+            style={styles.nameInput}
+            value={participantQuery}
+            onChangeText={setParticipantQuery}
+            placeholder={t('split.criar.participantsSearchPlaceholder')}
+            placeholderTextColor="rgba(255,255,255,0.25)"
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+          />
+          <Text style={styles.participantsHint}>
+            {maxInvitable > 0
+              ? t('split.criar.participantsSlotHint', { n: selectedParticipants.length, max: maxInvitable })
+              : t('split.criar.participantsNoSlots')}
+          </Text>
 
-          {/* Custom days stepper */}
-          {draft.linkValidity === 'custom' && (
-            <View style={styles.customStepper}>
-              <TouchableOpacity
-                onPress={() => setCustomDays(d => Math.max(1, d - 1))}
-                style={styles.stepBtn}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.stepBtnText}>−</Text>
-              </TouchableOpacity>
-              <Text style={styles.customDaysText}>
-                {customDays} {t('split.criar.customDaysUnit')}
-              </Text>
-              <TouchableOpacity
-                onPress={() => setCustomDays(d => Math.min(90, d + 1))}
-                style={styles.stepBtn}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.stepBtnText}>+</Text>
-              </TouchableOpacity>
+          {participantSearching && (
+            <Text style={styles.participantsHint}>{t('split.criar.participantsSearching')}</Text>
+          )}
+
+          {participantResults.length > 0 && (
+            <View style={styles.resultsList}>
+              {participantResults.map(r => {
+                const alreadySelected = selectedParticipants.some(sp => sp.id === r.id)
+                const disabled = alreadySelected || selectedParticipants.length >= maxInvitable
+                return (
+                  <TouchableOpacity
+                    key={r.id}
+                    onPress={() => addParticipant(r)}
+                    disabled={disabled}
+                    style={[styles.resultRow, disabled && styles.resultRowDisabled]}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.resultInfo}>
+                      <Text style={styles.resultName}>{r.name}</Text>
+                      <Text style={styles.resultHandle}>{r.handle}</Text>
+                    </View>
+                    <Text style={styles.resultAction}>
+                      {alreadySelected ? t('split.criar.participantsAdded') : t('split.criar.participantsAddCta')}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              })}
+            </View>
+          )}
+
+          {selectedParticipants.length > 0 && (
+            <View style={styles.selectedSection}>
+              <Eyebrow>{t('split.criar.participantsSelectedLabel')}</Eyebrow>
+              <View style={styles.chipsRow}>
+                {selectedParticipants.map(p => (
+                  <View key={p.id} style={styles.chip}>
+                    <Text style={styles.chipText} numberOfLines={1}>{p.handle}</Text>
+                    <TouchableOpacity onPress={() => removeParticipant(p.id)} hitSlop={8}>
+                      <Text style={styles.chipRemove}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
             </View>
           )}
         </ScrollView>
@@ -508,97 +382,10 @@ export default function SplitCriarScreen() {
           <PrimaryButton
             label={t('split.criar.createCta')}
             onPress={handleCreate}
-            state={creating ? 'loading' : 'default'}
+            state={creating ? 'loading' : slotsFilled ? 'default' : 'disabled'}
           />
         </View>
-      </WizardShell>
-    )
-  }
-
-  // ── Share screen ─────────────────────────────────────────────────────────────
-
-  const shareSummary = createdId
-    ? isFixed
-      ? t('split.criar.shareSummaryFixed', {
-          perPerson: formatAlbers(perPerson),
-          count: draft.participantCount,
-        })
-      : t('split.criar.shareSummaryVariable', {
-          blockPer: formatAlbers(perPerson),
-          count: draft.participantCount,
-        })
-    : ''
-
-  return (
-    <WizardShell
-      title={t('split.criar.shareLabel')}
-      subtitle={draft.name}
-      onClose={() => router.back()}
-      insets={insets}
-    >
-      <ScrollView
-        style={styles.flex}
-        contentContainerStyle={[styles.stepContent, { paddingBottom: 40 }]}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Created confirmation */}
-        <View style={styles.createdBox}>
-          <Text style={styles.createdLabel}>{t('split.criar.shareCreatedLabel')}</Text>
-          <Text style={styles.createdName}>{draft.name}</Text>
-          <Text style={styles.createdSummary}>{shareSummary}</Text>
-        </View>
-
-        {/* Invite link */}
-        <View style={styles.linkBox}>
-          <Text style={styles.linkLabel}>{t('split.criar.shareLinkLabel')}</Text>
-          <Text style={styles.linkText} numberOfLines={2} selectable>
-            {createdInviteUrl ?? '—'}
-          </Text>
-        </View>
-
-        {/* Copy + Share */}
-        <View style={styles.linkActions}>
-          <TouchableOpacity onPress={handleCopy} style={styles.ghostBtn} activeOpacity={0.75}>
-            <Text style={styles.ghostBtnText}>
-              {copied ? '✓ ' : ''}{t('split.criar.shareCopyCta')}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={handleShare} style={styles.ghostBtn} activeOpacity={0.75}>
-            <Text style={styles.ghostBtnText}>{t('split.criar.shareShareCta')}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Alber contacts */}
-        <View style={styles.contactsHeader}>
-          <Eyebrow>{t('split.criar.shareContactsLabel')}</Eyebrow>
-        </View>
-        {recentContacts.length === 0
-          ? <Text style={styles.contactsEmpty}>{t('split.criar.shareContactsEmpty')}</Text>
-          : (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.contactsRow}
-            >
-              {recentContacts.map(c => (
-                <View key={c.handle} style={styles.contactItem}>
-                  <View style={[styles.contactAvatar, { backgroundColor: avatarHue(c.handle) }]}>
-                    <Text style={styles.contactInitial}>{c.name[0]}</Text>
-                  </View>
-                  <Text style={styles.contactName} numberOfLines={1}>{c.name}</Text>
-                </View>
-              ))}
-            </ScrollView>
-          )
-        }
-      </ScrollView>
-
-      <View style={styles.actionArea}>
-        <PrimaryButton
-          label={t('split.criar.shareConcludeCta')}
-          onPress={handleDone}
-        />
-      </View>
+      </KeyboardAvoidingView>
     </WizardShell>
   )
 }
@@ -641,13 +428,6 @@ function WizardShell({
       {children}
     </View>
   )
-}
-
-// ─── Avatar hue helper ────────────────────────────────────────────────────────
-
-function avatarHue(handle: string): string {
-  const h = ((handle.charCodeAt(1) ?? 65) * 23) % 360
-  return `hsl(${h}, 18%, 22%)`
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
@@ -932,185 +712,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: 'rgba(255,255,255,0.5)',
   },
-
-  // Step 3 — Validity
-  validityCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 16,
-    borderRadius: spacing.radius.md,
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.08)',
-    marginBottom: spacing.sm,
-  },
-  validityCardSelected: {
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderColor: 'rgba(255,255,255,0.25)',
-  },
-  radio: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 1.3,
-    borderColor: 'rgba(255,255,255,0.4)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-  },
-  radioSelected: {
-    borderColor: colors.white[100],
-  },
-  radioDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-    backgroundColor: colors.white[100],
-  },
-  validityLabel: {
-    fontSize: 14.5,
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-  },
-  customStepper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    backgroundColor: TEAL_BG,
-    borderWidth: 0.5,
-    borderColor: TEAL_BORDER,
-    borderRadius: spacing.radius.md,
-    marginTop: -4,
-    marginBottom: spacing.md,
-  },
-  customDaysText: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 18,
-    fontWeight: '600',
-    fontFamily: typography.fontFamily.primary,
-    color: TEAL,
-    fontVariant: ['tabular-nums'],
-  },
   createErrorText: {
     fontSize: 12,
     fontFamily: typography.fontFamily.primary,
     color: 'rgba(239,68,68,0.9)',
     textAlign: 'center',
     marginBottom: 8,
-  },
-
-  // Share screen
-  createdBox: {
-    marginTop: 14,
-    padding: 18,
-    backgroundColor: TEAL_BG,
-    borderWidth: 0.5,
-    borderColor: TEAL_BORDER,
-    borderRadius: spacing.radius.md,
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  createdLabel: {
-    fontSize: 11,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(91,206,201,0.7)',
-    letterSpacing: 11 * 0.1,
-    textTransform: 'uppercase',
-  },
-  createdName: {
-    fontSize: 18,
-    fontWeight: '600',
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-  },
-  createdSummary: {
-    fontSize: 13,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.55)',
-    textAlign: 'center',
-  },
-  linkBox: {
-    marginTop: spacing.lg,
-    padding: 14,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: spacing.radius.md,
-    gap: 6,
-  },
-  linkLabel: {
-    fontSize: 10.5,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.4)',
-    letterSpacing: 10.5 * 0.14,
-    textTransform: 'uppercase',
-  },
-  linkText: {
-    fontSize: 12.5,
-    fontFamily: 'monospace',
-    color: colors.white[100],
-  },
-  linkActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginTop: 14,
-  },
-  ghostBtn: {
-    flex: 1,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ghostBtnText: {
-    fontSize: 12.5,
-    fontWeight: '500',
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.85)',
-  },
-  contactsHeader: {
-    marginTop: spacing.lg,
-    marginBottom: 12,
-  },
-  contactsEmpty: {
-    fontSize: typography.size.caption.fontSize,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.3)',
-    marginBottom: spacing.md,
-  },
-  contactsRow: {
-    gap: 14,
-    paddingBottom: spacing.sm,
-  },
-  contactItem: {
-    alignItems: 'center',
-    gap: 6,
-    minWidth: 54,
-  },
-  contactAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  contactInitial: {
-    fontSize: 15,
-    fontWeight: '600',
-    fontFamily: typography.fontFamily.primary,
-    color: colors.white[100],
-  },
-  contactName: {
-    fontSize: 10.5,
-    fontFamily: typography.fontFamily.primary,
-    color: 'rgba(255,255,255,0.7)',
-    textAlign: 'center',
   },
 })

@@ -174,12 +174,11 @@ interface NotificationsStore {
 
 | Rota | Formato | Uso |
 |---|---|---|
-| Split convite | `alber://split/convite/[token]` | Link compartilhado pelo dono |
 | Space público | `alber://spaces/[id]` | Compartilhamento de Space |
 | Evento | `alber://spaces/[id]/evento/[eventId]` | Compartilhamento de evento |
 
-**Regra:** deep link para split/convite sempre verifica autenticação primeiro.
-Usuário não autenticado → login → redirecionado para o split.
+> Split não tem mais deep link de convite — participantes são fixados na
+> criação (ver `specs/06_modules/split.md` §1).
 
 ---
 

@@ -27,17 +27,10 @@ function avatarBg(handle: string): string {
   return hslToHex(h, 18, 22)
 }
 
-function formatExpiry(split: Split, t: ReturnType<typeof useTranslation>['t']): string {
-  if (split.status === 'closed') return t('split.statusClosed')
+function formatStatus(split: Split, t: ReturnType<typeof useTranslation>['t']): string | null {
+  if (split.status === 'closed')  return t('split.statusClosed')
   if (split.status === 'expired') return t('split.statusExpired')
-  const ms = new Date(split.expiresAt).getTime() - Date.now()
-  if (ms <= 0) return t('split.statusExpired')
-  const hours = Math.floor(ms / 3_600_000)
-  if (hours < 24) return t('split.expiresInH', { n: Math.max(1, hours) })
-  const days = Math.floor(hours / 24)
-  return days === 1
-    ? t('split.expiresInDay')
-    : t('split.expiresInDays', { n: days })
+  return null
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -67,6 +60,7 @@ export function SplitCard({ split, onPress }: Props) {
 
   const valueSuffix = t(isFixed ? 'split.eachPays' : 'split.totalTarget')
   const valuePrefix = isFixed ? '' : `${t('split.upTo')} `
+  const statusLabel = formatStatus(split, t)
 
   return (
     <TouchableOpacity
@@ -74,14 +68,14 @@ export function SplitCard({ split, onPress }: Props) {
       activeOpacity={0.75}
       style={[styles.card, isClosed && styles.cardClosed]}
     >
-      {/* Row 1: type badge + expiry */}
+      {/* Row 1: type badge + status */}
       <View style={styles.badgeRow}>
         <View style={[styles.typeBadge, { borderColor: accentBorder }]}>
           <Text style={[styles.typeText, { color: accent }]}>
             {t(isFixed ? 'split.typeFixed' : 'split.typeVariable')}
           </Text>
         </View>
-        <Text style={styles.expiry}>{formatExpiry(split, t)}</Text>
+        {statusLabel && <Text style={styles.expiry}>{statusLabel}</Text>}
       </View>
 
       {/* Row 2: split name */}

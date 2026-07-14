@@ -129,7 +129,6 @@ export default function AppLayout() {
         <Stack.Screen name="split/criar" />
         <Stack.Screen name="split/[id]" />
         <Stack.Screen name="split/fechar/[id]" />
-        <Stack.Screen name="split/convite/[token]" />
 
         {/* Lounge */}
         <Stack.Screen name="lounge/[id]" />

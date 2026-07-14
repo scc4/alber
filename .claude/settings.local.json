@@ -66,7 +66,13 @@
       "PowerShell(deno --version 2>&1)",
       "Bash(/c/Users/fernando/AppData/Local/Temp/deno-install/bin/deno.exe *)",
       "Bash(npx expo-doctor *)",
-      "Bash(findstr splash *)"
+      "Bash(findstr splash *)",
+      "Bash(grep -v '\\\\.ts$')",
+      "Bash(echo \"exit:$?\")",
+      "Bash(grep -n \"SecurityConfirmation\\\\|security_answer_hash\\\\|pin_hash\\\\|onPass\\\\|handleSecurity\\\\|fetch\\(\\\\`\" \"app/\\(app\\)/perfil/handle.tsx\")",
+      "Bash(grep -i \"perfil/seguranca\\\\|perfil\\\\\\\\\\\\\\\\seguranca\")",
+      "Bash(grep -n \"// Step 3 — Validity\" \"app/\\(app\\)/split/criar.tsx\")",
+      "Bash(grep -i \"split-create\\\\|split-join\\\\|split/criar\\\\|split\\\\\\\\\\\\\\\\criar\")"
     ]
   }
 }

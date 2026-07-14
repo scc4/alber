@@ -1,14 +1,25 @@
 # Alber — Spec Módulo Split
-**Versão:** 1.0  
-**Data:** 28/04/2026  
+**Versão:** 1.2
+**Data:** 14/07/2026
 **Depende de:** 03_backend.md, 05_security.md
 
 ---
 
 ## 1. Visão geral
 
-Divisão de despesas em grupo. Dono cria split, convida via link deep link,
-participantes aderem com validação de saldo automática.
+Divisão de despesas em grupo. Dono cria o split e escolhe os participantes
+(busca por handle) **antes** de criar — não há convite por link nem entrada
+posterior. Ao confirmar a criação, todos os participantes selecionados já
+são cobrados/bloqueados automaticamente, com validação de saldo de todos
+feita antes de qualquer cobrança.
+
+> Decisão v1.2 (extrapola a v1.0/1.1 original): o fluxo antigo de "convite
+> via deep link + adesão posterior" foi removido. Motivo: bug em produção
+> onde a criação falhava no meio do registro de participantes, deixando o
+> split criado só com o dono — a causa raiz era esse modelo em duas fases
+> (criar → convidar → aguardar adesão). O novo modelo torna a criação
+> atômica: participantes só existem se todos puderem ser cobrados com
+> sucesso, numa única operação.
 
 ---
 
@@ -16,8 +27,13 @@ participantes aderem com validação de saldo automática.
 
 | Tipo | Débito | Saldo bloqueado | Fechamento |
 |---|---|---|---|
-| Fixo | Imediato na adesão | Não | Automático |
-| Variável | No fechamento | valor alvo ÷ participantes | Manual pelo dono |
+| Fixo | Imediato na criação (final, para todos) | Não | Automático (já nasce fechado) |
+| Variável | Imediato na criação (bloqueio) | valor alvo ÷ participantes | Manual pelo dono |
+
+Em ambos os tipos, cada participante selecionado (exceto o dono) paga sua
+quota via transferência Asaas real para a carteira do dono no momento da
+criação. O dono nunca paga — no tipo variável, a quota dele é reservada
+virtualmente (o dinheiro já está na própria subconta).
 
 ---
 
@@ -27,7 +43,7 @@ participantes aderem com validação de saldo automática.
 - Nome do split (texto livre)
 - Tipo: Fixo ou Variável (com explicação de cada)
 
-### Etapa 2 — Valor e participantes
+### Etapa 2 — Valor e vagas
 
 **Fixo:**
 - Valor total do split
@@ -36,50 +52,35 @@ participantes aderem com validação de saldo automática.
 
 **Variável:**
 - Valor alvo (teto obrigatório — não pode ultrapassar)
-- Para quantas pessoas vai enviar o link (além do dono)
+- Número de participantes (incluindo o dono)
 - "Cada um terá bloqueado: R$ X" (calculado live)
 - Aviso: valor reservado no saldo ao entrar, definido pelo dono no fechamento
 
-### Etapa 3 — Validade do link
-- Opções: 1 hora | 24 horas | 7 dias | Personalizado
+### Etapa 3 — Selecionar participantes (obrigatório)
+- Busca por handle (@handle ou CPF)
+- Adiciona participantes até preencher exatamente `vagas - 1` (todas as vagas
+  definidas na Etapa 2, menos o dono)
+- Botão "Criar Split" só habilita quando todas as vagas estiverem preenchidas
+- Cada participante exibido como chip removível antes de confirmar
 
-### Split criado
-- Link gerado: `alber://split/convite/{token}`
-- "Copiar" + "Compartilhar link" (share nativo)
-- Lista de contatos Alber para facilitar compartilhamento (se permissão)
-- Dono é automaticamente o primeiro participante
-
----
-
-## 4. Entrar em Split via link
-
-```
-Link recebido → App abre → (login se necessário) → Preview do split
-```
-
-### Preview
-- Nome, tipo, valor, dono, participantes atuais, prazo
-- Valor a ser bloqueado (variável) ou debitado (fixo)
-- Saldo do usuário: ✓ suficiente | ✗ insuficiente
-
-**Saldo suficiente:** entra direto  
-**Saldo insuficiente:** bloqueado + CTA "Carregar Albers" obrigatório
-
-**Split fixo:** débito imediato na adesão  
-**Split variável:** bloqueia `target_amount / max_participants` no saldo
-
-### Link expirado
-- Tela informativa + push para dono
-- Dono pode reenviar ou estender prazo
+### Criar (confirmação)
+1. Backend valida que todos os handles resolvem para usuários existentes
+2. Backend valida saldo Asaas de **todos** os participantes selecionados
+   (e do dono, se variável) — se qualquer um não tiver saldo suficiente ou
+   handle não existir, a criação inteira falha e nada é criado/cobrado
+3. Só então: split é criado, dono + participantes entram como participantes
+   confirmados, e cada participante é debitado/bloqueado via Asaas
+4. App navega direto para o detalhe do split criado
 
 ---
 
-## 5. Gestão do Split (dono)
+## 4. Gestão do Split (dono)
 
 ### Tela de detalhe
-- Participantes com status: ✓ aceito (R$ bloqueado 🔒) | ⏳ aguardando
-- Total bloqueado
-- [Reenviar link] [Estender prazo] [Fechar Split]
+- Participantes, todos já confirmados (não há mais estado "aguardando")
+- Total bloqueado (variável)
+- `[Fechar Split]` — somente splits variáveis ainda abertos (fixo já nasce
+  fechado, ver §6)
 
 ### Fechar Split variável
 ```
@@ -94,69 +95,52 @@ Tela de alocação:
 → BFF: debita final_amount, libera excedente, registra transações
 ```
 
-### Reenviar / Estender link
-- Reenviar: novo link + mesma tela de compartilhamento
-- Estender: date picker (mín: agora + 1h) + push para pendentes
+---
+
+## 5. Split fixo
+
+- Criação: débito imediato de todos os participantes selecionados, sem PIN
+  (saldo pré-validado antes de qualquer cobrança)
+- Fechamento automático e imediato — o split já nasce com status `closed`,
+  já que não existe mais uma fase de espera por adesão
 
 ---
 
-## 6. Split fixo
-
-- Adesão: débito imediato sem PIN (saldo já validado)
-- Fechamento automático quando todos aderiram ou link expirou
-- Dono pode encerrar manualmente
-
----
-
-## 7. Contatos com Alber no Split
-
-- Permissão solicitada ao abrir Split pela primeira vez
-- Sincronização sob demanda (ao abrir ou atualizar manualmente)
-- Lista de contatos da agenda que são usuários Alber
-- "Compartilhar" abre share nativo com link pré-preenchido
-- Se permissão negada: seção não exibida, sem erro
-
----
-
-## 8. Lista de Splits
+## 6. Lista de Splits
 
 - Seções: ATIVOS | ENCERRADOS (colapsável)
-- Card: nome, tipo, participantes, valor, status, prazo
+- Card: nome, tipo, participantes, valor, status
 - [+ Criar Split] no topo
 
 ---
 
-## 9. Analytics obrigatórios
+## 7. Analytics obrigatórios
 
 `split_list_viewed`, `split_create_started`, `split_created`,
-`split_link_copied`, `split_link_shared`, `split_join_viewed`,
-`split_joined`, `split_join_insufficient`, `split_join_declined`,
-`split_link_expired`, `split_extended`, `split_close_started`, `split_closed`
+`split_create_failed`, `split_close_started`, `split_closed`
 
 ---
 
-## 10. Critérios de aceitação
+## 8. Critérios de aceitação
 
 | ID | Critério |
 |---|---|
-| SP-01 | Split fixo debita imediatamente na adesão |
-| SP-02 | Split variável bloqueia valor alvo ÷ participantes |
-| SP-03 | Saldo insuficiente bloqueia com CTA carregar |
-| SP-04 | Deep link abre app e redireciona para preview |
-| SP-05 | Link expirado exibe tela informativa e notifica dono |
-| SP-06 | Dono pode reenviar link ou estender prazo |
+| SP-01 | Split fixo debita imediatamente todos os participantes na criação |
+| SP-02 | Split variável bloqueia valor alvo ÷ participantes de todos na criação |
+| SP-03 | Saldo insuficiente de qualquer participante bloqueia a criação inteira, nada é criado |
+| SP-04 | Etapa de participantes exige preencher todas as vagas antes de permitir criar |
+| SP-05 | Handle inválido/inexistente bloqueia a criação com mensagem clara |
 | SP-07 | Fechamento variável: dono define valor individual |
 | SP-08 | Soma das alocações não ultrapassa valor alvo |
 | SP-09 | Excedente devolvido automaticamente |
 | SP-10 | PIN exigido do dono no fechamento variável |
-| SP-11 | Contatos Alber exibidos se permissão concedida |
-| SP-12 | Push ao entrar e ao fechar split |
+| SP-12 | Push enviado a cada participante ao ser adicionado ao split |
 
 ---
 
-## 11. Ajustes v1.1 — Split variável aprimorado
+## 9. Ajustes v1.1 — Split variável aprimorado
 
-### 11.1 Foto por item lançado
+### 9.1 Foto por item lançado
 
 Cada item lançado pelo dono pode ter 1 foto vinculada.
 Fotos são adicionadas no momento do lançamento — não ao fechar.
@@ -191,7 +175,7 @@ Fotos são adicionadas no momento do lançamento — não ao fechar.
 
 ---
 
-### 11.2 Prestar conta progressiva (novo comportamento)
+### 9.2 Prestar conta progressiva
 
 O dono pode lançar itens da conta em tempo real antes de fechar o split.
 Cada lançamento é debitado imediatamente do valor bloqueado dos participantes.
@@ -204,7 +188,7 @@ Dono abre detalhe do split → [Lançar item]
   - Valor em R$
   - [Confirmar lançamento]
   ↓
-Sistema divide igualmente entre TODOS os participantes ativos
+Sistema divide igualmente entre TODOS os participantes
   ↓
 Débito imediato do valor proporcional do bloqueio de cada um
   ↓
@@ -224,37 +208,7 @@ Feed do split atualizado em tempo real para todos os participantes
 
 ---
 
-### 11.3 Recálculo ao entrar novo participante após lançamentos
-
-Quando um novo participante entra num split variável que já tem lançamentos:
-
-```
-Regra:
-- O que já foi debitado permanece (lançamentos anteriores são imutáveis)
-- O saldo restante (teto - total lançado) é recalculado igualmente
-  entre TODOS os participantes incluindo o novo
-
-Exemplo:
-  Teto: R$ 300 | 3 participantes originais
-  Lançamentos até agora: R$ 90 (R$ 30 cada)
-  Novo participante entra:
-  → Total agora: 4 participantes
-  → Saldo restante: R$ 210
-  → R$ 210 ÷ 4 = R$ 52,50 por pessoa (novo bloqueio adicional)
-  → Participantes originais: desbloqueiam R$ 30 (excedente),
-    bloqueiam R$ 52,50 (novo proporcional)
-  → Novo participante: bloqueia R$ 52,50
-
-Push para todos: "Um novo participante entrou. Seu valor foi recalculado."
-```
-
-**Bloqueio do novo participante ao entrar:**
-- Sistema calcula: saldo_restante ÷ total_participantes
-- Se saldo insuficiente: bloqueado de entrar com CTA carregar
-
----
-
-## 12. Critérios de aceitação adicionais (v1.1)
+## 10. Critérios de aceitação adicionais (v1.1)
 
 | ID | Critério |
 |---|---|
@@ -264,6 +218,3 @@ Push para todos: "Um novo participante entrou. Seu valor foi recalculado."
 | SP-15b | Tela de fechamento não exibe campo de foto |
 | SP-16 | Todos os participantes veem total acumulado em tempo real |
 | SP-17 | Lançamento bloqueado se ultrapassar valor alvo |
-| SP-18 | Novo participante recalcula saldo restante igualmente entre todos |
-| SP-19 | Push enviado a todos ao entrar novo participante após lançamentos |
-| SP-20 | Lançamentos anteriores preservados no recálculo |

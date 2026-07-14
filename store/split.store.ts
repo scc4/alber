@@ -9,7 +9,6 @@ import { BffError } from '../services/auth.service'
 
 export type SplitType         = 'fixed' | 'variable'
 export type SplitStatus       = 'active' | 'closed' | 'expired'
-export type LinkValidity      = '1h' | '24h' | '7d' | 'custom'
 export type ParticipantStatus = 'accepted' | 'pending'
 
 export interface SplitParticipant {
@@ -44,9 +43,6 @@ export interface Split {
   participants:     SplitParticipant[]
   items:            SplitItem[]
   totalLaunched:    number
-  inviteToken:      string
-  inviteDeepLink:   string
-  expiresAt:        string
   createdAt:        string
   closedAt:         string | null
 }
@@ -56,18 +52,10 @@ export interface SplitDraft {
   type:                SplitType | null
   totalValue:          number
   participantCount:    number
-  linkValidity:        LinkValidity
-  customExpiry:        string | null
   participantHandles:  string[]
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function expiryFromValidity(validity: LinkValidity, custom: string | null): string {
-  if (validity === 'custom' && custom) return custom
-  const lookup: Record<string, number> = { '1h': 3_600_000, '24h': 86_400_000, '7d': 604_800_000 }
-  return new Date(Date.now() + (lookup[validity] ?? 3_600_000)).toISOString()
-}
 
 function perPersonValue(totalValue: number, participantCount: number): number {
   if (participantCount <= 0) return 0
@@ -85,8 +73,6 @@ const DRAFT_INITIAL: SplitDraft = {
   type:                null,
   totalValue:          0,
   participantCount:    2,
-  linkValidity:        '24h',
-  customExpiry:        null,
   participantHandles:  [],
 }
 
@@ -112,16 +98,10 @@ interface SplitState {
   fetchSplit: (id: string, token: string) => Promise<void>
 
   /**
-   * Finaliza criação a partir do draft.
-   * Retorna { split_id, invite_token, invite_url } para navegação.
+   * Finaliza criação a partir do draft (participantes já fixados).
+   * Retorna { split_id } para navegação.
    */
   createSplit: (token: string) => Promise<splitService.CreateSplitResponse>
-
-  /**
-   * Participante entra no split via invite_token do deep link.
-   * Retorna dados do split + sua quota (fixo: débito Asaas | variável: bloqueio).
-   */
-  joinSplit: (inviteToken: string, token: string) => Promise<splitService.JoinSplitResponse>
 
   /**
    * Dono lança item no split variável.
@@ -210,7 +190,6 @@ export const useSplitStore = create<SplitState>((set, get) => ({
           type:                draft.type ?? 'fixed',
           target_amount:       draft.totalValue,
           max_participants:    draft.participantCount,
-          invite_expires_at:   expiryFromValidity(draft.linkValidity, draft.customExpiry),
           participant_handles: draft.participantHandles,
         },
         token,
@@ -219,20 +198,6 @@ export const useSplitStore = create<SplitState>((set, get) => ({
       return res
     } catch (e) {
       set({ error: errorMessage(e, 'Erro ao criar split'), loading: false })
-      throw e
-    }
-  },
-
-  // ── Entrar no split ────────────────────────────────────────────────────────
-
-  joinSplit: async (inviteToken, token) => {
-    set({ loading: true, error: null })
-    try {
-      const res = await splitService.joinSplit(inviteToken, token)
-      set({ loading: false })
-      return res
-    } catch (e) {
-      set({ error: errorMessage(e, 'Erro ao entrar no split'), loading: false })
       throw e
     }
   },

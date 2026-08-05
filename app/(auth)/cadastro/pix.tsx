@@ -204,6 +204,21 @@ export default function PixScreen() {
       )
 
       clearDraft()
+
+      if (res.login_required || !res.token) {
+        // Conta criada com sucesso no backend, mas o login automático falhou
+        // (ex.: instabilidade transitória). Não é um erro de cadastro.
+        Alert.alert(
+          t('auth.onboarding.pix.loginRequiredTitle'),
+          t('auth.onboarding.pix.loginRequiredMessage'),
+          [{
+            text: t('auth.onboarding.pix.loginRequiredButton'),
+            onPress: () => router.replace({ pathname: '/(auth)/login', params: { cpf: input.cpf } }),
+          }],
+        )
+        return
+      }
+
       if (res.onboarding_url) {
         router.replace({ pathname: '/(auth)/kyc', params: { url: res.onboarding_url } })
       } else {

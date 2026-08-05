@@ -38,7 +38,7 @@ interface AuthState {
 
   // Actions
   login:            (cpf: string, pinHash: string, securityAnswerHash: string, securityAnswerHashLegacy?: string) => Promise<void>
-  setSession:       (token: string, refreshToken: string, user: AuthUser, kycStatus: KycStatus, accountStatus: AccountStatus) => Promise<void>
+  setSession:       (token: string | null, refreshToken: string | null, user: AuthUser, kycStatus: KycStatus, accountStatus: AccountStatus) => Promise<void>
   loadSession:      () => Promise<void>
   logout:           () => Promise<void>
   setUser:          (user: AuthUser) => void
@@ -145,10 +145,12 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   // ── Sessão criada após registro ────────────────────────────────────────────
+  // token/refreshToken podem vir null quando o backend não conseguiu logar
+  // automaticamente após o cadastro (login_required) — a conta já existe.
   setSession: async (token, refreshToken, user, kycStatus, accountStatus) => {
     await authService.saveTokens(token, refreshToken)
     await authService.saveUser(user as unknown as Record<string, unknown>)
-    set({ user, token, kycStatus, accountStatus, isAuthenticated: true })
+    set({ user, token, kycStatus, accountStatus, isAuthenticated: !!token })
   },
 
   // ── Logout — limpa SecureStore + estado ───────────────────────────────────

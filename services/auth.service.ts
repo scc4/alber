@@ -79,11 +79,12 @@ export interface RegisterInput {
 }
 
 export interface RegisterResponse {
-  user_id:        string
-  token:          string
-  refresh_token:  string
-  kyc_status:     string
-  account_status: string
+  user_id:         string
+  token:           string | null
+  refresh_token:   string | null
+  kyc_status:      string
+  account_status:  string
+  login_required?: boolean
 }
 
 export async function register(input: RegisterInput): Promise<RegisterResponse> {
@@ -206,7 +207,8 @@ export async function fetchSecurityChallenge(
 
 // ── Helpers de sessão ─────────────────────────────────────────────────────────
 
-export async function saveTokens(token: string, refreshToken: string): Promise<void> {
+export async function saveTokens(token: string | null, refreshToken: string | null): Promise<void> {
+  if (!token || !refreshToken) return // login_required: sessão não foi criada no cadastro
   await SecureStore.setItemAsync(TOKEN_KEY, token)
   await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken)
 }

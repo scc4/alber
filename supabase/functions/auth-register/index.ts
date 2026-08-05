@@ -2,7 +2,7 @@
 // Spec: /specs/04_api_asaas.md §4.1
 // Spec: /specs/05_security.md §7
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
@@ -42,14 +42,10 @@ interface PendingRow {
   attempts: number
 }
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
-
 // ── Helper: salvar/atualizar pending_registration ─────────────────────────────
 
 async function savePending(opts: {
+  supabaseAdmin: SupabaseClient
   asaasAccountId: string
   asaasApiKeyEnc: string
   asaasWalletId: string
@@ -63,12 +59,12 @@ async function savePending(opts: {
 }): Promise<void> {
   try {
     if (opts.pendingId) {
-      await supabaseAdmin
+      await opts.supabaseAdmin
         .from('pending_registrations')
         .update({ error: opts.error, attempts: opts.currentAttempts + 1 })
         .eq('id', opts.pendingId)
     } else {
-      await supabaseAdmin.from('pending_registrations').insert({
+      await opts.supabaseAdmin.from('pending_registrations').insert({
         asaas_account_id:  opts.asaasAccountId,
         asaas_api_key_enc: opts.asaasApiKeyEnc,
         asaas_wallet_id:   opts.asaasWalletId,
@@ -87,11 +83,16 @@ async function savePending(opts: {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
 
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   let body: RegisterRequest
   try {
@@ -125,7 +126,7 @@ Deno.serve(async (req: Request) => {
   const encSecret   = Deno.env.get('ASAAS_API_KEY')!
 
   // Payload sem campos sensíveis — armazenado apenas para diagnóstico/retomada
-  const { pin_hash: _ph, security_questions: _sq, ...safePayload } = body as Record<string, unknown>
+  const { pin_hash: _ph, security_questions: _sq, ...safePayload } = body as unknown as Record<string, unknown>
 
   // ── ETAPA 0: Idempotência — verificar pending_registrations ─────────────────
 
@@ -334,6 +335,7 @@ Deno.serve(async (req: Request) => {
       asaas_response:   asaasRawResponse,
     })
     await savePending({
+      supabaseAdmin,
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
       email, cpfHash, handle: handleNorm,
       safePayload, error: String(authError?.message ?? 'auth_create_failed'),
@@ -376,6 +378,7 @@ Deno.serve(async (req: Request) => {
     })
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
     await savePending({
+      supabaseAdmin,
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
       email, cpfHash, handle: handleNorm,
       safePayload, error: String(userError?.message ?? 'users_insert_failed'),
@@ -412,6 +415,7 @@ Deno.serve(async (req: Request) => {
     await supabaseAdmin.from('users').delete().eq('id', userId)
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
     await savePending({
+      supabaseAdmin,
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
       email, cpfHash, handle: handleNorm,
       safePayload, error: String(qError?.message ?? 'security_questions_insert_failed'),
@@ -444,30 +448,40 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── ETAPA 6: Login e retorno do JWT ─────────────────────────────────────────
+  // 1 retry rápido — a chamada é idempotente (só emite token) e falhas aqui
+  // costumam ser transitórias (rate-limit do GoTrue logo após createUser).
 
   let access_token:  string | null = null
   let refresh_token: string | null = null
+  let signInErr: unknown = null
 
-  const signInRes = await fetch(
-    `${Deno.env.get('SUPABASE_URL')}/auth/v1/token?grant_type=password`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
+  for (let attempt = 0; attempt < 2 && !access_token; attempt++) {
+    if (attempt > 0) await new Promise<void>(resolve => setTimeout(resolve, 500))
+
+    const signInRes = await fetch(
+      `${Deno.env.get('SUPABASE_URL')}/auth/v1/token?grant_type=password`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
+        },
+        body: JSON.stringify({ email, password: pin_hash }),
       },
-      body: JSON.stringify({ email, password: pin_hash }),
-    },
-  )
+    )
 
-  if (!signInRes.ok) {
-    const signInErr = await signInRes.json().catch(() => ({}))
-    console.error('[auth-register] session creation failed:', signInErr)
+    if (signInRes.ok) {
+      const tokens = await signInRes.json() as { access_token: string; refresh_token: string }
+      access_token  = tokens.access_token
+      refresh_token = tokens.refresh_token
+    } else {
+      signInErr = await signInRes.json().catch(() => ({}))
+    }
+  }
+
+  if (!access_token) {
+    console.error('[auth-register] session creation failed after retry:', signInErr)
     // Não crítico — usuário pode fazer login manualmente
-  } else {
-    const tokens = await signInRes.json() as { access_token: string; refresh_token: string }
-    access_token  = tokens.access_token
-    refresh_token = tokens.refresh_token
   }
 
   // ── ETAPA 7: Resolver pending se veio de retomada ────────────────────────────
@@ -496,4 +510,8 @@ Deno.serve(async (req: Request) => {
     },
     201,
   )
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

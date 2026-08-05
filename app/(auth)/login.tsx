@@ -16,7 +16,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { AlberLogo } from '../../components/core/AlberLogo'
@@ -44,9 +44,10 @@ export default function LoginScreen() {
   const { t }    = useTranslation()
   const insets   = useSafeAreaInsets()
   const login    = useAuthStore(s => s.login)
+  const params   = useLocalSearchParams<{ cpf?: string }>()
 
   const [phase, setPhase]           = useState<Phase>('id')
-  const [identifier, setIdentifier] = useState('')
+  const [identifier, setIdentifier] = useState(params.cpf ? maskCPF(params.cpf) : '')
   const [pinHash, setPinHash]       = useState('')
   const [pinMode, setPinMode]       = useState<'secure' | 'setup'>('secure')
   const [challenge, setChallenge]     = useState<authService.SecurityChallenge | null>(null)

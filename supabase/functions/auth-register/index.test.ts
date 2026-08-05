@@ -1,11 +1,15 @@
 // E2E unit tests — auth-register Edge Function
 // Roda com: deno test supabase/functions/auth-register/index.test.ts --allow-env --allow-net
 //
-// Cobre em especial o bug de cadastro corrigido nesta sessão:
-// - ETAPA 6 (login automático pós-cadastro) com retry (item 4a do plano)
+// Cobre em especial dois bugs de cadastro corrigidos:
+// - ETAPA 6 (login automático pós-cadastro) com retry (item 4a do plano do bug de crash no app)
 // - resposta 201 com login_required:true quando o login falha mesmo após o retry
+// - pix_key gravada com o MESMO secret (ENCRYPTION_KEY) usado por todo o resto do
+//   sistema (financial-carregar, financial-descarregar, user-profile, perfil-update-pix,
+//   financial-create-pix-key, webhooks-asaas-kyc) — regressão do bug reportado pelo
+//   usuário "dniel" (QR code do Pix não aparecia ao carregar)
 
-import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
+import { assertEquals, assertNotEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
@@ -13,8 +17,10 @@ Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
 Deno.env.set('ASAAS_API_KEY', 'test-asaas-parent-key')
 Deno.env.set('ASAAS_ENVIRONMENT', 'sandbox')
 Deno.env.set('ASAAS_WEBHOOK_SECRET', 'test-webhook-secret')
+Deno.env.set('ENCRYPTION_KEY', 'test-encryption-key') // secret diferente de ASAAS_API_KEY, de propósito
 
 import { handleRequest } from './index.ts'
+import { aesDecrypt } from '../_shared/crypto.ts'
 
 // ── Mock factory ──────────────────────────────────────────────────────────────
 // Suporta rotas estáticas (mesma resposta sempre) e rotas em sequência
@@ -246,4 +252,59 @@ Deno.test('login falha nas 2 tentativas → 201 com login_required:true e token 
   assertEquals(data.token, null)
   assertEquals(data.refresh_token, null)
   assertEquals(data.login_required, true)
+})
+
+// ── Tests — bug do QR code Pix não aparecer no Carregar (reportado por "dniel") ─
+// Causa raiz: pix_key era gravada no cadastro com ASAAS_API_KEY, mas todo o
+// resto do sistema (financial-carregar, financial-descarregar, user-profile,
+// perfil-update-pix, financial-create-pix-key, webhooks-asaas-kyc) lê/grava
+// pix_key com ENCRYPTION_KEY — um secret diferente. A descriptografia com o
+// secret errado falha (AES-GCM rejeita o auth tag), e o carregamento nunca
+// chega a chamar a Asaas.
+
+Deno.test('pix_key gravada no cadastro é decriptável com ENCRYPTION_KEY (o secret usado pelo resto do sistema)', async () => {
+  let capturedUsersInsertBody: Record<string, unknown> | null = null
+
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+
+    if (method === 'POST' && url.includes('/rest/v1/users')) {
+      capturedUsersInsertBody = JSON.parse(init!.body as string)
+      return new Response(JSON.stringify(NEW_DB_USER), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
+
+    for (const r of [
+      ...BASE_ROUTES.filter(r => !(r.pattern === '/rest/v1/users' && r.method === 'POST')),
+      { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK },
+    ]) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  const PIX_KEY_PLAINTEXT = VALID_CPF
+  try {
+    const res = await handleRequest(makeReq({ pix_key: PIX_KEY_PLAINTEXT, pix_key_type: 'cpf' }))
+    assertEquals(res.status, 201)
+  } finally {
+    globalThis.fetch = orig
+  }
+
+  const insertedPixKeyEnc = capturedUsersInsertBody!.pix_key as string
+  const decryptedWithRightSecret = await aesDecrypt(insertedPixKeyEnc, 'test-encryption-key')
+  assertEquals(decryptedWithRightSecret, PIX_KEY_PLAINTEXT)
+
+  // Trava de regressão explícita: se alguém voltar a usar ASAAS_API_KEY para
+  // criptografar pix_key, a decriptografia abaixo com o secret ERRADO não
+  // deve mais bater — confirmando que os dois secrets realmente divergem.
+  let decryptedWithWrongSecret: string | null = null
+  try {
+    decryptedWithWrongSecret = await aesDecrypt(insertedPixKeyEnc, 'test-asaas-parent-key')
+  } catch { /* esperado: falha de autenticação do AES-GCM */ }
+  assertNotEquals(decryptedWithWrongSecret, PIX_KEY_PLAINTEXT)
 })

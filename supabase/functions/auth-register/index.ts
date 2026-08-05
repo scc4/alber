@@ -123,7 +123,8 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   const handleNorm  = handle.toLowerCase().replace(/^@/, '')
   const cpfHash     = await sha256hex(cpfClean)
-  const encSecret   = Deno.env.get('ASAAS_API_KEY')!
+  const encSecret   = Deno.env.get('ASAAS_API_KEY')!  // Asaas parent API key — também usada p/ criptografar asaas_api_key_enc
+  const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')! // mesmo secret usado por todo o resto do sistema p/ pix_key
 
   // Payload sem campos sensíveis — armazenado apenas para diagnóstico/retomada
   const { pin_hash: _ph, security_questions: _sq, ...safePayload } = body as unknown as Record<string, unknown>
@@ -315,7 +316,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   // Campos computados a partir do request atual (mesmo em retomada)
-  const pixKeyEnc = pix_key ? await aesEncrypt(pix_key, encSecret) : null
+  const pixKeyEnc = pix_key ? await aesEncrypt(pix_key, pixKeySecret) : null
   const pinBcrypt = await bcryptHash(pin_hash)
 
   // ── ETAPA 3: Criar usuário Supabase Auth ─────────────────────────────────────

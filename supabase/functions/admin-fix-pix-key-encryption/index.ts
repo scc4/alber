@@ -27,12 +27,12 @@
 // sem gravar nada — sempre rodar dry_run primeiro para conferir os números
 // antes de aplicar de fato com { "dry_run": false }.
 //
-// Autenticação: header x-cron-secret com o valor do secret CRON_SECRET
-// (reaproveitado aqui só para restringir quem pode chamar; não é um cron).
+// Autenticação: header x-admin-secret com o valor do secret PIX_FIX_ADMIN_SECRET
+// (dedicado a esta function one-off, não reaproveita o CRON_SECRET real do scheduler).
 //
 // Deploy:   supabase functions deploy admin-fix-pix-key-encryption
 // Chamada:  curl -X POST '<SUPABASE_URL>/functions/v1/admin-fix-pix-key-encryption' \
-//             -H 'x-cron-secret: <CRON_SECRET>' -H 'Content-Type: application/json' \
+//             -H 'x-admin-secret: <PIX_FIX_ADMIN_SECRET>' -H 'Content-Type: application/json' \
 //             -d '{"dry_run": false}'
 // Remover a function do projeto depois de confirmado que rodou com sucesso —
 // não é para ficar deployada permanentemente.
@@ -53,8 +53,10 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (corsRes) return corsRes
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
 
-  const cronSecret = Deno.env.get('CRON_SECRET')
-  if (!cronSecret || req.headers.get('x-cron-secret') !== cronSecret) {
+  // Secret dedicado a esta function one-off — não reaproveita CRON_SECRET
+  // (usado pelo scheduler real) para não arriscar um valor que não temos em mãos.
+  const adminSecret = Deno.env.get('PIX_FIX_ADMIN_SECRET')
+  if (!adminSecret || req.headers.get('x-admin-secret') !== adminSecret) {
     return err('UNAUTHORIZED', 'Secret inválido', 401)
   }
 

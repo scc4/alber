@@ -7,7 +7,7 @@ Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('ASAAS_API_KEY', 'test-asaas-parent-key')   // secret ERRADO usado pelo bug antigo
 Deno.env.set('ENCRYPTION_KEY', 'test-encryption-key')    // secret CORRETO usado pelo resto do sistema
-Deno.env.set('CRON_SECRET', 'test-cron-secret')
+Deno.env.set('PIX_FIX_ADMIN_SECRET', 'test-admin-secret')
 
 import { handleRequest } from './index.ts'
 import { aesEncrypt, aesDecrypt } from '../_shared/crypto.ts'
@@ -42,13 +42,13 @@ function withMock<T>(routes: MockRoute[], onPatch: ((url: string, body: unknown)
 function makeReq(body: Record<string, unknown> = {}, headers: Record<string, string> = {}): Request {
   return new Request('http://localhost/admin-fix-pix-key-encryption', {
     method:  'POST',
-    headers: { 'Content-Type': 'application/json', 'x-cron-secret': 'test-cron-secret', ...headers },
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': 'test-admin-secret', ...headers },
     body:    JSON.stringify(body),
   })
 }
 
-Deno.test('sem x-cron-secret correto → 401', async () => {
-  const req = makeReq({}, { 'x-cron-secret': 'wrong' })
+Deno.test('sem x-admin-secret correto → 401', async () => {
+  const req = makeReq({}, { 'x-admin-secret': 'wrong' })
   const res = await withMock([], undefined, () => handleRequest(req))
   assertEquals(res.status, 401)
 })
@@ -56,7 +56,7 @@ Deno.test('sem x-cron-secret correto → 401', async () => {
 Deno.test('GET retorna 405', async () => {
   const req = new Request('http://localhost/admin-fix-pix-key-encryption', {
     method: 'GET',
-    headers: { 'x-cron-secret': 'test-cron-secret' },
+    headers: { 'x-admin-secret': 'test-admin-secret' },
   })
   const res = await withMock([], undefined, () => handleRequest(req))
   assertEquals(res.status, 405)

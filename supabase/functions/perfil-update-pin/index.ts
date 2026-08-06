@@ -3,11 +3,6 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { bcryptVerify, bcryptHash, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 import { sendPush } from '../_shared/push.ts'
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
-
 // SHA-256 de PINs óbvios para comparação com o hash recebido
 const BLOCKED_PIN_HASHES = new Set([
   '672f3f58ad3b73a22cd60db820d84c82a2e76ab4c6ed73e4e3e8cbf2a0e84d0e', // 000000
@@ -22,7 +17,7 @@ function isObviousPin(pinHash: string): boolean {
   return BLOCKED_PIN_HASHES.has(pinHash)
 }
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
@@ -30,6 +25,10 @@ Deno.serve(async (req: Request) => {
   const authHeader = req.headers.get('Authorization')
   if (!authHeader?.startsWith('Bearer ')) return err('UNAUTHORIZED', 'Token não fornecido', 401)
 
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
   const supabaseUser = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
@@ -92,9 +91,11 @@ Deno.serve(async (req: Request) => {
   }
 
   if (!pinOk) {
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: user.id, event_type: 'pin_change_current_pin_failed', metadata: {},
-    }).catch(() => {})
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: user.id, event_type: 'pin_change_current_pin_failed', metadata: {},
+      })
+    } catch { /* não-crítico */ }
     return err('INVALID_CREDENTIALS', 'PIN atual incorreto', 401)
   }
 
@@ -122,9 +123,11 @@ Deno.serve(async (req: Request) => {
     }
   }
   if (!securityOk) {
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: user.id, event_type: 'pin_change_security_failed', metadata: {},
-    }).catch(() => {})
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: user.id, event_type: 'pin_change_security_failed', metadata: {},
+      })
+    } catch { /* não-crítico */ }
     return err('INVALID_CREDENTIALS', 'Resposta de segurança incorreta', 401)
   }
 
@@ -170,18 +173,23 @@ Deno.serve(async (req: Request) => {
   }
 
   // Invalidar todas as sessões (forçar novo login)
+  // signOut espera um JWT válido (não um user id) — usa o próprio token da
+  // requisição atual. Com scope 'global', revoga em todos os devices.
   try {
-    await supabaseAdmin.auth.admin.signOut(authUser.id, 'global')
+    const currentJwt = authHeader.replace(/^Bearer\s+/i, '')
+    await supabaseAdmin.auth.admin.signOut(currentJwt, 'global')
   } catch (e) {
     console.warn('[perfil-update-pin] signOut error (não crítico):', e)
   }
 
   // Audit log
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    user.id,
-    event_type: 'pin_changed',
-    metadata:   {},
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    user.id,
+      event_type: 'pin_changed',
+      metadata:   {},
+    })
+  } catch { /* não-crítico */ }
 
   // Push notification
   await sendPush(
@@ -192,4 +200,8 @@ Deno.serve(async (req: Request) => {
   )
 
   return json({ success: true })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

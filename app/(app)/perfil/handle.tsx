@@ -104,7 +104,7 @@ function StepInput({ currentHandle, inCooldown, nextAllowedDate, onConfirm }: St
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
         style={styles.flex}

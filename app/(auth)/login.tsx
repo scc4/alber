@@ -177,7 +177,7 @@ export default function LoginScreen() {
     return (
       <KeyboardAvoidingView
         style={[styles.root, { paddingTop: insets.top }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
           contentContainerStyle={[styles.idContent, { paddingBottom: insets.bottom + spacing.xl }]}

@@ -2,6 +2,8 @@
 // Design: /design/auth.jsx — OnboardShell + StepProgress
 import React, { ReactNode } from 'react'
 import {
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -54,29 +56,34 @@ export function OnboardShell({
         <View style={styles.backBtn} />
       </View>
 
-      <ScrollView
+      <KeyboardAvoidingView
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Progress bar */}
-        <StepProgress step={step} total={total} />
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Progress bar */}
+          <StepProgress step={step} total={total} />
 
-        {/* Title */}
-        <Text style={styles.title}>{title}</Text>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+          {/* Title */}
+          <Text style={styles.title}>{title}</Text>
+          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
 
-        {/* Content */}
-        <View style={styles.content}>{children}</View>
+          {/* Content */}
+          <View style={styles.content}>{children}</View>
 
-        {/* Footer */}
-        {footer ? (
-          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
-            {footer}
-          </View>
-        ) : null}
-      </ScrollView>
+          {/* Footer */}
+          {footer ? (
+            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+              {footer}
+            </View>
+          ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   )
 }

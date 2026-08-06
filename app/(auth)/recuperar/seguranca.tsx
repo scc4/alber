@@ -4,6 +4,8 @@
 
 import { useRef, useState } from 'react'
 import {
+  KeyboardAvoidingView,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -56,7 +58,10 @@ function ForgotShell({
         <Text style={shell.header}>{t('auth.recovery.header')}</Text>
         <View style={shell.backBtn} />
       </View>
-      <View style={shell.content}>
+      <KeyboardAvoidingView
+        style={shell.content}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
         {/* Progress */}
         <View style={shell.progress}>
           {[0,1,2,3].map(i => (
@@ -70,7 +75,7 @@ function ForgotShell({
         {subtitle ? <Text style={shell.subtitle}>{subtitle}</Text> : null}
         <View style={shell.body}>{children}</View>
         {footer ? <View style={shell.footer}>{footer}</View> : null}
-      </View>
+      </KeyboardAvoidingView>
     </View>
   )
 }

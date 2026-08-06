@@ -76,6 +76,7 @@ CREATE TABLE users (
   asaas_deposit_key TEXT,        -- chave de RECEBIMENTO da própria subconta Asaas — sempre EVP, criada pelo backend (nunca pelo usuário) via POST /pix/addressKeys, usada em /financial/carregar. Ver §4.3.
   kyc_status        TEXT DEFAULT 'pending',
   account_status    TEXT DEFAULT 'evaluation',
+  deleted_at        TIMESTAMPTZ, -- soft delete (§10.1 perfil.md) — separado de account_status de propósito
   created_at        TIMESTAMPTZ DEFAULT now(),
   updated_at        TIMESTAMPTZ DEFAULT now()
 );
@@ -399,6 +400,31 @@ subconta (diferente da chave de recebimento usada em §4.3).
 
 // Response 200
 { transaction_id, amount, destinatario_handle, novo_saldo }
+```
+
+### 4.9 POST /conta-excluir
+
+Spec completa: `06_modules/perfil.md §10.1`. Soft delete — ver §3.1 para o
+campo `deleted_at`.
+
+```typescript
+// Request (checagem — só JWT, sem PIN)
+{ action: 'status' }
+
+// Response 200
+{ eligible: boolean, balance_brl: number, blocks: {
+  positive_balance, owns_active_split, owns_active_lounge, active_split_participation
+} }
+
+// Request (efetivar)
+{ action: 'confirm', pin_hash: string, security_answer_hash: string, sms_code: string }
+
+// Response 200
+{ success: true }
+
+// Errors
+// 409 ALREADY_DELETED | 422 NOT_ELIGIBLE | 401 INVALID_CREDENTIALS |
+// 401 WRONG_SECURITY_ANSWER | 401 SMS_EXPIRED | 401 SMS_INVALID
 ```
 
 ---

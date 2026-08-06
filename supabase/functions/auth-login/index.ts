@@ -1,7 +1,7 @@
 // Spec: /specs/03_backend.md §4.2
 // Spec: /specs/05_security.md §2, §3, §4, §6
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, bcryptHash, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
@@ -17,14 +17,10 @@ interface LoginRequest {
 const MAX_ATTEMPTS   = 3
 const WINDOW_MINUTES = 15
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
-
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function logAudit(
+  supabaseAdmin: SupabaseClient,
   userId: string | null,
   eventType: string,
   meta: Record<string, unknown> = {},
@@ -36,7 +32,7 @@ async function logAudit(
   })
 }
 
-async function failedAttempts(userId: string): Promise<number> {
+async function failedAttempts(supabaseAdmin: SupabaseClient, userId: string): Promise<number> {
   const since = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000).toISOString()
   const { count } = await supabaseAdmin
     .from('audit_logs')
@@ -49,11 +45,16 @@ async function failedAttempts(userId: string): Promise<number> {
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
 
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   let body: LoginRequest
   try {
@@ -81,12 +82,12 @@ Deno.serve(async (req: Request) => {
 
   // ── Localizar usuário ────────────────────────────────────────────────────────
 
-  let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string } | null = null
+  let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string; deleted_at: string | null } | null = null
 
   if (isHandleId) {
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at')
       .eq('handle', handleClean)
       .maybeSingle()
     user = data
@@ -95,7 +96,7 @@ Deno.serve(async (req: Request) => {
     const cpfHash = await sha256hex(cpfClean)
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at')
       .eq('cpf', cpfHash)
       .maybeSingle()
     user = data
@@ -107,11 +108,16 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
+  if (user.deleted_at) {
+    console.error('[auth-login] FAIL:account_deleted user=', user.id)
+    return err('ACCOUNT_DELETED', 'Esta conta foi excluída', 401)
+  }
+
   // ── Rate limiting (spec 05_security §2: 3 tentativas → bloqueio 15 min) ──────
 
-  const attempts = await failedAttempts(user.id)
+  const attempts = await failedAttempts(supabaseAdmin, user.id)
   if (attempts >= MAX_ATTEMPTS) {
-    await logAudit(user.id, 'pin_blocked', { attempts })
+    await logAudit(supabaseAdmin, user.id, 'pin_blocked', { attempts })
     return err(
       'TOO_MANY_ATTEMPTS',
       `Conta bloqueada por ${WINDOW_MINUTES} minutos após tentativas excessivas`,
@@ -188,7 +194,7 @@ Deno.serve(async (req: Request) => {
 
   if (!pinOk) {
     console.error('[auth-login] FAIL:pin_wrong')
-    await logAudit(user.id, 'pin_failed', { attempts: attempts + 1 })
+    await logAudit(supabaseAdmin, user.id, 'pin_failed', { attempts: attempts + 1 })
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
@@ -225,7 +231,7 @@ Deno.serve(async (req: Request) => {
 
   if (!answerOk) {
     console.error('[auth-login] FAIL:security_answer_wrong user=', user.id)
-    await logAudit(user.id, 'security_question_failed', {})
+    await logAudit(supabaseAdmin, user.id, 'security_question_failed', {})
     return err('WRONG_SECURITY_ANSWER', 'Resposta incorreta', 401)
   }
 
@@ -283,7 +289,7 @@ Deno.serve(async (req: Request) => {
     refresh_token: string
   }
 
-  await logAudit(user.id, 'login_success', { legacy_migration: legacyMigration })
+  await logAudit(supabaseAdmin, user.id, 'login_success', { legacy_migration: legacyMigration })
 
   return json({
     token:         access_token,
@@ -297,4 +303,8 @@ Deno.serve(async (req: Request) => {
       account_status: user.account_status,
     },
   })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

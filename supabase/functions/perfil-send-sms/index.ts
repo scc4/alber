@@ -6,7 +6,7 @@ const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
 
-const VALID_PURPOSES = ['pin_change', 'pix_change', 'forgot_pin'] as const
+const VALID_PURPOSES = ['pin_change', 'pix_change', 'forgot_pin', 'account_delete'] as const
 type Purpose = typeof VALID_PURPOSES[number]
 
 // ── Normalizar número de telefone ─────────────────────────────────────────────

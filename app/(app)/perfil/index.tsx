@@ -362,6 +362,17 @@ export default function PerfilScreen() {
           />
         </Section>
 
+        {/* CONTA E PRIVACIDADE */}
+        <Section title={t('perfil.sectionContaPrivacidade')}>
+          <ActionRow
+            label={t('perfil.rowExcluirConta')}
+            sublabel={t('perfil.rowExcluirContaSublabel')}
+            accentSublabel
+            accentColor={colors.state.error}
+            onPress={() => router.push('/(app)/perfil/excluir-conta')}
+          />
+        </Section>
+
         {/* SUPORTE FINANCEIRO */}
         <Section title={t('perfil.sectionSuporteFinanceiro')}>
           <Text style={styles.suporteIntro}>{t('perfil.suporteIntro')}</Text>

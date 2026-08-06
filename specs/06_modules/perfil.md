@@ -128,11 +128,50 @@ troca de PIN, tentativas bloqueadas)
 
 ---
 
+## 10.1 Conta e Privacidade — Excluir minha conta
+
+Exigido pelas políticas da Google Play/App Store: todo app que permite criar
+conta precisa permitir iniciar a exclusão dentro do próprio app.
+
+**Modelo: soft delete.** A linha em `users` é preservada — dados financeiros
+(`transactions`, `splits`, etc.) são retidos por obrigação legal e não têm
+`ON DELETE CASCADE` na maioria das tabelas relacionadas. Ao excluir:
+`name`/`handle`/`email` são sobrescritos com um placeholder anônimo e
+`deleted_at` é marcado. `cpf` (já armazenado como hash) e dados financeiros
+não são tocados. `auth-login` passa a rejeitar login dessa conta
+(`ACCOUNT_DELETED`). O usuário tem a impressão de exclusão completa (perde
+acesso, some da busca/extrato/lounge/split de terceiros), mas nada é
+fisicamente apagado.
+
+**Pré-condições (bloqueiam a exclusão se não satisfeitas):**
+- Saldo na subconta Asaas deve estar zerado (senão: CTA para Descarregar).
+- Não pode ser dono de Split aberto (`status = 'open'`).
+- Não pode ser dono de Lounge ativo (`status = 'active'`).
+- Não pode ter saldo bloqueado (`blocked_amount > 0`) em Split ainda aberto.
+
+**Fluxo:** Perfil → Conta e Privacidade → Excluir minha conta →
+aviso explicativo → PIN → pergunta de segurança → código SMS → confirmação
+final (digitar "EXCLUIR") → sucesso → logout automático → tela de boas-vindas.
+Mesmo padrão de autenticação forte usado em troca de PIN (§5).
+
+**Backend:** `conta-excluir` — `POST {action:'status'}` (só JWT, retorna
+elegibilidade para a tela decidir se mostra o bloqueio antes do usuário
+passar por PIN/segurança/SMS à toa) e `POST {action:'confirm', pin_hash,
+security_answer_hash, sms_code}` (revalida as mesmas pré-condições no
+servidor antes de efetivar).
+
+**Fora de escopo desta versão:** encerramento da subconta Asaas (não há
+endpoint disponível) e reabertura/reativação de conta excluída — usuário
+precisa contatar o suporte para recadastrar com o mesmo CPF.
+
+---
+
 ## 11. Analytics obrigatórios
 
 `perfil_viewed`, `perfil_handle_change_started`, `perfil_handle_changed`,
 `perfil_pin_change_started`, `perfil_pin_changed`, `perfil_pix_key_changed`,
-`perfil_kyc_started`, `perfil_notifications_changed`, `perfil_logout`
+`perfil_kyc_started`, `perfil_notifications_changed`, `perfil_logout`,
+`perfil_account_delete_started`, `perfil_account_deleted`
 
 ---
 
@@ -150,3 +189,7 @@ troca de PIN, tentativas bloqueadas)
 | PR-08 | Notificações de segurança não desabilitáveis |
 | PR-09 | Logout limpa SecureStore e invalida token |
 | PR-10 | Chave Pix exige autenticação dupla para trocar |
+| PR-11 | Excluir conta exige PIN + segurança + SMS + confirmação explícita |
+| PR-12 | Exclusão é bloqueada com saldo positivo ou splits/lounges ativos |
+| PR-13 | Conta excluída não consegue fazer login novamente |
+| PR-14 | Dados financeiros são retidos após a exclusão (soft delete) |

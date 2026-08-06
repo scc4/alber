@@ -141,6 +141,9 @@ export default function LoginScreen() {
         pinErrKey.current++
         setPinError(t('auth.login.errorInvalid'))
         setPhase('pin')
+      } else if (code === 'ACCOUNT_DELETED') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorAccountDeleted'))
+        setPhase('id')
       } else {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))
       }
@@ -165,6 +168,9 @@ export default function LoginScreen() {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorInvalid'))
       } else if (code === 'TOO_MANY_ATTEMPTS') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
+        setPhase('id')
+      } else if (code === 'ACCOUNT_DELETED') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorAccountDeleted'))
         setPhase('id')
       } else {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))

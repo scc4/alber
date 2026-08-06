@@ -71,8 +71,9 @@ CREATE TABLE users (
   birth_date        DATE NOT NULL,
   handle            TEXT UNIQUE NOT NULL,
   handle_updated_at TIMESTAMPTZ,
-  pix_key           TEXT,
+  pix_key           TEXT,        -- chave de SAQUE escolhida pelo usuário (cpf/phone/email/random) — destino em /financial/descarregar. NUNCA usada para gerar QR de carregamento.
   pix_key_type      TEXT,
+  asaas_deposit_key TEXT,        -- chave de RECEBIMENTO da própria subconta Asaas — sempre EVP, criada pelo backend (nunca pelo usuário) via POST /pix/addressKeys, usada em /financial/carregar. Ver §4.3.
   kyc_status        TEXT DEFAULT 'pending',
   account_status    TEXT DEFAULT 'evaluation',
   created_at        TIMESTAMPTZ DEFAULT now(),
@@ -261,7 +262,7 @@ CREATE TABLE audit_logs (
   handle: string
   pin_hash: string
   security_questions: [{ question: string; answer_hash: string }] // x4
-  pix_key: string
+  pix_key: string       // chave de SAQUE — ver nota abaixo
   pix_key_type: string
   terms_accepted: boolean
 }
@@ -272,6 +273,20 @@ CREATE TABLE audit_logs (
 // Errors
 // 409 CPF_DUPLICATE | 409 HANDLE_TAKEN | 422 CPF_INVALID | 503 ASAAS_ERROR
 ```
+
+**Nota — dois conceitos de chave Pix (não confundir):**
+`pix_key`/`pix_key_type` acima é a chave de **saque** informada pelo usuário
+neste formulário (cpf/phone/email/random) — usada só como destino em
+`POST /financial/descarregar` (§4.4). Ela nunca é, e nunca deve ser, registrada
+como chave Pix na Asaas.
+
+Separadamente, o backend registra uma chave de **recebimento** própria da
+subconta na Asaas — sempre EVP (aleatória), nunca escolhida pelo usuário —
+logo após criar a subconta nesta mesma chamada (best-effort: se a Asaas ainda
+não permitir o registro nesse momento, ex. KYC pendente, fica para o fallback
+em `webhooks-asaas-kyc`/`financial-carregar`, ver §4.3). Essa chave é salva em
+`users.asaas_deposit_key` (§3.1) e é a usada para gerar o QR code de
+carregamento — nunca `pix_key`.
 
 ### 4.2 POST /auth/login
 ```typescript
@@ -292,6 +307,18 @@ CREATE TABLE audit_logs (
 // Response 201
 { qr_code, qr_code_image, expires_at, payment_id }
 ```
+Gera um QR code Pix **estático** (`createPixStaticQrCode`, não o fluxo
+dinâmico via `/payments` descrito em §4_api_asaas) vinculado à chave de
+**recebimento** da própria subconta (`users.asaas_deposit_key`, sempre EVP —
+nunca `pix_key`, que é a chave de saque do usuário, ver nota em §4.1).
+
+Se `asaas_deposit_key` ainda não existir (conta criada antes desta correção,
+ou o registro no cadastro falhou), este endpoint cria a chave EVP na hora
+(`createPixAddressKey('EVP', ...)`) e grava em `users.asaas_deposit_key` antes
+de gerar o QR — mesmo fallback usado em `webhooks-asaas-kyc` na aprovação do KYC.
+
+Erros: `403 KYC_REQUIRED` | `422 EVALUATION_LIMIT` | `503 ACCOUNT_NOT_CONFIGURED`
+| `503 PIX_KEY_FAILED` (falha ao registrar a chave de recebimento) | `503 ASAAS_ERROR`
 
 ### 4.4 POST /financial/descarregar
 ```typescript
@@ -303,6 +330,10 @@ CREATE TABLE audit_logs (
 // Response 200
 { transaction_id, amount_sent, fee, pix_key, status: 'processing' }
 ```
+`pix_key` aqui é a chave de **saque** (`users.pix_key`/`pix_key_type`,
+escolhida pelo usuário no cadastro ou em Perfil) — usada como destino externo
+de `POST /transfers` na Asaas. Não precisa estar registrada na própria
+subconta (diferente da chave de recebimento usada em §4.3).
 
 ### 4.5 POST /financial/receber
 ```typescript
@@ -421,11 +452,14 @@ cpf_pagador != users.cpf WHERE asaas_account_id = payment.account
 ## 7. Variáveis de ambiente do BFF
 
 ```env
-ASAAS_API_KEY=
+ASAAS_API_KEY=                # também usado como secret de criptografia de asaas_api_key_enc
 ASAAS_WEBHOOK_SECRET=
 ASAAS_ENVIRONMENT=           # sandbox | production
 ASAAS_PARENT_ACCOUNT_ID=
+ASAAS_PARENT_WALLET_ID=
+ENCRYPTION_KEY=               # secret de criptografia de pix_key e asaas_deposit_key (distinto de ASAAS_API_KEY — ver §3.1)
 SUPABASE_SERVICE_ROLE_KEY=
 JWT_SECRET=
 PIX_EXPIRATION_MINUTES=30
+CRON_SECRET=                  # autentica chamadas do scheduler a cron-activate-batches
 ```

@@ -6,7 +6,7 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
-import { createAsaasAccount, getAsaasAccountByCpf } from '../_shared/asaas.ts'
+import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 
 interface AddressDTO {
@@ -163,6 +163,11 @@ export async function handleRequest(req: Request): Promise<Response> {
   // URL do fluxo de KYC da subconta — obtida após 15s de espera obrigatória (docs Asaas).
   // null em retomadas via pending_registrations (edge case sem impacto crítico).
   let onboardingUrl: string | null = null
+  // Chave Pix EVP de RECEBIMENTO da própria subconta (distinta de pix_key, a chave de
+  // saque escolhida pelo usuário) — registrada na Asaas via POST /pix/addressKeys.
+  // null em retomadas ou se a Asaas ainda não permitir o registro nesta etapa (ex.: KYC
+  // pendente) — nesse caso, webhooks-asaas-kyc e financial-carregar criam como fallback.
+  let depositKeyEnc: string | null = null
 
   if (pendingReg) {
     // Retomar com dados do Asaas já salvos — pular ETAPA 1 e ETAPA 2
@@ -286,6 +291,20 @@ export async function handleRequest(req: Request): Promise<Response> {
       console.warn('[asaas] WARNING: apiKey is null - White Label may not be enabled')
     }
 
+    // ── Registrar chave Pix EVP de recebimento (distinta da pix_key de saque) ─
+    // Best-effort: não bloqueia o cadastro. Se falhar (ex.: Asaas exigir KYC
+    // aprovado antes de registrar chave — ainda não confirmado), fica null e
+    // é criada depois por webhooks-asaas-kyc ou financial-carregar.
+    if (asaasAccount.apiKey) {
+      try {
+        const { key } = await createPixAddressKey('EVP', asaasAccount.apiKey)
+        depositKeyEnc = await aesEncrypt(key, pixKeySecret)
+        console.log('[auth-register] chave Pix de recebimento (EVP) registrada na Asaas')
+      } catch (e) {
+        console.warn('[auth-register] erro ao registrar chave Pix de recebimento (não-crítico):', e)
+      }
+    }
+
     // ── Buscar onboardingUrl (aguarda 15s — obrigatório conforme docs Asaas) ──
     // Usa apiKey da SUBCONTA (asaasAccount.apiKey), nunca da conta pai.
     // Se apiKey for nulo (White Label não habilitado), pula a chamada.
@@ -364,6 +383,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       handle:            handleNorm,
       pix_key:           pixKeyEnc,
       pix_key_type:      pix_key_type ?? null,
+      asaas_deposit_key: depositKeyEnc,
       kyc_status:        'pending',
       account_status:    'evaluation',
       onboarding_url:    onboardingUrl,

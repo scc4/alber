@@ -17,16 +17,16 @@ const EVALUATION_LIMIT_BRL = 2000
 const EVALUATION_DAYS      = 60
 const QR_EXPIRATION_SECS   = 1800  // 30 minutos
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
-
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
 
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   // ── Autenticar JWT ───────────────────────────────────────────────────────────
 
@@ -67,7 +67,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: userData, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, asaas_api_key_enc, pix_key, kyc_status, account_status, created_at')
+    .select('id, asaas_api_key_enc, asaas_deposit_key, kyc_status, account_status, created_at')
     .eq('auth_id', user.id)
     .maybeSingle()
 
@@ -129,29 +129,34 @@ Deno.serve(async (req: Request) => {
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
   }
 
-  // ── ETAPA 1 — Garantir chave Pix ────────────────────────────────────────────
+  // ── ETAPA 1 — Garantir chave Pix de RECEBIMENTO da subconta ─────────────────
+  // Distinta de pix_key (chave de SAQUE escolhida pelo usuário, usada só em
+  // descarregar) — aqui é sempre uma chave EVP própria da subconta, registrada
+  // na Asaas. Nunca usar pix_key aqui: ela não está registrada como chave de
+  // recebimento e a Asaas rejeita com "Chave Pix não encontrada".
 
   let pixKeyRaw: string
-  if (userData.pix_key) {
+  if (userData.asaas_deposit_key) {
     try {
-      pixKeyRaw = await aesDecrypt(userData.pix_key, pixKeySecret)
+      pixKeyRaw = await aesDecrypt(userData.asaas_deposit_key, pixKeySecret)
     } catch (e) {
-      console.error('pix_key decryption failed:', e)
+      console.error('asaas_deposit_key decryption failed:', e)
       return err('CRYPTO_ERROR', 'Erro ao ler chave Pix', 500)
     }
   } else {
-    // Cria EVP automaticamente — mesmo fluxo do webhook KYC
+    // Fallback: auth-register não conseguiu registrar no cadastro (ex.: KYC
+    // ainda pendente naquele momento) — cria agora, mesmo fluxo do webhook KYC.
     try {
       const created   = await createPixAddressKey('EVP', subApiKey)
       pixKeyRaw       = created.key
       const encrypted = await aesEncrypt(pixKeyRaw, pixKeySecret)
       await supabaseAdmin
         .from('users')
-        .update({ pix_key: encrypted, pix_key_type: 'random' })
+        .update({ asaas_deposit_key: encrypted })
         .eq('id', userData.id)
-      console.log(`[carregar] chave Pix EVP criada para usuário ${userData.id}`)
+      console.log(`[carregar] chave Pix de recebimento (EVP) criada para usuário ${userData.id}`)
     } catch (e) {
-      await logError(supabaseAdmin, 'financial-carregar', e, { user_id: userData.id, step: 'create_pix_key' })
+      await logError(supabaseAdmin, 'financial-carregar', e, { user_id: userData.id, step: 'create_deposit_key' })
       return err('PIX_KEY_FAILED', 'Erro ao configurar chave Pix', 503)
     }
   }
@@ -234,4 +239,8 @@ Deno.serve(async (req: Request) => {
     },
     201,
   )
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

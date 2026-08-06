@@ -308,3 +308,83 @@ Deno.test('pix_key gravada no cadastro é decriptável com ENCRYPTION_KEY (o sec
   } catch { /* esperado: falha de autenticação do AES-GCM */ }
   assertNotEquals(decryptedWithWrongSecret, PIX_KEY_PLAINTEXT)
 })
+
+// ── Tests — bug do QR code Pix não gerar no Carregar por conflação de conceitos ─
+// Causa raiz (confirmada em produção com a conta real do usuário "daniel"):
+// pix_key é a chave de SAQUE escolhida pelo usuário (usada só em descarregar) e
+// NUNCA é registrada como chave Pix na Asaas — usá-la para gerar o QR de
+// carregamento falha na Asaas com "Chave Pix não encontrada". A chave de
+// RECEBIMENTO da subconta precisa ser uma EVP própria, registrada via
+// POST /pix/addressKeys e salva num campo separado (asaas_deposit_key).
+
+Deno.test('cadastro registra chave de recebimento (asaas_deposit_key) separada da pix_key de saque, quando a subconta já tem apiKey', async () => {
+  const origSetTimeout = globalThis.setTimeout
+  // Stub só para este teste — evita esperar os 15s reais do fetch de onboardingUrl,
+  // que roda no mesmo bloco condicional (apiKey presente) que o registro da chave.
+  // deno-lint-ignore no-explicit-any
+  ;(globalThis as any).setTimeout = (fn: () => void) => { fn(); return 0 }
+
+  let capturedUsersInsertBody: Record<string, unknown> | null = null
+  const ASAAS_ACCOUNT_WITH_KEY = { id: 'asaas-acc-2', walletId: 'wallet-2', apiKey: 'sub-api-key-raw' }
+  const EVP_KEY_RAW = 'evp-generated-key-123'
+
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+
+    if (method === 'POST' && url.includes('/rest/v1/users')) {
+      capturedUsersInsertBody = JSON.parse(init!.body as string)
+      return new Response(JSON.stringify(NEW_DB_USER), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
+    if (method === 'POST' && url.includes('sandbox.asaas.com/api/v3/accounts')) {
+      return new Response(JSON.stringify(ASAAS_ACCOUNT_WITH_KEY), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    if (method === 'POST' && url.includes('/pix/addressKeys')) {
+      return new Response(JSON.stringify({ key: EVP_KEY_RAW, type: 'EVP' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    if (url.includes('/myAccount/documents')) {
+      return new Response(JSON.stringify({ onboardingUrl: null }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+
+    for (const r of [
+      ...BASE_ROUTES.filter(r => !(r.pattern === '/rest/v1/users' && r.method === 'POST') && !r.pattern.includes('accounts')),
+      { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK },
+    ]) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  try {
+    const res = await handleRequest(makeReq({ pix_key: VALID_CPF, pix_key_type: 'cpf' }))
+    assertEquals(res.status, 201)
+  } finally {
+    globalThis.fetch = orig
+    globalThis.setTimeout = origSetTimeout
+  }
+
+  const depositKeyEnc = capturedUsersInsertBody!.asaas_deposit_key as string
+  const pixKeyEnc      = capturedUsersInsertBody!.pix_key as string
+  assertEquals(typeof depositKeyEnc, 'string')
+
+  const decryptedDepositKey = await aesDecrypt(depositKeyEnc, 'test-encryption-key')
+  const decryptedPixKey     = await aesDecrypt(pixKeyEnc, 'test-encryption-key')
+
+  assertEquals(decryptedDepositKey, EVP_KEY_RAW)     // chave de recebimento = a EVP retornada pela Asaas
+  assertEquals(decryptedPixKey, VALID_CPF)           // chave de saque = o CPF escolhido pelo usuário
+  assertNotEquals(decryptedDepositKey, decryptedPixKey) // nunca devem ser o mesmo valor/campo
+})
+
+Deno.test('cadastro sem apiKey da subconta (White Label pendente) segue sem chave de recebimento — sem bloquear o cadastro', async () => {
+  // ASAAS_ACCOUNT (fixture padrão) já tem apiKey: null
+  const routes = [
+    ...BASE_ROUTES,
+    { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK },
+  ]
+  const res  = await withMock(routes, [], () => handleRequest(makeReq()))
+  assertEquals(res.status, 201)
+})

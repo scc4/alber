@@ -21,11 +21,6 @@ const HANDLED_EVENTS = new Set([
   'ACCOUNT_REJECTED',
 ])
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
-
 // ── Mapeamento status Asaas → kyc_status interno ─────────────────────────────
 
 function mapKycStatus(asaasStatus: string): 'approved' | 'rejected' | null {
@@ -37,10 +32,15 @@ function mapKycStatus(asaasStatus: string): 'approved' | 'rejected' | null {
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   // ── Validar token do webhook (spec §6) ───────────────────────────────────────
   // Asaas envia o authToken configurado no header 'asaas-access-token'.
@@ -106,7 +106,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: userData, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, name, kyc_status, asaas_api_key_enc, pix_key')
+    .select('id, name, kyc_status, asaas_api_key_enc, asaas_deposit_key')
     .eq('asaas_account_id', asaasAccountId)
     .maybeSingle()
 
@@ -144,22 +144,24 @@ Deno.serve(async (req: Request) => {
 
   console.log(`[kyc-webhook] usuário ${userData.id} → kyc_status="${newKycStatus}"`)
 
-  // ── Criar chave Pix EVP se ainda não tiver ───────────────────────────────────
+  // ── Criar chave Pix de RECEBIMENTO (EVP) se ainda não tiver ──────────────────
+  // Distinta de pix_key (chave de saque escolhida pelo usuário) — asaas_deposit_key
+  // é sempre EVP, própria da subconta, usada em financial-carregar.
 
-  if (newKycStatus === 'approved' && !userData.pix_key && userData.asaas_api_key_enc) {
+  if (newKycStatus === 'approved' && !userData.asaas_deposit_key && userData.asaas_api_key_enc) {
     try {
       const subApiKey    = await aesDecrypt(userData.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
       const { key }      = await createPixAddressKey('EVP', subApiKey)
       const encryptedKey = await aesEncrypt(key, Deno.env.get('ENCRYPTION_KEY')!)
       await supabaseAdmin
         .from('users')
-        .update({ pix_key: encryptedKey, pix_key_type: 'random' })
+        .update({ asaas_deposit_key: encryptedKey })
         .eq('id', userData.id)
-      console.log(`[kyc-webhook] chave Pix EVP criada para usuário ${userData.id}`)
+      console.log(`[kyc-webhook] chave Pix de recebimento (EVP) criada para usuário ${userData.id}`)
     } catch (pixErr) {
-      console.error('[kyc-webhook] falha ao criar chave Pix EVP (não bloqueante):', pixErr)
+      console.error('[kyc-webhook] falha ao criar chave Pix de recebimento (não bloqueante):', pixErr)
       await logError(supabaseAdmin, 'webhooks-asaas-kyc', pixErr, {
-        context: 'create_pix_key',
+        context: 'create_deposit_key',
         user_id: userData.id,
         asaas_account_id: asaasAccountId,
       })
@@ -198,4 +200,8 @@ Deno.serve(async (req: Request) => {
   })
 
   return new Response('OK', { status: 200 })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

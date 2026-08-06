@@ -39,6 +39,7 @@ export type TxType =
 export interface Transaction {
   id:         string
   type:       TxType
+  status:     'completed' | 'refunded'
   desc:       string
   sub:        string
   amount:     number
@@ -197,6 +198,7 @@ function mapApiTx(row: ApiTx): Transaction {
   return {
     id:        row.id,
     type,
+    status:    row.status === 'refunded' ? 'refunded' : 'completed',
     desc,
     sub,
     amount,
@@ -577,7 +579,11 @@ function TxDetailModal({ tx, onClose }: { tx: Transaction; onClose: () => void }
 
           <DetailRow label={t('atividade.detailDate')}   value={formatDateTime(tx.date)} />
           <DetailRow label={t('atividade.detailId')}     value={tx.id} muted />
-          <DetailRow label={t('atividade.detailStatus')} value={t('atividade.detailStatusDone')} accent={colors.state.success} />
+          <DetailRow
+            label={t('atividade.detailStatus')}
+            value={tx.status === 'refunded' ? t('atividade.detailStatusRefunded') : t('atividade.detailStatusDone')}
+            accent={tx.status === 'refunded' ? colors.warning[500] : colors.state.success}
+          />
         </View>
 
         {tx.splitId && (

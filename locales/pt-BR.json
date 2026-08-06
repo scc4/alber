@@ -807,6 +807,7 @@
     "detailId": "ID",
     "detailStatus": "Status",
     "detailStatusDone": "Concluído ✓",
+    "detailStatusRefunded": "Estornado ↩",
     "detailSplit": "Split",
     "detailSharePart": "Sua parte",
     "detailUnblocked": "Desbloqueado",

@@ -14,15 +14,15 @@ const TIPO_FILTER: Record<string, string[]> = {
   ticket: ['event_purchase', 'event_refund'],
 }
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
-
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
   if (req.method !== 'GET') return err('METHOD_NOT_ALLOWED', 'Use GET', 405)
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +63,9 @@ Deno.serve(async (req: Request) => {
       { count: 'exact' },
     )
     .eq('user_id', user.id)
+    // Atividade é um extrato — só movimentações que de fato aconteceram.
+    // pending/processing/failed nunca chegaram a se efetivar e não devem aparecer.
+    .in('status', ['completed', 'refunded'])
     .order('created_at', { ascending: false })
     .range(page * limit, page * limit + limit - 1)
 
@@ -133,4 +136,8 @@ Deno.serve(async (req: Request) => {
   const hasMore = (page + 1) * limit < total
 
   return json({ data, total, hasMore })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

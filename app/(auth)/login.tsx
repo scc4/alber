@@ -26,6 +26,7 @@ import { Field } from '../../components/core/Field'
 import { useAuthStore } from '../../store/auth.store'
 import * as authService from '../../services/auth.service'
 import { sha256Hex, normalizeSecurityAnswer, legacyDevHash } from '../../utils/crypto'
+import { formatDateTime } from '../../utils/format'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
@@ -64,30 +65,56 @@ export default function LoginScreen() {
     ? identifier.replace(/^@/, '').length >= 3
     : identifier.replace(/\D/g, '').length === 11
 
+  // Busca um challenge novo — usado ao entrar na fase security e ao errar uma
+  // resposta (excludeQuestionId evita repetir a mesma pergunta).
+  const loadChallenge = (excludeQuestionId?: string) => {
+    setChallengeError(false)
+    setChallengeLoading(true)
+    const cpfOrHandle = identifier.startsWith('@') ? identifier : identifier.replace(/\D/g, '')
+    authService.fetchSecurityChallenge(cpfOrHandle, pinHash, excludeQuestionId)
+      .then(result => {
+        switch (result.type) {
+          case 'pin_setup_required':
+            pinErrKey.current++
+            setPinHash('')
+            setPinMode('setup')
+            setPhase('pin')
+            break
+          case 'pin_invalid':
+            // PIN estava errado — auth-question nem chega a gerar pergunta.
+            // Volta pro passo do PIN com feedback claro, em vez do erro genérico de sempre.
+            pinErrKey.current++
+            setPinHash('')
+            setPinError(t('auth.login.errorInvalid'))
+            setPhase('pin')
+            break
+          case 'blocked':
+            Alert.alert(
+              t('auth.login.errorTitle'),
+              t('auth.login.errorAccountBlocked', { time: formatDateTime(result.blockedUntil) }),
+            )
+            setPhase('id')
+            break
+          case 'ok':
+            setChallenge(result.challenge)
+            break
+          case 'error':
+            setChallengeError(true)
+            break
+        }
+      })
+      .catch(() => setChallengeError(true))
+      .finally(() => setChallengeLoading(false))
+  }
+
   // Busca challenge do backend ao entrar na fase security
   useEffect(() => {
     if (phase !== 'security') return
     setChallenge(null)
     setWrongChoice(false)
     setAnswer('')
-    setChallengeError(false)
-    setChallengeLoading(true)
-    const cpfOrHandle = identifier.startsWith('@') ? identifier : identifier.replace(/\D/g, '')
-    authService.fetchSecurityChallenge(cpfOrHandle, pinHash)
-      .then(result => {
-        if (result === 'PIN_SETUP_REQUIRED') {
-          pinErrKey.current++
-          setPinHash('')
-          setPinMode('setup')
-          setPhase('pin')
-          return
-        }
-        if (result) setChallenge(result)
-        else setChallengeError(true)
-      })
-      .catch(() => setChallengeError(true))
-      .finally(() => setChallengeLoading(false))
-  }, [phase])
+    loadChallenge()
+  }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleIdentifierChange = (v: string) => {
     if (v === '' || v === '@') { setIdentifier(v); return }
@@ -117,11 +144,19 @@ export default function LoginScreen() {
       setIsLoggingIn(false)
       const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
       if (code === 'WRONG_SECURITY_ANSWER') {
-        // Resposta errada — fica na tela de segurança, mostra feedback
+        // Resposta errada — mostra feedback e busca uma pergunta NOVA (evita repetir a mesma)
         setWrongChoice(true)
-        setTimeout(() => setWrongChoice(false), 1800)
-      } else if (code === 'TOO_MANY_ATTEMPTS') {
-        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
+        const wrongQuestionId = challenge?.question_id
+        setTimeout(() => {
+          setWrongChoice(false)
+          loadChallenge(wrongQuestionId)
+        }, 1800)
+      } else if (code === 'ACCOUNT_BLOCKED') {
+        const blockedUntil = e instanceof authService.BffError ? e.extra.blocked_until as string | undefined : undefined
+        Alert.alert(
+          t('auth.login.errorTitle'),
+          t('auth.login.errorAccountBlocked', { time: blockedUntil ? formatDateTime(blockedUntil) : '' }),
+        )
         setPhase('id')
       } else if (code === 'PIN_SETUP_REQUIRED') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.pinSetupRequired'), [
@@ -166,8 +201,12 @@ export default function LoginScreen() {
       const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
       if (code === 'WRONG_SECURITY_ANSWER' || code === 'INVALID_CREDENTIALS') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorInvalid'))
-      } else if (code === 'TOO_MANY_ATTEMPTS') {
-        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorRateLimit'))
+      } else if (code === 'ACCOUNT_BLOCKED') {
+        const blockedUntil = e instanceof authService.BffError ? e.extra.blocked_until as string | undefined : undefined
+        Alert.alert(
+          t('auth.login.errorTitle'),
+          t('auth.login.errorAccountBlocked', { time: blockedUntil ? formatDateTime(blockedUntil) : '' }),
+        )
         setPhase('id')
       } else if (code === 'ACCOUNT_DELETED') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorAccountDeleted'))
@@ -289,7 +328,7 @@ export default function LoginScreen() {
             <View style={styles.spacer} />
             <PrimaryButton
               label={t('auth.login.securityRetry')}
-              onPress={() => setPhase('security')}
+              onPress={() => loadChallenge()}
             />
           </>
 

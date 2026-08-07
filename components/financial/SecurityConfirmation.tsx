@@ -34,6 +34,10 @@ export interface SecurityConfirmationProps {
   wrongAnswer?: boolean
   /** Callback com o hash da opção selecionada — enviar direto ao BFF. */
   onPass: (answerHash: string) => void
+  /** PIN estava incorreto ao buscar o challenge — não é possível chegar a uma pergunta. */
+  onPinInvalid?: () => void
+  /** Conta temporariamente bloqueada por tentativas excessivas. */
+  onBlocked?: (blockedUntil: string) => void
 }
 
 export function SecurityConfirmation({
@@ -44,6 +48,8 @@ export function SecurityConfirmation({
   submitting,
   wrongAnswer,
   onPass,
+  onPinInvalid,
+  onBlocked,
 }: SecurityConfirmationProps) {
   const { t } = useTranslation()
   const [challenge, setChallenge] = useState<SecurityChallenge | null>(null)
@@ -57,15 +63,30 @@ export function SecurityConfirmation({
   // rápida e trocar as opções embaixo do dedo do usuário no meio do toque.
   const requestId = React.useRef(0)
 
-  const load = useCallback(() => {
+  const load = useCallback((excludeQuestionId?: string) => {
     const myRequestId = ++requestId.current
     setLoading(true)
     setFetchErr(false)
     setChallenge(null)
-    fetchSecurityChallenge(identifier, pinHash)
-      .then(r => {
+    fetchSecurityChallenge(identifier, pinHash, excludeQuestionId)
+      .then(result => {
         if (myRequestId !== requestId.current) return // resposta obsoleta — ignorar
-        if (r && r !== 'PIN_SETUP_REQUIRED' && r.options.length) setChallenge(r); else setFetchErr(true)
+        switch (result.type) {
+          case 'ok':
+            setChallenge(result.challenge)
+            break
+          case 'pin_invalid':
+            // Sem handler específico, cai no erro genérico (com retry) em vez de travar silenciosamente
+            if (onPinInvalid) onPinInvalid(); else setFetchErr(true)
+            break
+          case 'blocked':
+            if (onBlocked) onBlocked(result.blockedUntil); else setFetchErr(true)
+            break
+          case 'pin_setup_required': // tratado pelo caller via componente pai (login) — aqui é erro genérico
+          case 'error':
+            setFetchErr(true)
+            break
+        }
       })
       .catch(() => {
         if (myRequestId !== requestId.current) return
@@ -75,11 +96,12 @@ export function SecurityConfirmation({
         if (myRequestId !== requestId.current) return
         setLoading(false)
       })
-  }, [identifier, pinHash])
+  }, [identifier, pinHash, onPinInvalid, onBlocked])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Anima shake quando wrongAnswer passa de false→true
+  // Anima shake quando wrongAnswer passa de false→true, e busca uma pergunta
+  // nova (excluindo a que acabou de ser respondida errado) depois da animação.
   const prevWrong = React.useRef(false)
   useEffect(() => {
     if (wrongAnswer && !prevWrong.current) {
@@ -88,10 +110,12 @@ export function SecurityConfirmation({
         Animated.timing(shakeX, { toValue: -10, duration: 55, useNativeDriver: true }),
         Animated.timing(shakeX, { toValue: 8,   duration: 55, useNativeDriver: true }),
         Animated.timing(shakeX, { toValue: 0,   duration: 55, useNativeDriver: true }),
-      ]).start()
+      ]).start(() => {
+        load(challenge?.question_id)
+      })
     }
     prevWrong.current = wrongAnswer ?? false
-  }, [wrongAnswer])
+  }, [wrongAnswer]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return (
@@ -106,7 +130,7 @@ export function SecurityConfirmation({
       <View style={styles.container}>
         {eyebrow && <Text style={styles.eyebrow}>{eyebrow}</Text>}
         <Text style={styles.question}>{t('auth.login.securityLoadError')}</Text>
-        <TouchableOpacity style={styles.retryCta} onPress={load} activeOpacity={0.75}>
+        <TouchableOpacity style={styles.retryCta} onPress={() => load()} activeOpacity={0.75}>
           <Text style={styles.retryCtaText}>{t('auth.login.securityRetry')}</Text>
         </TouchableOpacity>
       </View>

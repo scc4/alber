@@ -1,12 +1,14 @@
 // E2E unit tests — auth-login Edge Function
 // Roda com: deno test supabase/functions/auth-login/index.test.ts --allow-env --allow-net
 //
-// Cobre principalmente o novo gate de conta excluída (deleted_at), que impede
-// login mesmo com PIN/pergunta de segurança corretos — parte do fluxo de
-// exclusão de conta (soft delete). Não retesta toda a lógica pré-existente de
-// PIN em pares/legado (fora do escopo desta mudança).
+// Cobre: o gate de conta excluída (deleted_at) e o bloqueio temporário de
+// login por tentativas excessivas (login_blocked_until — 3 PINs errados ou
+// 2 respostas de segurança erradas em 15min bloqueiam por 60min, ver
+// _shared/login-lockout.ts). Não retesta toda a lógica pré-existente de PIN
+// em pares/legado (fora do escopo desta mudança).
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
+import { bcryptHash } from '../_shared/crypto.ts'
 
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
@@ -56,6 +58,7 @@ function userRow(overrides: Record<string, unknown> = {}) {
     id: 'db-user-1', auth_id: '11111111-1111-4111-8111-111111111111',
     name: 'Fulano', email: 'fulano@teste.com', handle: 'fulano',
     kyc_status: 'approved', account_status: 'active', deleted_at: null,
+    login_blocked_until: null,
     ...overrides,
   }]
 }
@@ -115,7 +118,7 @@ Deno.test('conta excluída (deleted_at preenchido) → 401 ACCOUNT_DELETED, nunc
   assertEquals(adminUsersCalled, false) // não deveria nem tentar verificar o PIN
 })
 
-Deno.test('conta ativa (deleted_at null) — passa do gate de exclusão, segue para checar PIN', async () => {
+Deno.test('conta ativa (sem bloqueio) — passa dos gates, segue para checar PIN', async () => {
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
@@ -124,29 +127,22 @@ Deno.test('conta ativa (deleted_at null) — passa do gate de exclusão, segue p
   const res  = await withMock(routes, () => handleRequest(makeReq()))
   const data = await res.json()
   // Sem pin_bcrypt configurado no mock → cai em INVALID_CREDENTIALS, mas
-  // o importante aqui é que NÃO é ACCOUNT_DELETED — passou do gate certo.
+  // o importante aqui é que NÃO é ACCOUNT_DELETED/ACCOUNT_BLOCKED — passou dos gates certos.
   assertEquals(res.status, 401)
   assertEquals(data.code, 'INVALID_CREDENTIALS')
 })
 
-Deno.test('muitas tentativas recentes → 429 TOO_MANY_ATTEMPTS', async () => {
-  // failedAttempts usa select(..., { count: 'exact', head: true }) — o count
-  // vem do header Content-Range da resposta, não do body (postgrest-js).
+Deno.test('login_blocked_until no futuro → 403 ACCOUNT_BLOCKED, nunca chega a checar PIN', async () => {
+  const future = new Date(Date.now() + 30 * 60_000).toISOString()
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow({ login_blocked_until: future }) },
+  ]
+  let adminUsersCalled = false
   const orig = globalThis.fetch
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
-    const method = (init?.method ?? 'GET').toUpperCase()
-    if (method === 'POST' && url.includes('/rest/v1/audit_logs')) {
-      return new Response(JSON.stringify({}), { status: 201, headers: { 'Content-Type': 'application/json' } })
-    }
-    // head:true count query — pode chegar como GET ou HEAD dependendo da versão do postgrest-js
-    if (url.includes('/rest/v1/audit_logs')) {
-      return new Response(null, { status: 200, headers: { 'content-range': '0-2/3' } })
-    }
-    if (url.includes('/rest/v1/users')) {
-      return new Response(JSON.stringify(userRow()), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    }
-    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    if (url.includes('/auth/v1/admin/users/')) adminUsersCalled = true
+    return mockFetch(routes)(input, init)
   }) as typeof fetch
 
   let res: Response
@@ -156,6 +152,88 @@ Deno.test('muitas tentativas recentes → 429 TOO_MANY_ATTEMPTS', async () => {
     globalThis.fetch = orig
   }
   const data = await res.json()
-  assertEquals(res.status, 429)
-  assertEquals(data.code, 'TOO_MANY_ATTEMPTS')
+  assertEquals(res.status, 403)
+  assertEquals(data.code, 'ACCOUNT_BLOCKED')
+  assertEquals(data.blocked_until, future)
+  assertEquals(adminUsersCalled, false)
+})
+
+Deno.test('login_blocked_until no passado → tratado como não-bloqueado, segue o fluxo normal', async () => {
+  const past = new Date(Date.now() - 5 * 60_000).toISOString()
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow({ login_blocked_until: past }) },
+    { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
+    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: {} } },
+  ]
+  const res  = await withMock(routes, () => handleRequest(makeReq()))
+  const data = await res.json()
+  assertEquals(res.status, 401)
+  assertEquals(data.code, 'INVALID_CREDENTIALS') // não ACCOUNT_BLOCKED
+})
+
+Deno.test('3ª tentativa de PIN errado dentro da janela → bloqueia e retorna ACCOUNT_BLOCKED (não INVALID_CREDENTIALS)', async () => {
+  // Simula 2 falhas anteriores já registradas (audit_logs GET conta 2) — esta
+  // é a 3ª, deve bater o threshold e bloquear.
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
+    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('correct-pin') } } },
+    { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
+    { pattern: '/rest/v1/audit_logs', method: 'GET', status: 200, body: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }, // já 3 no total após esta inserção
+  ]
+  let patchedBody: Record<string, unknown> | null = null
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'PATCH' && url.includes('/rest/v1/users')) {
+      patchedBody = JSON.parse(init!.body as string)
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    return mockFetch(routes)(input, init)
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ pin_hash: 'wrong-pin-hash-not-matching' }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  const data = await res.json()
+  assertEquals(res.status, 403)
+  assertEquals(data.code, 'ACCOUNT_BLOCKED')
+  assertEquals(typeof data.blocked_until, 'string')
+  assertEquals(typeof patchedBody!.login_blocked_until, 'string') // gravou o bloqueio de verdade
+})
+
+Deno.test('2ª resposta de segurança errada dentro da janela → bloqueia e retorna ACCOUNT_BLOCKED (não WRONG_SECURITY_ANSWER)', async () => {
+  const correctPin = await bcryptHash('right-pin-hash')
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
+    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: correctPin, pin_sha256: 'right-pin-hash' } } },
+    { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ id: 'q1', answer_hash: await bcryptHash('resposta-certa') }] },
+    { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
+    { pattern: '/rest/v1/audit_logs', method: 'GET', status: 200, body: [{ id: 'a' }, { id: 'b' }] }, // já 2 no total após esta inserção
+  ]
+  let patchedBody: Record<string, unknown> | null = null
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'PATCH' && url.includes('/rest/v1/users')) {
+      patchedBody = JSON.parse(init!.body as string)
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    return mockFetch(routes)(input, init)
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ pin_hash: 'right-pin-hash', security_answer_hash: 'resposta-errada-hash' }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  const data = await res.json()
+  assertEquals(res.status, 403)
+  assertEquals(data.code, 'ACCOUNT_BLOCKED')
+  assertEquals(typeof patchedBody!.login_blocked_until, 'string')
 })

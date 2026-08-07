@@ -155,6 +155,7 @@
       "errorRateLimit": "Muitas tentativas. Tente novamente em 15 minutos.",
       "errorGeneric": "Erro ao fazer login. Verifique sua conexão.",
       "errorAccountDeleted": "Esta conta foi excluída.",
+      "errorAccountBlocked": "Login bloqueado por tentativas excessivas. Tente novamente às {{time}}.",
       "pinSetupRequired": "Por segurança, insira seu PIN novamente para concluir o login."
     },
     "security": {

@@ -5,6 +5,10 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, bcryptHash, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import {
+  isCurrentlyBlocked, recordFailureAndMaybeBlock,
+  PIN_FAILURE_THRESHOLD, SECURITY_FAILURE_THRESHOLD, LOGIN_BLOCK_MINUTES,
+} from '../_shared/login-lockout.ts'
 
 interface LoginRequest {
   cpf: string
@@ -12,10 +16,6 @@ interface LoginRequest {
   security_answer_hash: string
   security_answer_hash_legacy?: string   // dev-fallback hash — migração de contas antigas
 }
-
-// Janela de bloqueio e máximo de tentativas (spec 05_security §2)
-const MAX_ATTEMPTS   = 3
-const WINDOW_MINUTES = 15
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -32,15 +32,13 @@ async function logAudit(
   })
 }
 
-async function failedAttempts(supabaseAdmin: SupabaseClient, userId: string): Promise<number> {
-  const since = new Date(Date.now() - WINDOW_MINUTES * 60 * 1000).toISOString()
-  const { count } = await supabaseAdmin
-    .from('audit_logs')
-    .select('id', { count: 'exact', head: true })
-    .eq('user_id', userId)
-    .in('event_type', ['login_failed', 'pin_failed'])
-    .gte('created_at', since)
-  return count ?? 0
+function blockedResponse(blockedUntil: string) {
+  return err(
+    'ACCOUNT_BLOCKED',
+    `Login bloqueado por ${LOGIN_BLOCK_MINUTES} minutos após tentativas excessivas`,
+    403,
+    { blocked_until: blockedUntil },
+  )
 }
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -82,12 +80,12 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // ── Localizar usuário ────────────────────────────────────────────────────────
 
-  let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string; deleted_at: string | null } | null = null
+  let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string; deleted_at: string | null; login_blocked_until: string | null } | null = null
 
   if (isHandleId) {
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until')
       .eq('handle', handleClean)
       .maybeSingle()
     user = data
@@ -96,7 +94,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const cpfHash = await sha256hex(cpfClean)
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until')
       .eq('cpf', cpfHash)
       .maybeSingle()
     user = data
@@ -113,16 +111,13 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('ACCOUNT_DELETED', 'Esta conta foi excluída', 401)
   }
 
-  // ── Rate limiting (spec 05_security §2: 3 tentativas → bloqueio 15 min) ──────
+  // ── Bloqueio temporário por tentativas excessivas (spec 05_security §2) ─────
+  // 3 PINs errados ou 2 respostas de segurança erradas (contadas em
+  // auth-question e aqui) bloqueiam o login por LOGIN_BLOCK_MINUTES.
 
-  const attempts = await failedAttempts(supabaseAdmin, user.id)
-  if (attempts >= MAX_ATTEMPTS) {
-    await logAudit(supabaseAdmin, user.id, 'pin_blocked', { attempts })
-    return err(
-      'TOO_MANY_ATTEMPTS',
-      `Conta bloqueada por ${WINDOW_MINUTES} minutos após tentativas excessivas`,
-      429,
-    )
+  if (isCurrentlyBlocked(user.login_blocked_until)) {
+    console.error('[auth-login] FAIL:account_blocked user=', user.id, 'until=', user.login_blocked_until)
+    return blockedResponse(user.login_blocked_until!)
   }
 
   // ── Verificar PIN ────────────────────────────────────────────────────────────
@@ -194,7 +189,8 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   if (!pinOk) {
     console.error('[auth-login] FAIL:pin_wrong')
-    await logAudit(supabaseAdmin, user.id, 'pin_failed', { attempts: attempts + 1 })
+    const { blocked, blockedUntil } = await recordFailureAndMaybeBlock(supabaseAdmin, user.id, 'pin_failed', PIN_FAILURE_THRESHOLD)
+    if (blocked) return blockedResponse(blockedUntil!)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 
@@ -231,7 +227,8 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   if (!answerOk) {
     console.error('[auth-login] FAIL:security_answer_wrong user=', user.id)
-    await logAudit(supabaseAdmin, user.id, 'security_question_failed', {})
+    const { blocked, blockedUntil } = await recordFailureAndMaybeBlock(supabaseAdmin, user.id, 'security_question_failed', SECURITY_FAILURE_THRESHOLD)
+    if (blocked) return blockedResponse(blockedUntil!)
     return err('WRONG_SECURITY_ANSWER', 'Resposta incorreta', 401)
   }
 
@@ -290,6 +287,11 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   await logAudit(supabaseAdmin, user.id, 'login_success', { legacy_migration: legacyMigration })
+
+  // Limpa um bloqueio já expirado (hygiene — o gate acima já ignora valores no passado)
+  if (user.login_blocked_until) {
+    await supabaseAdmin.from('users').update({ login_blocked_until: null }).eq('id', user.id)
+  }
 
   return json({
     token:         access_token,

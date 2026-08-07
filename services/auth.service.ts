@@ -20,11 +20,14 @@ export const USER_KEY           = 'auth_user'
 export class BffError extends Error {
   code:   string
   status: number
-  constructor(code: string, message: string, status: number) {
+  /** Campos extra do corpo do erro (ex.: blocked_until em ACCOUNT_BLOCKED) */
+  extra:  Record<string, unknown>
+  constructor(code: string, message: string, status: number, extra: Record<string, unknown> = {}) {
     super(message)
     this.name   = 'BffError'
     this.code   = code
     this.status = status
+    this.extra  = extra
   }
 }
 
@@ -44,10 +47,12 @@ async function post<T>(path: string, body: unknown, token?: string): Promise<T> 
   console.log(`[bff] ${path} → HTTP ${res.status}`)
   if (!res.ok) {
     console.log(`[bff] ${path} error body:`, JSON.stringify(data))
+    const { code: _c, message: _m, ...extra } = data
     throw new BffError(
       String(data.code    ?? 'UNKNOWN'),
       String(data.message ?? 'Erro desconhecido'),
       res.status,
+      extra,
     )
   }
   return data as T
@@ -177,14 +182,23 @@ export async function fetchUserProfile(token: string): Promise<UserProfileRespon
 // ── Challenge de pergunta de segurança (requer PIN correto) ──────────────────
 
 export interface SecurityChallenge {
-  question: string
-  options:  { hash: string; display: string }[]
+  question:    string
+  question_id: string
+  options:     { hash: string; display: string }[]
 }
+
+export type SecurityChallengeResult =
+  | { type: 'ok'; challenge: SecurityChallenge }
+  | { type: 'pin_setup_required' }
+  | { type: 'pin_invalid' }               // PIN errado — auth-login nunca chega a ser chamado nesse caso
+  | { type: 'blocked'; blockedUntil: string } // conta temporariamente bloqueada (3 PIN ou 2 resposta errados)
+  | { type: 'error' }                     // falha de rede/servidor — retry genérico faz sentido
 
 export async function fetchSecurityChallenge(
   identifier: string,
   pinHash: string,
-): Promise<SecurityChallenge | null | 'PIN_SETUP_REQUIRED'> {
+  excludeQuestionId?: string,
+): Promise<SecurityChallengeResult> {
   try {
     const res = await fetch(`${BFF}/auth-question`, {
       method: 'POST',
@@ -193,15 +207,28 @@ export async function fetchSecurityChallenge(
         'apikey': ANON_KEY,
         'Authorization': `Bearer ${ANON_KEY}`,
       },
-      body: JSON.stringify({ identifier, pin_hash: pinHash }),
+      body: JSON.stringify({ identifier, pin_hash: pinHash, exclude_question_id: excludeQuestionId }),
     })
-    if (!res.ok) return null
-    const data = await res.json() as { question: string; options: { hash: string; display: string }[]; pin_setup_required?: boolean }
-    if (data.pin_setup_required) return 'PIN_SETUP_REQUIRED'
-    if (!data.question && !data.options?.length) return null
-    return { question: data.question, options: data.options ?? [] }
+    if (!res.ok) return { type: 'error' }
+    const data = await res.json() as {
+      question:      string
+      question_id?:  string
+      options:       { hash: string; display: string }[]
+      pin_setup_required?: boolean
+      pin_invalid?:        boolean
+      blocked?:            boolean
+      blocked_until?:      string
+    }
+    if (data.pin_setup_required) return { type: 'pin_setup_required' }
+    if (data.blocked)            return { type: 'blocked', blockedUntil: data.blocked_until ?? '' }
+    if (data.pin_invalid)        return { type: 'pin_invalid' }
+    if (!data.question && !data.options?.length) return { type: 'error' }
+    return {
+      type: 'ok',
+      challenge: { question: data.question, question_id: data.question_id ?? '', options: data.options ?? [] },
+    }
   } catch {
-    return null
+    return { type: 'error' }
   }
 }
 

@@ -6,11 +6,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, tryParsePairsPayload, verifyPinWithPairs, bcryptVerify } from '../_shared/crypto.ts'
-
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
+import { isCurrentlyBlocked, recordFailureAndMaybeBlock, PIN_FAILURE_THRESHOLD } from '../_shared/login-lockout.ts'
 
 // ── Mascaramento e geração de decoys (espelhado de utils/crypto.ts) ──────────
 
@@ -41,20 +37,25 @@ function generateDecoys(realAnswer: string, count: number): string[] {
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
 
   if (req.method !== 'POST') return json({ question: '', options: [] })
 
-  let body: { identifier: string; pin_hash: string }
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
+
+  let body: { identifier: string; pin_hash: string; exclude_question_id?: string }
   try {
     body = await req.json()
   } catch {
     return json({ question: '', options: [] })
   }
 
-  const { identifier, pin_hash } = body
+  const { identifier, pin_hash, exclude_question_id } = body
   if (!identifier || !pin_hash) return json({ question: '', options: [] })
 
   // ── Localizar usuário ────────────────────────────────────────────────────────
@@ -67,29 +68,40 @@ Deno.serve(async (req: Request) => {
 
   let userId: string | null = null
   let authId: string | null = null
+  let loginBlockedUntil: string | null = null
 
   if (isHandleId) {
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id')
+      .select('id, auth_id, login_blocked_until')
       .eq('handle', handleClean)
       .maybeSingle()
     userId = data?.id ?? null
     authId = data?.auth_id ?? null
+    loginBlockedUntil = data?.login_blocked_until ?? null
   } else {
     const cpfHash = await sha256hex(cpfClean)
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id')
+      .select('id, auth_id, login_blocked_until')
       .eq('cpf', cpfHash)
       .maybeSingle()
     userId = data?.id ?? null
     authId = data?.auth_id ?? null
+    loginBlockedUntil = data?.login_blocked_until ?? null
   }
 
   if (!userId || !authId) return json({ question: '', options: [] })
 
-  // ── Verificar PIN (sem logar falha — rate limit está no auth-login) ──────────
+  // ── Bloqueio temporário por tentativas excessivas (ver _shared/login-lockout) ─
+  // Checa ANTES de tentar o PIN — não adianta nem tentar enquanto bloqueado.
+
+  if (isCurrentlyBlocked(loginBlockedUntil)) {
+    return json({ question: '', options: [], blocked: true, blocked_until: loginBlockedUntil })
+  }
+
+  // ── Verificar PIN (falha é logada e contada aqui — este costuma ser o único
+  //    lugar onde um PIN errado é de fato detectado no fluxo real de login) ───
 
   const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(authId)
   const pinBcrypt: string | undefined = authUser?.user?.app_metadata?.pin_bcrypt
@@ -123,7 +135,11 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  if (!pinOk) return json({ question: '', options: [] })
+  if (!pinOk) {
+    const { blocked, blockedUntil } = await recordFailureAndMaybeBlock(supabaseAdmin, userId, 'pin_failed', PIN_FAILURE_THRESHOLD)
+    if (blocked) return json({ question: '', options: [], blocked: true, blocked_until: blockedUntil })
+    return json({ question: '', options: [], pin_invalid: true })
+  }
 
   // ── Buscar pergunta e answer_normalized ──────────────────────────────────────
 
@@ -135,8 +151,14 @@ Deno.serve(async (req: Request) => {
 
   if (!questions || questions.length === 0) return json({ question: '', options: [] })
 
-  // Sorteia aleatoriamente entre as perguntas que têm answer_sha256
-  const eligible = questions.filter(q => q.answer_sha256)
+  // Sorteia aleatoriamente entre as perguntas que têm answer_sha256 — evita
+  // repetir exclude_question_id (pergunta que acabou de ser respondida
+  // errado), a menos que seja a única opção elegível.
+  let eligible = questions.filter(q => q.answer_sha256)
+  if (exclude_question_id && eligible.length > 1) {
+    const withoutExcluded = eligible.filter(q => q.id !== exclude_question_id)
+    if (withoutExcluded.length > 0) eligible = withoutExcluded
+  }
   if (eligible.length === 0) {
     const first = questions[0]
     return json({ question: first?.question ?? '', options: [] })
@@ -166,7 +188,12 @@ Deno.serve(async (req: Request) => {
   const shuffled = [...options].sort(() => Math.random() - 0.5)
 
   return json({
-    question: row.question as string,
-    options:  shuffled,
+    question:    row.question as string,
+    question_id: row.id as string,
+    options:     shuffled,
   })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

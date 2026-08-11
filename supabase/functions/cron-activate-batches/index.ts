@@ -25,8 +25,9 @@ Deno.serve(async (req: Request) => {
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
 
   // Autenticação via cron secret — chamado internamente pelo scheduler, não pelo app
+  // Falha fechada: sem CRON_SECRET configurado, bloqueia (nunca deixa passar sem checar)
   const cronSecret = Deno.env.get('CRON_SECRET')
-  if (cronSecret && req.headers.get('x-cron-secret') !== cronSecret) {
+  if (!cronSecret || req.headers.get('x-cron-secret') !== cronSecret) {
     return err('UNAUTHORIZED', 'Invalid cron secret', 401)
   }
 

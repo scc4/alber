@@ -121,6 +121,29 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('CPF_INVALID', 'CPF inválido', 422)
   }
 
+  // ── Rate limit: máx 5 tentativas de cadastro por IP a cada 15 minutos ────────
+  // auth-register cria uma subconta real na Asaas por chamada bem-sucedida —
+  // sem esse limite, um script pode gerar CPFs válidos (checksum) em sequência
+  // e forçar a criação de contas em massa sem custo pro atacante.
+
+  const clientIp = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown'
+  const fifteenMinAgo = new Date(Date.now() - 15 * 60_000).toISOString()
+  const { count: registerAttempts } = await supabaseAdmin
+    .from('audit_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('event_type', 'register_attempt')
+    .eq('ip_address', clientIp)
+    .gte('created_at', fifteenMinAgo)
+
+  if ((registerAttempts ?? 0) >= 5) {
+    return err('RATE_LIMITED', 'Muitas tentativas de cadastro. Aguarde alguns minutos.', 429)
+  }
+  await supabaseAdmin.from('audit_logs').insert({
+    user_id:    null,
+    event_type: 'register_attempt',
+    ip_address: clientIp,
+  })
+
   const handleNorm  = handle.toLowerCase().replace(/^@/, '')
   const cpfHash     = await sha256hex(cpfClean)
   const encSecret   = Deno.env.get('ASAAS_API_KEY')!  // Asaas parent API key — também usada p/ criptografar asaas_api_key_enc

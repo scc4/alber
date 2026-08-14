@@ -51,8 +51,9 @@ export interface BalanceResponse {
   account_status: string
 }
 
-export async function getBalance(token: string): Promise<BalanceResponse> {
-  return get<BalanceResponse>('financial-balance', token)
+export async function getBalance(token: string, companyId?: string): Promise<BalanceResponse> {
+  const qs = companyId ? `?company_id=${encodeURIComponent(companyId)}` : ''
+  return get<BalanceResponse>(`financial-balance${qs}`, token)
 }
 
 // ── Carregar (spec §4.3) ──────────────────────────────────────────────────────
@@ -67,8 +68,8 @@ export interface CarregarResponse {
   expires_at:      string
 }
 
-export async function carregar(token: string, amountAlbers: number): Promise<CarregarResponse> {
-  return post<CarregarResponse>('financial-carregar', { amount_albers: amountAlbers }, token)
+export async function carregar(token: string, amountAlbers: number, companyId?: string): Promise<CarregarResponse> {
+  return post<CarregarResponse>('financial-carregar', { amount_albers: amountAlbers, company_id: companyId }, token)
 }
 
 // ── Descarregar (spec §4.4) ───────────────────────────────────────────────────
@@ -86,11 +87,13 @@ export async function descarregar(
   amountAlbers: number,
   pinHash: string,
   securityAnswerHash: string,
+  companyId?: string,
 ): Promise<DescarregarResponse> {
   return post<DescarregarResponse>('financial-descarregar', {
     amount_albers:        amountAlbers,
     pin_hash:             pinHash,
     security_answer_hash: securityAnswerHash,
+    company_id:           companyId,
   }, token)
 }
 
@@ -121,12 +124,14 @@ export async function receber(
   payerIdentifier: string,
   payerPinHash: string,
   payerSecurityAnswerHash: string,
+  companyId?: string,
 ): Promise<ReceberResponse> {
   return post<ReceberResponse>('financial-receber', {
     amount_albers:               amountAlbers,
     payer_identifier:            payerIdentifier,
     payer_pin_hash:              payerPinHash,
     payer_security_answer_hash:  payerSecurityAnswerHash,
+    company_id:                  companyId,
   }, token)
 }
 
@@ -145,11 +150,13 @@ export async function transferir(
   amountAlbers: number,
   pinHash: string,
   securityAnswerHash: string,
+  companyId?: string,
 ): Promise<TransferirResponse> {
   return post<TransferirResponse>('financial-transferir', {
     destinatario_identifier: destinatarioIdentifier,
     amount_albers:           amountAlbers,
     pin_hash:                pinHash,
     security_answer_hash:    securityAnswerHash,
+    company_id:              companyId,
   }, token)
 }

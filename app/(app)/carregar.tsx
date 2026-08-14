@@ -26,7 +26,9 @@ import { Eyebrow } from '../../components/shared/Eyebrow'
 import { QRCodeDisplay } from '../../components/financial/QRCodeDisplay'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
-import { useBalanceStore } from '../../store/balance.store'
+import { useActiveContextStore } from '../../store/active-context.store'
+import { useCompanyStore } from '../../store/company.store'
+import { useContextualBalance } from '../../hooks/useContextualBalance'
 import { carregar, CarregarResponse, descarregar, DescarregarResponse } from '../../services/financial.service'
 import { formatAlbers, formatCurrency } from '../../utils/format'
 import { BffError, fetchUserProfile } from '../../services/auth.service'
@@ -71,8 +73,17 @@ function parseBRL(digits: string): number {
 
 export default function CarregarScreen() {
   const { t } = useTranslation()
-  const { kycStatus, user, token, setKycStatus } = useAuthStore()
-  const { balance, fetchBalance } = useBalanceStore()
+  const { kycStatus: personalKycStatus, user, token, setKycStatus } = useAuthStore()
+  const context   = useActiveContextStore(s => s.context)
+  const companies = useCompanyStore(s => s.companies)
+  const { balance, fetchBalance } = useContextualBalance()
+
+  const companyId = context.type === 'company' ? context.companyId : undefined
+  // No contexto de empresa, o KYC que importa é o da empresa, não o pessoal
+  // do operador — cada carteira tem seu próprio status junto ao Asaas.
+  const kycStatus = context.type === 'company'
+    ? (companies.find(c => c.id === context.companyId)?.kyc_status ?? 'pending')
+    : personalKycStatus
 
   const [tab, setTab]           = useState<Tab>('carregar')
   const [step, setStep]         = useState<Step>(
@@ -166,7 +177,7 @@ export default function CarregarScreen() {
     setCarregarLoading(true)
     setApiError(null)
     try {
-      const result = await carregar(token, numericAmount)
+      const result = await carregar(token, numericAmount, companyId)
       setCarregarResult(result)
       setStep('qr')
     } catch (e) {
@@ -197,7 +208,7 @@ export default function CarregarScreen() {
     if (!answerHash || !pinHash || !token) return
     setStep('processing')
     try {
-      const result = await descarregar(token, numericAmount, pinHash, answerHash)
+      const result = await descarregar(token, numericAmount, pinHash, answerHash, companyId)
       setDescarregarResult(result)
       await fetchBalance()
       setStep('success')
@@ -237,10 +248,13 @@ export default function CarregarScreen() {
   }
 
   const handleKycVerify = async () => {
-    if (!token || !user?.id) return
+    if (!token) return
+    const table = companyId ? 'companies' : 'users'
+    const idValue = companyId ?? user?.id
+    if (!idValue) return
     try {
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/users?id=eq.${user.id}&select=onboarding_url`,
+        `${SUPABASE_URL}/rest/v1/${table}?id=eq.${idValue}&select=onboarding_url`,
         { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
       )
       if (res.ok) {
@@ -253,17 +267,27 @@ export default function CarregarScreen() {
         }
       }
     } catch { /* segue para fallback */ }
-    router.push('/(app)/perfil/kyc' as never)
+    if (!companyId) router.push('/(app)/perfil/kyc' as never)
   }
 
   const handleKycWebViewClose = async () => {
     setKycWebViewVisible(false)
     if (!token) return
     try {
-      const profile = await fetchUserProfile(token)
-      if (profile?.kyc_status === 'approved') {
-        setKycStatus('approved')
-        setStep('value')
+      if (companyId) {
+        // Não há polling dedicado pro KYC de empresa ainda — recarrega a lista
+        // (financial-balance também sincroniza o status a cada consulta de saldo).
+        await useCompanyStore.getState().fetchCompanies()
+        const updated = useCompanyStore.getState().companies
+        if (updated.find(c => c.id === companyId)?.kyc_status === 'approved') {
+          setStep('value')
+        }
+      } else {
+        const profile = await fetchUserProfile(token)
+        if (profile?.kyc_status === 'approved') {
+          setKycStatus('approved')
+          setStep('value')
+        }
       }
     } catch { /* mantém step kyc_blocked */ }
   }

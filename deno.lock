@@ -57,7 +57,9 @@
     "packageJson": {
       "dependencies": [
         "npm:@react-native-community/datetimepicker@9.1.0",
+        "npm:@react-native/jest-preset@~0.86.2",
         "npm:@supabase/supabase-js@2.110.2",
+        "npm:@types/jest@^29.5.14",
         "npm:@types/react@~19.2.2",
         "npm:expo-clipboard@~56.0.4",
         "npm:expo-constants@~56.0.20",
@@ -73,6 +75,8 @@
         "npm:expo-status-bar@~56.0.4",
         "npm:expo@~56.0.14",
         "npm:i18next@^26.2.0",
+        "npm:jest-expo@^57.0.4",
+        "npm:jest@^29.7.0",
         "npm:react-i18next@^17.0.8",
         "npm:react-native-safe-area-context@5.7",
         "npm:react-native-screens@4.25.2",

@@ -8,6 +8,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt } from '../_shared/crypto.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'
+import { resolveWalletContext } from '../_shared/company-permissions.ts'
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req)
@@ -42,7 +43,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: userData, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, asaas_api_key_enc, account_status, kyc_status')
+    .select('id, asaas_api_key_enc, account_status, kyc_status, created_at')
     .eq('auth_id', user.id)
     .maybeSingle()
 
@@ -50,16 +51,24 @@ Deno.serve(async (req: Request) => {
     return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
   }
 
+  // ── Resolver carteira: pessoal ou empresa (?company_id=) ──────────────────────
+
+  const companyId = new URL(req.url).searchParams.get('company_id')
+
+  const resolution = await resolveWalletContext(supabaseAdmin, userData.id, companyId, 'ver_saldo', userData)
+  if (!resolution.ok) return err(resolution.code, resolution.message, resolution.status)
+  const wallet = resolution.wallet
+
   // ── Saldo disponível via Asaas (spec 04_api §4.8) ────────────────────────────
 
   let asaasBalance = 0
   let asaasError   = false
   let subApiKey:  string | null = null
 
-  if (userData.asaas_api_key_enc) {
+  if (wallet.asaasApiKeyEnc) {
     try {
       const encSecret = Deno.env.get('ASAAS_API_KEY')!
-      subApiKey       = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
+      subApiKey       = await aesDecrypt(wallet.asaasApiKeyEnc, encSecret)
       asaasBalance    = await getSubcontaBalance(subApiKey)
     } catch (e) {
       console.error('Asaas balance fetch failed:', e)
@@ -71,7 +80,7 @@ Deno.serve(async (req: Request) => {
   // ── Polling de KYC: sincroniza status Asaas → banco se ainda 'pending' ───────
   // Complementa o webhook — garante que aprovações não percam notificação.
 
-  let kycStatus = userData.kyc_status as string
+  let kycStatus = wallet.kycStatus
 
   if (kycStatus === 'pending' && subApiKey) {
     try {
@@ -86,9 +95,9 @@ Deno.serve(async (req: Request) => {
         console.log('[financial-balance] Asaas account status:', statusData.general)
         if (statusData.general === 'APPROVED') {
           const { error: updateErr } = await supabaseAdmin
-            .from('users')
+            .from(wallet.ownerType === 'company' ? 'companies' : 'users')
             .update({ kyc_status: 'approved' })
-            .eq('id', userData.id)
+            .eq('id', wallet.companyId ?? userData.id)
           if (updateErr) {
             console.error('[financial-balance] kyc_status update failed:', updateErr)
           } else {
@@ -106,21 +115,26 @@ Deno.serve(async (req: Request) => {
 
   // ── Saldo bloqueado em splits (spec 03_backend §5.3) ─────────────────────────
   // blocked = Σ blocked_amount WHERE user_id = ? AND status = 'accepted'
+  // Splits são só pessoais nesta fase — carteira de empresa não participa.
 
-  const { data: participations, error: splitErr } = await supabaseAdmin
-    .from('split_participants')
-    .select('blocked_amount')
-    .eq('user_id', userData.id)
-    .eq('status', 'accepted')
+  let blocked = 0
 
-  if (splitErr) {
-    console.error('Split participants query failed:', splitErr)
+  if (wallet.ownerType === 'personal') {
+    const { data: participations, error: splitErr } = await supabaseAdmin
+      .from('split_participants')
+      .select('blocked_amount')
+      .eq('user_id', userData.id)
+      .eq('status', 'accepted')
+
+    if (splitErr) {
+      console.error('Split participants query failed:', splitErr)
+    }
+
+    blocked = (participations ?? []).reduce(
+      (sum, p) => sum + Number(p.blocked_amount ?? 0),
+      0,
+    )
   }
-
-  const blocked = (participations ?? []).reduce(
-    (sum, p) => sum + Number(p.blocked_amount ?? 0),
-    0,
-  )
 
   const available = Math.max(0, asaasBalance)
   const total     = available + blocked
@@ -132,6 +146,6 @@ Deno.serve(async (req: Request) => {
     currency:       'ALB',
     stale:          asaasError,
     kyc_status:     kycStatus,
-    account_status: userData.account_status,
+    account_status: wallet.accountStatus,
   })
 })

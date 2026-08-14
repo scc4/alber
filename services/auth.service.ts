@@ -78,9 +78,33 @@ export interface RegisterInput {
   handle:             string
   pin_hash:           string       // SHA-256 do PIN de 6 dígitos
   security_questions: { question: string; answer_hash: string; answer_text?: string }[]
-  pix_key:            string
-  pix_key_type:       'cpf' | 'phone' | 'email' | 'random'
+  pix_key?:           string
+  pix_key_type?:      'cpf' | 'phone' | 'email' | 'random'
   terms_accepted:     boolean
+  // false quando a pessoa só quer ser master/operador de empresa, sem
+  // carteira pessoal própria (plano CNPJ velvet-puzzling-sedgewick).
+  create_personal_wallet?: boolean
+  // Presente quando o cadastro veio de um link de convite de operador.
+  invite_token?: string
+  // Presente quando o cadastro escolheu "Empresa" — cria a conta PJ junto,
+  // com o usuário acima como master (plano CNPJ velvet-puzzling-sedgewick)
+  company?: {
+    cnpj:          string       // dígitos/letras, sem máscara
+    handle:        string
+    company_name:  string
+    trading_name?: string
+    company_type:  'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION'
+    income_value:  number
+    address: {
+      street:       string
+      number:       string
+      complement?:  string
+      neighborhood: string
+      zip_code:     string
+      city?:        string
+      state?:       string
+    }
+  }
 }
 
 export interface RegisterResponse {
@@ -90,6 +114,12 @@ export interface RegisterResponse {
   kyc_status:      string
   account_status:  string
   login_required?: boolean
+  company_id?:             string
+  company_account_status?: string
+  company_kyc_status?:     string
+  company_onboarding_url?: string | null
+  company_error?:          { code: string; message: string }
+  invite_error?:           { code: string; message: string }
 }
 
 export async function register(input: RegisterInput): Promise<RegisterResponse> {
@@ -117,6 +147,7 @@ export interface LoginResponse {
     email:          string
     kyc_status:     string
     account_status: string
+    has_personal_wallet: boolean
   }
 }
 
@@ -167,6 +198,7 @@ export interface UserProfileResponse {
   pix_key_masked: string
   pix_key_type:   string
   has_pix_key:    boolean
+  has_personal_wallet: boolean
 }
 
 export async function fetchUserProfile(token: string): Promise<UserProfileResponse | null> {

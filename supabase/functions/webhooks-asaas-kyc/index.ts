@@ -7,8 +7,14 @@
 //   REJECTED   → 'rejected'
 //   RESTRICTED → 'rejected'   (funcionalidade limitada = tratado como reprovado)
 //   outros     → sem alteração (200 imediato)
+//
+// Plano velvet-puzzling-sedgewick (ciclo de vida do KYC de empresa): a
+// subconta pode ser de uma `users` (pessoa física) OU de uma `companies`
+// (empresa) — tenta users primeiro (comportamento de sempre) e cai para
+// companies quando não encontra. Rejeição de empresa também marca
+// deleted_at, liberando o CNPJ/handle automaticamente (migration 044).
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
@@ -111,9 +117,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     .maybeSingle()
 
   if (userErr || !userData) {
-    // Pode ser subconta de Space ou conta não encontrada — não é erro crítico
-    console.warn('[kyc-webhook] usuário não encontrado para asaas_account_id:', asaasAccountId)
-    return new Response('OK', { status: 200 })
+    // Não é uma subconta pessoal — tenta como subconta de empresa antes de desistir.
+    return await handleCompanyKyc(supabaseAdmin, asaasAccountId, newKycStatus, event, rawStatus)
   }
 
   // ── Idempotência — já no status final ────────────────────────────────────────
@@ -196,6 +201,115 @@ export async function handleRequest(req: Request): Promise<Response> {
       asaas_event:      event,
       asaas_status:     rawStatus,
       previous_status:  userData.kyc_status,
+    },
+  })
+
+  return new Response('OK', { status: 200 })
+}
+
+// ── Ramo empresa (companies) ──────────────────────────────────────────────────
+// Espelha a lógica acima, com uma diferença: rejeição também marca deleted_at,
+// liberando o CNPJ/handle da empresa (índices parciais da migration 044) para
+// que outra pessoa possa cadastrar o mesmo CNPJ — nunca mexe na subconta Asaas
+// em si, que fica órfã (trade-off aceito, documentado no plano).
+async function handleCompanyKyc(
+  supabaseAdmin: SupabaseClient,
+  asaasAccountId: string,
+  newKycStatus: 'approved' | 'rejected',
+  event: string,
+  rawStatus: string,
+): Promise<Response> {
+  const { data: companyData, error: companyErr } = await supabaseAdmin
+    .from('companies')
+    .select('id, owner_id, kyc_status, asaas_api_key_enc, asaas_deposit_key')
+    .eq('asaas_account_id', asaasAccountId)
+    .is('deleted_at', null)
+    .maybeSingle()
+
+  if (companyErr || !companyData) {
+    console.warn('[kyc-webhook] nem usuário nem empresa encontrados para asaas_account_id:', asaasAccountId)
+    return new Response('OK', { status: 200 })
+  }
+
+  if (companyData.kyc_status === newKycStatus) {
+    console.log(`[kyc-webhook] empresa ${companyData.id} já está em kyc_status="${newKycStatus}" — ignorando`)
+    return new Response('OK', { status: 200 })
+  }
+
+  const now = new Date().toISOString()
+  const updatePayload: Record<string, unknown> = { kyc_status: newKycStatus, updated_at: now }
+  if (newKycStatus === 'approved') {
+    updatePayload.onboarding_completed_at = now
+  } else {
+    // Libera CNPJ/handle na hora — decisão de produto: nenhuma revisão manual
+    // intermediária, o Asaas já fez a checagem real de documentos.
+    updatePayload.deleted_at = now
+  }
+
+  const { error: updateErr } = await supabaseAdmin
+    .from('companies')
+    .update(updatePayload)
+    .eq('id', companyData.id)
+
+  if (updateErr) {
+    console.error('[kyc-webhook] falha ao atualizar kyc_status da empresa:', updateErr)
+    await logError(supabaseAdmin, 'webhooks-asaas-kyc', updateErr, {
+      event, asaas_account_id: asaasAccountId, new_kyc_status: newKycStatus, company_id: companyData.id,
+    })
+    return new Response('Internal Server Error', { status: 500 })
+  }
+
+  console.log(`[kyc-webhook] empresa ${companyData.id} → kyc_status="${newKycStatus}"`)
+
+  // ── Criar chave Pix de RECEBIMENTO (EVP) se ainda não tiver ──────────────────
+
+  if (newKycStatus === 'approved' && !companyData.asaas_deposit_key && companyData.asaas_api_key_enc) {
+    try {
+      const subApiKey    = await aesDecrypt(companyData.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+      const { key }      = await createPixAddressKey('EVP', subApiKey)
+      const encryptedKey = await aesEncrypt(key, Deno.env.get('ENCRYPTION_KEY')!)
+      await supabaseAdmin
+        .from('companies')
+        .update({ asaas_deposit_key: encryptedKey })
+        .eq('id', companyData.id)
+      console.log(`[kyc-webhook] chave Pix de recebimento (EVP) criada para empresa ${companyData.id}`)
+    } catch (pixErr) {
+      console.error('[kyc-webhook] falha ao criar chave Pix de recebimento da empresa (não bloqueante):', pixErr)
+      await logError(supabaseAdmin, 'webhooks-asaas-kyc', pixErr, {
+        context: 'create_deposit_key', company_id: companyData.id, asaas_account_id: asaasAccountId,
+      })
+    }
+  }
+
+  // ── Push notification ao master ──────────────────────────────────────────────
+
+  if (newKycStatus === 'approved') {
+    await sendPush(
+      companyData.owner_id,
+      'Empresa verificada!',
+      'A verificação da sua empresa foi concluída. Já pode usar o Alber.',
+      { route: `/(app)/empresas/${companyData.id}` },
+    )
+  } else {
+    await sendPush(
+      companyData.owner_id,
+      'Verificação da empresa não aprovada',
+      'A verificação de identidade da empresa não foi concluída. Acesse o app para mais informações.',
+      { route: `/(app)/empresas/${companyData.id}` },
+    )
+  }
+
+  // ── Audit log ────────────────────────────────────────────────────────────────
+
+  await supabaseAdmin.from('audit_logs').insert({
+    user_id:    companyData.owner_id,
+    event_type: `company_kyc_status_${newKycStatus}`,
+    metadata: {
+      company_id:       companyData.id,
+      asaas_account_id: asaasAccountId,
+      asaas_event:      event,
+      asaas_status:     rawStatus,
+      previous_status:  companyData.kyc_status,
     },
   })
 

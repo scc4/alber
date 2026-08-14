@@ -34,7 +34,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: user, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, name, handle, email, phone, birth_date, pix_key, pix_key_type, kyc_status, account_status, created_at')
+    .select('id, name, handle, email, phone, birth_date, pix_key, pix_key_type, kyc_status, account_status, created_at, asaas_account_id')
     .eq('auth_id', authUser.id)
     .maybeSingle()
 
@@ -66,6 +66,7 @@ Deno.serve(async (req: Request) => {
     pix_key_masked: pixKeyMasked,
     pix_key_type:   user.pix_key_type ?? 'cpf',
     has_pix_key:    !!user.pix_key,
+    has_personal_wallet: !!user.asaas_account_id,
   })
 })
 

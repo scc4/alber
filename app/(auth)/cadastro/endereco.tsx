@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next'
 import { OnboardShell } from '../../../components/core/OnboardShell'
 import { Field } from '../../../components/core/Field'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
-import { updateDraft } from '../../../store/signup-draft'
+import { getDraft, updateDraft } from '../../../store/signup-draft'
 
 function maskCEP(v: string) {
   v = v.replace(/\D/g, '').slice(0, 8)
@@ -82,7 +82,10 @@ export default function EnderecoScreen() {
 
   const handleNext = () => {
     updateDraft({ cep, street, number, complement, neighborhood, city, state: uf })
-    router.push('/(auth)/cadastro/handle')
+    const next = getDraft().accountType === 'business'
+      ? '/(auth)/cadastro/dados-empresa'
+      : '/(auth)/cadastro/handle'
+    router.push(next)
   }
 
   return (

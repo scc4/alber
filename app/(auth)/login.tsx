@@ -26,6 +26,7 @@ import { Field } from '../../components/core/Field'
 import { useAuthStore } from '../../store/auth.store'
 import * as authService from '../../services/auth.service'
 import { sha256Hex, normalizeSecurityAnswer, legacyDevHash } from '../../utils/crypto'
+import { resolveInitialRoute } from '../../hooks/useInitialRoute'
 import { formatDateTime } from '../../utils/format'
 import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
@@ -139,7 +140,7 @@ export default function LoginScreen() {
     const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
     try {
       await login(cpfOrHandle, pinHash, optionHash)
-      router.replace('/(app)/')
+      router.replace((await resolveInitialRoute()) as never)
     } catch (e: unknown) {
       setIsLoggingIn(false)
       const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
@@ -195,7 +196,7 @@ export default function LoginScreen() {
       const answerHash = await sha256Hex(normalized)
       const legacyHash = legacyDevHash(normalized)
       await login(cpfOrHandle, pinHash, answerHash, legacyHash)
-      router.replace('/(app)/')
+      router.replace((await resolveInitialRoute()) as never)
     } catch (e: unknown) {
       setIsLoggingIn(false)
       const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'

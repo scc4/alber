@@ -189,3 +189,4 @@ const transaction_id = crypto.randomUUID()
 | Limite de transferências subconta/dia | Impacta volume Split e Receber |
 | Prazo médio aprovação KYC produção | Impacta UX período de avaliação |
 | Prazo habilitação White Label produção | Impacta cronograma go-live |
+| `POST /accounts` aceita `cpfCnpj` alfanumérico (CNPJ novo formato, IN RFB 2.229/2024, emissão iniciada em 31/07/2026)? | Bloqueante para abrir conta PJ com CNPJ alfanumérico — nosso validador já aceita (`_shared/cnpj.ts`), mas não confirmamos se o Asaas já processa esse formato na criação de subconta |

@@ -5,9 +5,12 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
+import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { createCompanyForOwner, CreateCompanyInput, isValidHandleFormat } from '../_shared/company.ts'
+import { consumeCompanyInvite } from '../_shared/company-invite.ts'
 
 interface AddressDTO {
   street: string
@@ -29,9 +32,21 @@ interface RegisterRequest {
   handle: string
   pin_hash: string
   security_questions: { question: string; answer_hash: string; answer_text?: string }[]
-  pix_key: string
-  pix_key_type: 'cpf' | 'phone' | 'email' | 'random'
+  pix_key?: string
+  pix_key_type?: 'cpf' | 'phone' | 'email' | 'random'
   terms_accepted: boolean
+  // Presente quando o cadastro escolheu "Empresa" no seletor de tipo de conta —
+  // o usuário acima vira o master da empresa (plano CNPJ velvet-puzzling-sedgewick).
+  company?: CreateCompanyInput
+  // false quando a pessoa só quer ser master/operador de empresa, sem
+  // carteira pessoal própria (plano CNPJ velvet-puzzling-sedgewick).
+  // Ausente/true = comportamento de sempre (cria a subconta Asaas pessoal).
+  create_personal_wallet?: boolean
+  // Presente quando o cadastro veio de um link de convite de operador
+  // (empresas/[id]/operadores → company-invite-link-create). Nunca cria
+  // carteira pessoal nem empresa própria — só ativa o operador na empresa
+  // do convite. Ignora `company` se os dois vierem juntos (não deveria).
+  invite_token?: string
 }
 
 interface PendingRow {
@@ -46,9 +61,9 @@ interface PendingRow {
 
 async function savePending(opts: {
   supabaseAdmin: SupabaseClient
-  asaasAccountId: string
-  asaasApiKeyEnc: string
-  asaasWalletId: string
+  asaasAccountId: string | null
+  asaasApiKeyEnc: string | null
+  asaasWalletId: string | null
   email: string
   cpfHash: string
   handle: string
@@ -104,7 +119,14 @@ export async function handleRequest(req: Request): Promise<Response> {
   const {
     name, email, cpf, birth_date, phone, address,
     handle, pin_hash, security_questions, pix_key, pix_key_type, terms_accepted,
+    company, create_personal_wallet, invite_token,
   } = body
+
+  // Convite de operador nunca cria carteira pessoal nem empresa própria.
+  // Ausente/true (fora do fluxo de convite) = sempre criou subconta Asaas
+  // pessoal (comportamento de sempre).
+  const wantsPersonalWallet = !invite_token && create_personal_wallet !== false
+  const companyToCreate = invite_token ? undefined : company
 
   if (!name || !email || !cpf || !birth_date || !phone || !handle || !pin_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -119,6 +141,75 @@ export async function handleRequest(req: Request): Promise<Response> {
   const cpfClean = normalizeCpf(cpf)
   if (!validateCpf(cpfClean)) {
     return err('CPF_INVALID', 'CPF inválido', 422)
+  }
+
+  // ── Validação antecipada dos dados da empresa ────────────────────────────────
+  // Roda ANTES de criar a conta pessoal — um CNPJ inválido/duplicado não deve
+  // deixar o representante com uma conta pessoal criada e a empresa travada.
+  // Falhas de infraestrutura (Asaas fora do ar etc.) continuam não-críticas e
+  // são tratadas depois de a conta pessoal já existir (ETAPA 4.5).
+
+  if (companyToCreate) {
+    if (
+      !companyToCreate.cnpj || !companyToCreate.handle || !companyToCreate.company_name?.trim() || !companyToCreate.company_type ||
+      companyToCreate.income_value == null || !companyToCreate.address?.street || !companyToCreate.address?.number ||
+      !companyToCreate.address?.neighborhood || !companyToCreate.address?.zip_code
+    ) {
+      return err('COMPANY_MISSING_FIELDS', 'Campos obrigatórios da empresa ausentes', 400)
+    }
+
+    const companyCnpjClean = normalizeCnpj(companyToCreate.cnpj)
+    if (!validateCnpj(companyCnpjClean)) {
+      return err('CNPJ_INVALID', 'CNPJ inválido', 422)
+    }
+
+    const companyCnpjHash = await sha256hex(companyCnpjClean)
+    // Empresas com deleted_at (rejeitada pelo Asaas ou abandonada pelo master
+    // antes da aprovação) já liberaram o CNPJ (migration 044) — não bloqueiam
+    // mais. Uma linha ainda pendente bloqueia com um código diferente, pra
+    // avisar que é uma verificação em andamento, não uma conta já existente.
+    const { data: existingCompanyCnpj } = await supabaseAdmin
+      .from('companies').select('id, kyc_status').eq('cnpj', companyCnpjHash).is('deleted_at', null).maybeSingle()
+    if (existingCompanyCnpj) {
+      return existingCompanyCnpj.kyc_status === 'pending'
+        ? err('CNPJ_UNDER_REVIEW', 'Este CNPJ já está em processo de verificação por outra conta.', 409)
+        : err('CNPJ_DUPLICATE', 'CNPJ já cadastrado', 409)
+    }
+
+    const companyHandleNorm = companyToCreate.handle.toLowerCase().replace(/^@/, '')
+    if (!isValidHandleFormat(companyHandleNorm)) {
+      return err('COMPANY_HANDLE_INVALID', '@handle da empresa inválido', 400)
+    }
+    // Compara também com o handle do próprio representante (sendo criado
+    // nesta mesma requisição, ainda não existe no banco pra pegar por query).
+    if (companyHandleNorm === handle.toLowerCase().replace(/^@/, '')) {
+      return err('COMPANY_HANDLE_TAKEN', '@handle da empresa não pode ser igual ao seu @handle pessoal', 409)
+    }
+    const [{ data: handleUser }, { data: handleCompany }] = await Promise.all([
+      supabaseAdmin.from('users').select('id').eq('handle', companyHandleNorm).maybeSingle(),
+      supabaseAdmin.from('companies').select('id').eq('handle', companyHandleNorm).is('deleted_at', null).maybeSingle(),
+    ])
+    if (handleUser || handleCompany) {
+      return err('COMPANY_HANDLE_TAKEN', '@handle da empresa já está em uso', 409)
+    }
+  }
+
+  // ── Validação antecipada do convite de operador ──────────────────────────────
+  // Mesmo raciocínio: não cria conta pessoal para um convite que já sabemos
+  // que vai falhar (expirado, já usado, ou nunca existiu).
+
+  if (invite_token) {
+    const { data: invite } = await supabaseAdmin
+      .from('company_invites')
+      .select('status, expires_at')
+      .eq('token', invite_token)
+      .maybeSingle()
+
+    if (!invite) return err('INVITE_NOT_FOUND', 'Convite não encontrado', 404)
+    if (invite.status !== 'pending') return err('INVITE_UNAVAILABLE', 'Este convite não está mais disponível', 409)
+    if (new Date(invite.expires_at).getTime() < Date.now()) {
+      return err('INVITE_EXPIRED', 'Este convite expirou', 409)
+    }
   }
 
   // ── Rate limit: máx 5 tentativas de cadastro por IP a cada 15 minutos ────────
@@ -153,32 +244,37 @@ export async function handleRequest(req: Request): Promise<Response> {
   const { pin_hash: _ph, security_questions: _sq, ...safePayload } = body as unknown as Record<string, unknown>
 
   // ── ETAPA 0: Idempotência — verificar pending_registrations ─────────────────
+  // Só se aplica a quem quer carteira pessoal: a máquina de pending existe pra
+  // recuperar falha parcial de criação de subconta Asaas — sem carteira
+  // pessoal não há nada do lado do Asaas que possa falhar aqui.
 
   let pendingReg: PendingRow | null = null
 
-  // Busca por cpf_hash primeiro (identificador primário)
-  const { data: byCpf } = await supabaseAdmin
-    .from('pending_registrations')
-    .select('id, asaas_account_id, asaas_api_key_enc, asaas_wallet_id, attempts')
-    .eq('cpf_hash', cpfHash)
-    .eq('status', 'pending')
-    .maybeSingle()
-
-  if (byCpf) {
-    pendingReg = byCpf as PendingRow
-  } else {
-    const { data: byEmail } = await supabaseAdmin
+  if (wantsPersonalWallet) {
+    // Busca por cpf_hash primeiro (identificador primário)
+    const { data: byCpf } = await supabaseAdmin
       .from('pending_registrations')
       .select('id, asaas_account_id, asaas_api_key_enc, asaas_wallet_id, attempts')
-      .eq('email', email)
+      .eq('cpf_hash', cpfHash)
       .eq('status', 'pending')
       .maybeSingle()
-    if (byEmail) pendingReg = byEmail as PendingRow
+
+    if (byCpf) {
+      pendingReg = byCpf as PendingRow
+    } else {
+      const { data: byEmail } = await supabaseAdmin
+        .from('pending_registrations')
+        .select('id, asaas_account_id, asaas_api_key_enc, asaas_wallet_id, attempts')
+        .eq('email', email)
+        .eq('status', 'pending')
+        .maybeSingle()
+      if (byEmail) pendingReg = byEmail as PendingRow
+    }
   }
 
-  let asaasAccountId: string
-  let asaasApiKeyEnc: string
-  let asaasWalletId:  string
+  let asaasAccountId: string | null = null
+  let asaasApiKeyEnc: string | null = null
+  let asaasWalletId:  string | null = null
   // Captura o response bruto do Asaas (inclui apiKey em texto claro) para que,
   // se qualquer ETAPA seguinte falhar, o error_logs contenha dados suficientes
   // para recuperação manual sem depender de pending_registrations.
@@ -192,7 +288,23 @@ export async function handleRequest(req: Request): Promise<Response> {
   // pendente) — nesse caso, webhooks-asaas-kyc e financial-carregar criam como fallback.
   let depositKeyEnc: string | null = null
 
-  if (pendingReg) {
+  if (!wantsPersonalWallet) {
+    // Sem carteira pessoal — ainda precisa checar duplicatas (CPF continua
+    // sendo a identidade única da pessoa), só não cria nada no Asaas.
+    // asaasAccountId/asaasApiKeyEnc/asaasWalletId ficam null (users.
+    // asaas_account_id agora é nullable — migration 041).
+    const { data: existingCpf } = await supabaseAdmin
+      .from('users').select('id').eq('cpf', cpfHash).maybeSingle()
+    if (existingCpf) return err('CPF_DUPLICATE', 'CPF já cadastrado', 409)
+
+    const { data: existingEmail } = await supabaseAdmin
+      .from('users').select('id').eq('email', email).maybeSingle()
+    if (existingEmail) return err('EMAIL_IN_USE', 'Este e-mail já está em uso', 409)
+
+    const { data: existingHandle } = await supabaseAdmin
+      .from('users').select('id').eq('handle', handleNorm).maybeSingle()
+    if (existingHandle) return err('HANDLE_TAKEN', 'Handle já em uso', 409)
+  } else if (pendingReg) {
     // Retomar com dados do Asaas já salvos — pular ETAPA 1 e ETAPA 2
     console.log('[auth-register] retomando pending_registration:', pendingReg.id)
     asaasAccountId = pendingReg.asaas_account_id
@@ -374,7 +486,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (authError || !authData.user) {
     console.error('[auth-register] auth user creation failed:', authError)
     await logError(supabaseAdmin, 'auth-register', authError ?? new Error('auth_create_failed'), safePayload, {
-      asaas_account_id: asaasAccountId,
+      asaas_account_id: asaasAccountId ?? undefined,
       asaas_response:   asaasRawResponse,
     })
     await savePending({
@@ -417,7 +529,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (userError || !newUser) {
     console.error('[auth-register] users insert failed:', userError)
     await logError(supabaseAdmin, 'auth-register', userError ?? new Error('users_insert_failed'), safePayload, {
-      asaas_account_id: asaasAccountId,
+      asaas_account_id: asaasAccountId ?? undefined,
       asaas_response:   asaasRawResponse,
     })
     await supabaseAdmin.auth.admin.deleteUser(authUserId)
@@ -432,6 +544,37 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   const userId = newUser.id
+
+  // ── ETAPA 4.5: Criar empresa (quando o cadastro escolheu "Empresa") ──────────
+  // Falha aqui NÃO derruba o cadastro pessoal já criado — a subconta PJ pode
+  // ser aberta depois via company-create (mesma lógica, reutilizável), sem
+  // precisar repetir o onboarding pessoal. Ver _shared/company.ts.
+
+  let companyResult: Awaited<ReturnType<typeof createCompanyForOwner>> | null = null
+
+  if (companyToCreate) {
+    companyResult = await createCompanyForOwner(supabaseAdmin, userId, companyToCreate)
+    if (!companyResult.ok) {
+      console.error('[auth-register] company creation failed (não-crítico para a conta pessoal):', companyResult.code, companyResult.message)
+      await logError(supabaseAdmin, 'auth-register', new Error(`COMPANY_CREATE_FAILED: ${companyResult.code}`), safePayload, {
+        asaas_account_id: asaasAccountId ?? undefined,
+      })
+    }
+  }
+
+  // ── ETAPA 4.6: Consumir convite de operador (quando veio de um link) ─────────
+  // Mesma filosofia: falha aqui não derruba a conta pessoal já criada — só
+  // fica sem o vínculo com a empresa, recuperável com um novo convite.
+
+  let inviteResult: Awaited<ReturnType<typeof consumeCompanyInvite>> | null = null
+
+  if (invite_token) {
+    inviteResult = await consumeCompanyInvite(supabaseAdmin, invite_token, userId)
+    if (!inviteResult.ok) {
+      console.error('[auth-register] invite consumption failed (não-crítico para a conta pessoal):', inviteResult.code, inviteResult.message)
+      await logError(supabaseAdmin, 'auth-register', new Error(`INVITE_CONSUME_FAILED: ${inviteResult.code}`), safePayload)
+    }
+  }
 
   // ── ETAPA 5: Inserir perguntas de segurança ───────────────────────────────────
 
@@ -453,7 +596,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (qError) {
     console.error('[auth-register] security questions insert failed:', qError)
     await logError(supabaseAdmin, 'auth-register', qError, safePayload, {
-      asaas_account_id: asaasAccountId,
+      asaas_account_id: asaasAccountId ?? undefined,
       asaas_response:   asaasRawResponse,
     })
     await supabaseAdmin.from('users').delete().eq('id', userId)
@@ -551,6 +694,19 @@ export async function handleRequest(req: Request): Promise<Response> {
       account_status: 'evaluation',
       onboarding_url: onboardingUrl,
       ...(access_token == null && { login_required: true }),
+      ...(companyResult?.ok && {
+        company_id:             companyResult.company_id,
+        company_account_status: companyResult.account_status,
+        company_kyc_status:     companyResult.kyc_status,
+        company_onboarding_url: companyResult.onboarding_url,
+      }),
+      ...(companyResult && !companyResult.ok && {
+        company_error: { code: companyResult.code, message: companyResult.message },
+      }),
+      ...(inviteResult?.ok && { company_id: inviteResult.companyId }),
+      ...(inviteResult && !inviteResult.ok && {
+        invite_error: { code: inviteResult.code, message: inviteResult.message },
+      }),
     },
     201,
   )

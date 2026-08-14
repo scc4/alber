@@ -27,7 +27,7 @@ export default function WelcomeScreen() {
       <View style={styles.buttons}>
         <PrimaryButton
           label={t('auth.welcome.signup')}
-          onPress={() => router.push('/(auth)/cadastro/dados')}
+          onPress={() => router.push('/(auth)/cadastro/tipo-conta')}
           variant="primary"
         />
         <PrimaryButton

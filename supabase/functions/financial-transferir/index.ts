@@ -8,24 +8,34 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
+import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
+import { resolveWalletContext } from '../_shared/company-permissions.ts'
 
 interface TransferirRequest {
   destinatario_identifier: string   // CPF, @handle ou e-mail
   amount_albers:           number
   pin_hash:                string   // SHA-256(PIN do remetente)
   security_answer_hash:    string   // SHA-256(resposta do remetente)
+  // Quando presente, o remetente é a carteira da empresa (o PIN/segurança
+  // continuam sendo do operador autenticado) — destinatário é sempre pessoal
+  // nesta fase (empresa ainda não é localizável como destinatária).
+  company_id?:             string
 }
 
-interface UserRow {
+// Destinatário unificado — pessoa física ou empresa. `ownerId` só existe
+// quando kind==='company' (o master, usado como user_id da transação de
+// crédito e como alvo do push — companies não tem PIN/push próprios).
+interface Recipient {
+  kind:              'user' | 'company'
   id:                string
-  auth_id:           string
-  name:              string
   handle:            string
+  name:              string
   asaas_api_key_enc: string | null
   asaas_wallet_id:   string | null
+  ownerId?:          string
 }
 
 const MAX_ATTEMPTS   = 3
@@ -36,45 +46,80 @@ const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
 
-// ── Localizar destinatário por @handle, CPF ou e-mail ────────────────────────
+// ── Localizar destinatário por @handle, CPF, CNPJ ou e-mail ──────────────────
 // Handles são persistidos de forma inconsistente entre fluxos (auth-register
 // grava sem "@", perfil-update-handle grava com "@") — o match precisa
 // aceitar identificador com ou sem "@", comparando com o valor com ou sem
-// "@" armazenado no banco (spec §6).
+// "@" armazenado no banco (spec §6). Empresa (companies.handle/cnpj) sempre
+// grava sem "@". CPF/e-mail só existem em pessoa física; CNPJ só em empresa.
 
-async function findRecipient(identifier: string): Promise<UserRow | null> {
+async function findRecipient(identifier: string): Promise<Recipient | null> {
   const clean  = identifier.trim()
   const digits = clean.replace(/\D/g, '')
 
-  // CPF — 11 dígitos e não é e-mail
+  // CPF — 11 dígitos e não é e-mail → só pessoa física
   if (digits.length === 11 && !clean.includes('@')) {
     const cpfHash = await sha256hex(normalizeCpf(digits))
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
+      .select('id, name, handle, asaas_api_key_enc, asaas_wallet_id')
       .eq('cpf', cpfHash)
       .maybeSingle()
-    return data
+    return data ? { kind: 'user', ...data } : null
   }
 
-  // E-mail — formato claro usuario@dominio.tld
+  // CNPJ — 14 caracteres alfanuméricos válidos → só empresa
+  const cnpjClean = normalizeCnpj(clean)
+  if (cnpjClean.length === 14 && validateCnpj(cnpjClean)) {
+    const cnpjHash = await sha256hex(cnpjClean)
+    const { data } = await supabaseAdmin
+      .from('companies')
+      .select('id, owner_id, handle, company_name, trading_name, asaas_api_key_enc, asaas_wallet_id')
+      .eq('cnpj', cnpjHash)
+      .maybeSingle()
+    return data ? {
+      kind: 'company', id: data.id, ownerId: data.owner_id, handle: data.handle,
+      name: data.trading_name || data.company_name,
+      asaas_api_key_enc: data.asaas_api_key_enc, asaas_wallet_id: data.asaas_wallet_id,
+    } : null
+  }
+
+  // E-mail — formato claro usuario@dominio.tld → só pessoa física (empresa
+  // não tem e-mail próprio, usa o do master só como contato do cadastro)
   if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
+      .select('id, name, handle, asaas_api_key_enc, asaas_wallet_id')
       .ilike('email', clean.toLowerCase())
       .maybeSingle()
-    return data
+    return data ? { kind: 'user', ...data } : null
   }
 
-  // Handle — aceita com ou sem "@", independente de como foi persistido
+  // Handle — aceita com ou sem "@"; busca em users primeiro (não pode haver
+  // o mesmo handle nas duas tabelas — checado na criação da empresa)
   const handleNoAt = clean.replace(/^@/, '').toLowerCase()
-  const { data } = await supabaseAdmin
+
+  const { data: userMatch } = await supabaseAdmin
     .from('users')
-    .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
+    .select('id, name, handle, asaas_api_key_enc, asaas_wallet_id')
     .or(`handle.ilike.${handleNoAt},handle.ilike.@${handleNoAt}`)
     .maybeSingle()
-  return data
+  if (userMatch) return { kind: 'user', ...userMatch }
+
+  const { data: companyMatch } = await supabaseAdmin
+    .from('companies')
+    .select('id, owner_id, handle, company_name, trading_name, asaas_api_key_enc, asaas_wallet_id')
+    .ilike('handle', handleNoAt)
+    .maybeSingle()
+  if (companyMatch) {
+    return {
+      kind: 'company', id: companyMatch.id, ownerId: companyMatch.owner_id, handle: companyMatch.handle,
+      name: companyMatch.trading_name || companyMatch.company_name,
+      asaas_api_key_enc: companyMatch.asaas_api_key_enc, asaas_wallet_id: companyMatch.asaas_wallet_id,
+    }
+  }
+
+  return null
 }
 
 // ── Rate limiting do remetente ───────────────────────────────────────────────
@@ -118,8 +163,8 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { destinatario_identifier, amount_albers, pin_hash, security_answer_hash } = body
-  const safePayload = { destinatario_identifier, amount_albers } as Record<string, unknown>
+  const { destinatario_identifier, amount_albers, pin_hash, security_answer_hash, company_id } = body
+  const safePayload = { destinatario_identifier, amount_albers, company_id } as Record<string, unknown>
 
   if (!destinatario_identifier || !amount_albers || !pin_hash || !security_answer_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -129,14 +174,24 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Buscar dados do remetente ────────────────────────────────────────────────
+  // PIN e pergunta de segurança são sempre do operador autenticado, mesmo
+  // quando a carteira que envia é a de uma empresa (ver resolveWalletContext).
 
   const { data: sender, error: sndErr } = await supabaseAdmin
     .from('users')
-    .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
+    .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id, kyc_status, account_status, created_at')
     .eq('auth_id', authUser.id)
     .maybeSingle()
 
   if (sndErr || !sender) return err('USER_NOT_FOUND', 'Remetente não encontrado', 404)
+
+  // ── Resolver carteira do remetente: pessoal ou empresa ────────────────────────
+
+  const senderWalletResolution = await resolveWalletContext(supabaseAdmin, sender.id, company_id, 'transferir', sender)
+  if (!senderWalletResolution.ok) {
+    return err(senderWalletResolution.code, senderWalletResolution.message, senderWalletResolution.status)
+  }
+  const senderWallet = senderWalletResolution.wallet
 
   // ── Localizar destinatário ───────────────────────────────────────────────────
 
@@ -146,10 +201,12 @@ Deno.serve(async (req: Request) => {
     return err('RECIPIENT_NOT_FOUND', 'Destinatário não encontrado', 404)
   }
 
-  // ── Verificar remetente ≠ destinatário ───────────────────────────────────────
+  // ── Verificar carteira remetente ≠ carteira destinatária ─────────────────────
+  // Compara pela wallet, não pelo usuário: um operador pode transferir da
+  // empresa para sua própria conta pessoal (não é a mesma carteira).
 
-  if (sender.id === recipient.id) {
-    return err('SELF_TRANSFER', 'Não é possível transferir para si mesmo', 422)
+  if (recipient.asaas_wallet_id && recipient.asaas_wallet_id === senderWallet.asaasWalletId) {
+    return err('SELF_TRANSFER', 'Não é possível transferir para a mesma carteira', 422)
   }
 
   // ── Rate limiting do remetente ───────────────────────────────────────────────
@@ -220,13 +277,13 @@ Deno.serve(async (req: Request) => {
 
   // ── Descriptografar API key do remetente ─────────────────────────────────────
 
-  if (!sender.asaas_api_key_enc) {
+  if (!senderWallet.asaasApiKeyEnc) {
     return err('ACCOUNT_NOT_CONFIGURED', 'Conta do remetente não configurada', 503)
   }
 
   let senderApiKey: string
   try {
-    senderApiKey = await aesDecrypt(sender.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+    senderApiKey = await aesDecrypt(senderWallet.asaasApiKeyEnc, Deno.env.get('ASAAS_API_KEY')!)
   } catch (e) {
     console.error('Sender API key decryption failed:', e)
     await logError(supabaseAdmin, 'financial-transferir', e, safePayload)
@@ -259,6 +316,7 @@ Deno.serve(async (req: Request) => {
     .from('transactions')
     .insert({
       user_id:    sender.id,
+      company_id: senderWallet.companyId,
       type:       'transferir_enviado',
       amount:     amount_albers,
       amount_brl: amount_albers,
@@ -277,10 +335,14 @@ Deno.serve(async (req: Request) => {
   const senderTxId = sndTxData.id
 
   // TX 2: transferir_recebido (crédito do destinatário)
+  // transactions.user_id referencia users — quando o destinatário é empresa,
+  // grava o master (owner_id) como autor nominal e company_id identifica a
+  // carteira de fato creditada.
   const { data: rcpTxData } = await supabaseAdmin
     .from('transactions')
     .insert({
-      user_id:        recipient.id,
+      user_id:        recipient.kind === 'company' ? recipient.ownerId! : recipient.id,
+      company_id:     recipient.kind === 'company' ? recipient.id : null,
       type:           'transferir_recebido',
       amount:         amount_albers,
       amount_brl:     amount_albers,
@@ -332,11 +394,12 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Push notification para destinatário (best-effort) ────────────────────────
+  // Empresa não tem push próprio — notifica o master.
 
   await sendPush(
-    recipient.id,
+    recipient.kind === 'company' ? recipient.ownerId! : recipient.id,
     'Transferência recebida',
-    `${sender.name} transferiu ${amount_albers} Albers para você`,
+    `${sender.name} transferiu ${amount_albers} Albers para ${recipient.kind === 'company' ? recipient.name : 'você'}`,
     { route: '/(app)/atividade' },
     'transaction',
   )

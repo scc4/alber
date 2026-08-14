@@ -24,6 +24,7 @@ interface OnboardShellProps {
   onBack?: () => void
   children: ReactNode
   footer?: ReactNode
+  hideProgress?: boolean // telas fora da contagem numerada (ex: seletor de tipo de conta)
 }
 
 export function OnboardShell({
@@ -35,6 +36,7 @@ export function OnboardShell({
   onBack,
   children,
   footer,
+  hideProgress = false,
 }: OnboardShellProps) {
   const insets = useSafeAreaInsets()
 
@@ -67,7 +69,7 @@ export function OnboardShell({
           showsVerticalScrollIndicator={false}
         >
           {/* Progress bar */}
-          <StepProgress step={step} total={total} />
+          {!hideProgress && <StepProgress step={step} total={total} />}
 
           {/* Title */}
           <Text style={styles.title}>{title}</Text>

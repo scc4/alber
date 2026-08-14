@@ -80,12 +80,12 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // ── Localizar usuário ────────────────────────────────────────────────────────
 
-  let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string; deleted_at: string | null; login_blocked_until: string | null } | null = null
+  let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string; deleted_at: string | null; login_blocked_until: string | null; asaas_account_id: string | null } | null = null
 
   if (isHandleId) {
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until, asaas_account_id')
       .eq('handle', handleClean)
       .maybeSingle()
     user = data
@@ -94,7 +94,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const cpfHash = await sha256hex(cpfClean)
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until')
+      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until, asaas_account_id')
       .eq('cpf', cpfHash)
       .maybeSingle()
     user = data
@@ -303,6 +303,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       email:          user.email,
       kyc_status:     user.kyc_status,
       account_status: user.account_status,
+      has_personal_wallet: !!user.asaas_account_id,
     },
   })
 }

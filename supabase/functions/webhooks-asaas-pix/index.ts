@@ -138,7 +138,7 @@ Deno.serve(async (req: Request) => {
 
   const { data: tx, error: txErr } = await supabaseAdmin
     .from('transactions')
-    .select('id, user_id, status, amount, amount_brl')
+    .select('id, user_id, company_id, status, amount, amount_brl')
     .eq('asaas_payment_id', txLookupId)
     .maybeSingle()
 
@@ -154,37 +154,49 @@ Deno.serve(async (req: Request) => {
     return new Response('OK', { status: 200 })
   }
 
-  // ── Buscar dados do usuário (CPF hash + API key) ──────────────────────────────
+  // ── Buscar dados do titular da subconta (CPF/CNPJ hash + API key) ────────────
+  // Transação de empresa (tx.company_id) → titular é a empresa (CNPJ);
+  // transação pessoal → titular é o usuário autor da transação (CPF).
 
-  const { data: userData, error: userErr } = await supabaseAdmin
-    .from('users')
-    .select('id, cpf, asaas_api_key_enc')
-    .eq('id', tx.user_id)
-    .maybeSingle()
+  const isCompanyTx = Boolean(tx.company_id)
 
-  if (userErr || !userData) {
-    console.error('Webhook: usuário não encontrado para tx', tx.id)
+  const { data: ownerData, error: ownerErr } = isCompanyTx
+    ? await supabaseAdmin
+        .from('companies')
+        .select('id, cnpj, asaas_api_key_enc')
+        .eq('id', tx.company_id)
+        .maybeSingle()
+        .then(res => ({ data: res.data ? { id: res.data.id, doc: res.data.cnpj, asaas_api_key_enc: res.data.asaas_api_key_enc } : null, error: res.error }))
+    : await supabaseAdmin
+        .from('users')
+        .select('id, cpf, asaas_api_key_enc')
+        .eq('id', tx.user_id)
+        .maybeSingle()
+        .then(res => ({ data: res.data ? { id: res.data.id, doc: res.data.cpf, asaas_api_key_enc: res.data.asaas_api_key_enc } : null, error: res.error }))
+
+  if (ownerErr || !ownerData) {
+    console.error('Webhook: titular da subconta não encontrado para tx', tx.id)
     return new Response('OK', { status: 200 })
   }
 
-  // ── Validar CPF do pagador (spec 04_api §4.3, §5.4) ─────────────────────────
+  // ── Validar CPF/CNPJ do pagador (spec 04_api §4.3, §5.4) ────────────────────
   // cpfCnpj vem do campo pixTransaction.payer do webhook.
   // ⚠️ Disponibilidade confirmada pendente com Asaas (spec §9).
-  // Se o campo não estiver presente, assume-se CPF válido (não bloqueia o fluxo).
+  // Se o campo não estiver presente, assume-se válido (não bloqueia o fluxo).
 
   const payerCpfRaw = payment.pixTransaction?.payer?.cpfCnpj
 
   if (payerCpfRaw) {
     const payerCpfHash = await sha256hex(normalizeCpf(payerCpfRaw))
 
-    if (payerCpfHash !== userData.cpf) {
-      // CPF do pagador difere do titular da conta — devolver automaticamente
-      console.warn('Webhook: CPF divergente para tx', tx.id)
+    if (payerCpfHash !== ownerData.doc) {
+      // CPF/CNPJ do pagador difere do titular da conta — devolver automaticamente
+      console.warn('Webhook: CPF/CNPJ divergente para tx', tx.id)
 
       try {
         const encSecret = Deno.env.get('ASAAS_API_KEY')!
-        const subApiKey = await aesDecrypt(userData.asaas_api_key_enc, encSecret)
-        await refundPayment(payment.id, payment.value, 'CPF do pagador divergente', subApiKey)
+        const subApiKey = await aesDecrypt(ownerData.asaas_api_key_enc, encSecret)
+        await refundPayment(payment.id, payment.value, 'CPF/CNPJ do pagador divergente', subApiKey)
       } catch (e) {
         console.error('Webhook: falha ao solicitar devolução:', e)
         await logError(supabaseAdmin, 'webhooks-asaas-pix', e, { event, payment_id: payment.id, transaction_id: tx.id })
@@ -196,7 +208,7 @@ Deno.serve(async (req: Request) => {
         .eq('id', tx.id)
 
       await supabaseAdmin.from('audit_logs').insert({
-        user_id:    userData.id,
+        user_id:    tx.user_id,
         event_type: 'carregar_cpf_mismatch',
         metadata:   { transaction_id: tx.id, asaas_payment_id: payment.id },
       })
@@ -219,14 +231,14 @@ Deno.serve(async (req: Request) => {
   }
 
   await supabaseAdmin.from('audit_logs').insert({
-    user_id:    userData.id,
+    user_id:    tx.user_id,
     event_type: 'carregar_completed',
     metadata:   { transaction_id: tx.id, asaas_payment_id: payment.id, value: payment.value },
   })
 
   const amountAlbers = Number(tx.amount ?? 0)
   await sendPush(
-    userData.id,
+    tx.user_id,
     'Albers carregados!',
     `Seus ${amountAlbers} Albers foram carregados com sucesso.`,
     { route: '/(app)/atividade' },

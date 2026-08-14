@@ -50,8 +50,10 @@ async function asaasRequest(
 export interface CreateAccountInput {
   name: string
   email: string
-  cpfCnpj: string   // CPF puro (apenas dígitos) — Asaas recebe em texto puro
-  birthDate: string // YYYY-MM-DD
+  cpfCnpj: string   // CPF ou CNPJ puro (apenas dígitos) — Asaas recebe em texto puro
+  birthDate?: string // YYYY-MM-DD — obrigatório quando pessoa física (11 dígitos)
+  companyType?: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION' // obrigatório quando pessoa jurídica (14 dígitos)
+  tradingName?: string // nome fantasia — só pessoa jurídica, opcional
   phone: string
   mobilePhone: string
   address: string
@@ -69,12 +71,24 @@ export async function createAsaasAccount(
   input: CreateAccountInput,
   parentApiKey: string,
 ): Promise<{ id: string; apiKey: string; walletId: string }> {
+  // O Asaas decide personType (FISICA/JURIDICA) pelo tamanho do cpfCnpj —
+  // 11 dígitos = CPF/pessoa física, 14 dígitos = CNPJ/pessoa jurídica.
+  const isJuridica = input.cpfCnpj.replace(/\D/g, '').length === 14
+
+  if (isJuridica && !input.companyType) {
+    throw new Error('ASAAS_ACCOUNT_CREATE_FAILED: companyType é obrigatório para pessoa jurídica')
+  }
+  if (!isJuridica && !input.birthDate) {
+    throw new Error('ASAAS_ACCOUNT_CREATE_FAILED: birthDate é obrigatório para pessoa física')
+  }
+
   const res = await asaasRequest('POST', '/accounts', parentApiKey, {
     name:          input.name,
     email:         input.email,
     cpfCnpj:       input.cpfCnpj,
-    birthDate:     input.birthDate,
-    companyType:   'INDIVIDUAL',
+    ...(isJuridica
+      ? { companyType: input.companyType, tradingName: input.tradingName }
+      : { birthDate: input.birthDate }),
     phone:         input.phone,
     mobilePhone:   input.mobilePhone,
     address:       input.address,

@@ -362,6 +362,15 @@ export default function PerfilScreen() {
           />
         </Section>
 
+        {/* EMPRESAS (contas PJ) */}
+        <Section title={t('perfil.sectionEmpresas')}>
+          <ActionRow
+            label={t('perfil.rowEmpresas')}
+            sublabel={t('perfil.rowEmpresasSublabel')}
+            onPress={() => router.push('/(app)/empresas')}
+          />
+        </Section>
+
         {/* CONTA E PRIVACIDADE */}
         <Section title={t('perfil.sectionContaPrivacidade')}>
           <ActionRow

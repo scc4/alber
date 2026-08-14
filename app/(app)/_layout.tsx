@@ -143,6 +143,13 @@ export default function AppLayout() {
         <Stack.Screen name="perfil/seguranca" />
         <Stack.Screen name="perfil/kyc" />
         <Stack.Screen name="perfil/notificacoes" />
+
+        {/* Empresas (contas PJ) — Home/Carregar/Transferir/Receber/Atividade
+            são compartilhadas com a conta pessoal via contexto ativo
+            (store/active-context.store.ts); aqui só a gestão. */}
+        <Stack.Screen name="empresas/index" />
+        <Stack.Screen name="empresas/[id]/operadores" />
+        <Stack.Screen name="empresas/[id]/pix" />
       </Stack>
 
       {showNav && (

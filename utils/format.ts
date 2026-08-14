@@ -57,3 +57,16 @@ export function maskTime(value: string): string {
   if (digits.length > 2) return `${digits.slice(0, 2)}:${digits.slice(2)}`
   return digits
 }
+
+// Máscara de exibição do CNPJ — aceita dígito ou letra maiúscula nas 12
+// primeiras posições (CNPJ alfanumérico, emissão iniciada em 31/07/2026);
+// os 2 dígitos verificadores continuam sempre numéricos, mas a máscara não
+// precisa validar isso, só formatar o que foi digitado até agora.
+export function maskCNPJ(value: string): string {
+  const chars = value.replace(/[^0-9A-Za-z]/g, '').toUpperCase().slice(0, 14)
+  if (chars.length > 12) return `${chars.slice(0, 2)}.${chars.slice(2, 5)}.${chars.slice(5, 8)}/${chars.slice(8, 12)}-${chars.slice(12)}`
+  if (chars.length > 8)  return `${chars.slice(0, 2)}.${chars.slice(2, 5)}.${chars.slice(5, 8)}/${chars.slice(8)}`
+  if (chars.length > 5)  return `${chars.slice(0, 2)}.${chars.slice(2, 5)}.${chars.slice(5)}`
+  if (chars.length > 2)  return `${chars.slice(0, 2)}.${chars.slice(2)}`
+  return chars
+}

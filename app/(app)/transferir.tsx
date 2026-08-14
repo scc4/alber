@@ -21,7 +21,8 @@ import { SecurityConfirmation } from '../../components/financial/SecurityConfirm
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
-import { useBalanceStore } from '../../store/balance.store'
+import { useActiveContextStore } from '../../store/active-context.store'
+import { useContextualBalance } from '../../hooks/useContextualBalance'
 import { transferir, TransferirResponse } from '../../services/financial.service'
 import { formatAlbers } from '../../utils/format'
 import { maskAlbers } from '../../utils/currency'
@@ -53,7 +54,9 @@ const MAX_ATTEMPTS = 3
 export default function TransferirScreen() {
   const { t } = useTranslation()
   const { user, token } = useAuthStore()
-  const { balance, fetchBalance } = useBalanceStore()
+  const context = useActiveContextStore(s => s.context)
+  const companyId = context.type === 'company' ? context.companyId : undefined
+  const { balance, fetchBalance } = useContextualBalance()
 
   const [step, setStep]             = useState<Step>('search')
   const [query, setQuery]           = useState('')
@@ -77,7 +80,10 @@ export default function TransferirScreen() {
     if (!token) { setRecentsLoading(false); return }
     ;(async () => {
       try {
-        const params = new URLSearchParams({ tipo: 'out', page: '0', limit: '20' })
+        const params = new URLSearchParams({
+          tipo: 'out', page: '0', limit: '20',
+          ...(companyId && { company_id: companyId }),
+        })
         const res = await fetch(`${BFF_URL}/financial-atividade?${params}`, {
           headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` },
         })
@@ -101,7 +107,7 @@ export default function TransferirScreen() {
         setRecentsLoading(false)
       }
     })()
-  }, [token])
+  }, [token, companyId])
 
   // Debounce auto-search enquanto o usuário digita
   useEffect(() => {
@@ -239,7 +245,7 @@ export default function TransferirScreen() {
     if (!answerHash || !pinHash || !token || !recipient) return
     setStep('processing')
     try {
-      const result = await transferir(token, query, amount, pinHash, answerHash)
+      const result = await transferir(token, query, amount, pinHash, answerHash, companyId)
       setTransferirResult(result)
       await fetchBalance()
       setStep('success')

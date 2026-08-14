@@ -22,6 +22,7 @@ import { SecurityConfirmation } from '../../components/financial/SecurityConfirm
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { AsaasBadge } from '../../components/shared/AsaasBadge'
 import { useAuthStore } from '../../store/auth.store'
+import { useActiveContextStore } from '../../store/active-context.store'
 import { receber, ReceberResponse } from '../../services/financial.service'
 import { BffError } from '../../services/auth.service'
 import { formatAlbers } from '../../utils/format'
@@ -53,6 +54,8 @@ const MAX_ATTEMPTS = 3
 export default function ReceberScreen() {
   const { t } = useTranslation()
   const { user, token } = useAuthStore()
+  const context = useActiveContextStore(s => s.context)
+  const companyId = context.type === 'company' ? context.companyId : undefined
 
   const [step, setStep]               = useState<Step>('value')
   const [amount, setAmount]           = useState('')
@@ -78,8 +81,12 @@ export default function ReceberScreen() {
     if (!token) { setRecentsLoading(false); return }
     ;(async () => {
       try {
+        const params = new URLSearchParams({
+          tipo: 'in', page: '0', limit: '20',
+          ...(companyId && { company_id: companyId }),
+        })
         const res = await fetch(
-          `${BFF}/financial-atividade?tipo=in&page=0&limit=20`,
+          `${BFF}/financial-atividade?${params}`,
           { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } },
         )
         if (!res.ok) return
@@ -105,7 +112,7 @@ export default function ReceberScreen() {
         setRecentsLoading(false)
       }
     })()
-  }, [token])
+  }, [token, companyId])
 
   // ─── Busca real de usuário + perguntas de segurança ──────────────────────────
 
@@ -164,7 +171,7 @@ export default function ReceberScreen() {
     if (!payerPinHash || !token) return
     setStep('processing')
     try {
-      const result = await receber(token, amountNum, identifier, payerPinHash, answerHash)
+      const result = await receber(token, amountNum, identifier, payerPinHash, answerHash, companyId)
       setReceberResult(result)
       setStep('success')
     } catch (e) {

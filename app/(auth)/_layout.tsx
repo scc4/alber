@@ -6,8 +6,10 @@ export default function AuthLayout() {
       <Stack.Screen name="index" />
       <Stack.Screen name="welcome" />
       <Stack.Screen name="login" />
+      <Stack.Screen name="cadastro/tipo-conta" />
       <Stack.Screen name="cadastro/dados" />
       <Stack.Screen name="cadastro/endereco" />
+      <Stack.Screen name="cadastro/dados-empresa" />
       <Stack.Screen name="cadastro/handle" />
       <Stack.Screen name="cadastro/pin" />
       <Stack.Screen name="cadastro/seguranca" />
@@ -15,6 +17,7 @@ export default function AuthLayout() {
       <Stack.Screen name="recuperar/seguranca" />
       <Stack.Screen name="recuperar/codigo" />
       <Stack.Screen name="recuperar/novo-pin" />
+      <Stack.Screen name="convite-operador/[token]" />
     </Stack>
   )
 }

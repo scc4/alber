@@ -11,6 +11,39 @@
       "header": "CRIAR CONTA",
       "step": "{{current}}/{{total}}",
       "continue": "Continuar",
+      "tipoConta": {
+        "title": "Que tipo de conta você quer abrir?",
+        "subtitle": "Você pode abrir uma conta pessoal ou uma conta para sua empresa.",
+        "personalTitle": "Pessoa física",
+        "personalDescription": "Sua carteira digital pessoal, no seu CPF.",
+        "businessTitle": "Empresa",
+        "businessDescription": "Uma conta no CNPJ da sua empresa, com você como responsável. Depois é possível convidar outras pessoas para operar.",
+        "alsoPersonalWallet": "Também quero uma carteira pessoal para mim (opcional)"
+      },
+      "dadosEmpresa": {
+        "title": "Dados da empresa",
+        "subtitle": "Essas informações são usadas para abrir a conta financeira da sua empresa.",
+        "companyName": "Razão social",
+        "companyNamePlaceholder": "Nome registrado na Receita Federal",
+        "tradingName": "Nome fantasia",
+        "tradingNamePlaceholder": "Opcional",
+        "handle": "@handle da empresa",
+        "handlePlaceholder": "minhaempresa",
+        "handleHint": "Como sua empresa será encontrada para receber transferências. 3-20 caracteres, letras/números/underscore.",
+        "handleError": "@handle inválido",
+        "cnpj": "CNPJ",
+        "cnpjPlaceholder": "00.000.000/0000-00",
+        "cnpjError": "CNPJ inválido",
+        "companyType": "Tipo de empresa",
+        "typeMei": "MEI",
+        "typeLimited": "Limitada (LTDA)",
+        "typeIndividual": "Empresário Individual (EI)",
+        "typeAssociation": "Associação",
+        "incomeValue": "Faturamento mensal",
+        "incomeValuePlaceholder": "R$ 0,00",
+        "incomeValueHint": "Exigido para abertura da conta financeira",
+        "addressSection": "Endereço da empresa"
+      },
       "dados": {
         "title": "Dados pessoais",
         "subtitle": "Suas informações ficam protegidas e são usadas apenas para criar sua conta.",
@@ -87,6 +120,8 @@
       "pix": {
         "title": "Sua chave Pix para saques",
         "subtitle": "Esta chave será usada para transferir seus Albers de volta para sua conta bancária quando quiser sacar.",
+        "titleNoWallet": "Quase lá",
+        "subtitleNoWallet": "Você optou por não ter uma carteira pessoal — só a conta da sua empresa será criada. Confirme abaixo para concluir.",
         "cpf": "CPF",
         "phone": "Telefone",
         "email": "E-mail",
@@ -109,7 +144,11 @@
         "asaasDisclosure": "Declaro ciência de que os serviços financeiros são prestados pelo ASAAS GESTÃO FINANCEIRA INSTITUIÇÃO DE PAGAMENTOS S.A., instituição de pagamento autorizada pelo Banco Central do Brasil.",
         "asaasSaibaMais": "Saiba mais",
         "asaasModalBody": "Os serviços financeiros disponibilizados por meio do Alber, incluindo abertura e manutenção de conta de pagamento, processamento de transações, transferências e pagamentos, são prestados pelo ASAAS GESTÃO FINANCEIRA INSTITUIÇÃO DE PAGAMENTOS S.A., instituição de pagamento autorizada a funcionar pelo Banco Central do Brasil. A ALBER SERVIÇOS DIGITAIS LTDA atua exclusivamente como integradora tecnológica, não sendo instituição financeira ou de pagamento.",
-        "asaasModalClose": "Fechar"
+        "asaasModalClose": "Fechar",
+        "companyErrorTitle": "Empresa pendente",
+        "companyErrorMessage": "Sua conta pessoal foi criada, mas houve um problema ao abrir a conta da empresa. Você pode tentar de novo em Perfil > Minhas Empresas.",
+        "inviteErrorTitle": "Convite indisponível",
+        "inviteErrorMessage": "Sua conta foi criada, mas o convite não pôde ser usado (pode ter expirado). Peça um novo convite para quem te chamou."
       },
       "terms": {
         "header": "QUASE LÁ",
@@ -832,6 +871,104 @@
     "shareHandle": "Compartilhar @handle",
     "profileTitle": "Perfil"
   },
+  "accountSwitcher": {
+    "title": "Trocar de conta",
+    "personal": "Pessoal",
+    "manageCta": "Gerenciar empresas"
+  },
+  "convite": {
+    "operador": {
+      "title": "Você foi convidado!",
+      "body": "{{company}} te convidou para operar a conta dela no Alber. Vamos criar seu acesso — rápido, sem burocracia.",
+      "genericCompany": "Uma empresa",
+      "startCta": "Continuar",
+      "invalidTitle": "Convite inválido",
+      "invalidBody": "Este link de convite não é mais válido. Peça um novo convite para quem te chamou.",
+      "alreadyLoggedInTitle": "Você já tem uma conta",
+      "alreadyLoggedInBody": "Peça para quem te convidou usar seu @handle direto no app, em Empresas > Operadores.",
+      "backCta": "Voltar"
+    }
+  },
+  "empresas": {
+    "title": "Minhas empresas",
+    "loading": "Carregando empresas…",
+    "emptyTitle": "Nenhuma empresa ainda",
+    "emptyBody": "Empresas são criadas no cadastro do Alber. Aceite um convite de handle ou link para operar a empresa de outra pessoa.",
+    "roleMaster": "Master",
+    "roleOperator": "Operador",
+    "status": {
+      "active": "Ativa",
+      "evaluation": "Em avaliação",
+      "blocked": "Bloqueada",
+      "rejected": "Verificação reprovada"
+    },
+    "detalhe": {
+      "title": "Empresa",
+      "balanceLabel": "Saldo disponível",
+      "staleHint": "Saldo pode estar desatualizado",
+      "carregarCta": "Carregar",
+      "extratoCta": "Ver extrato",
+      "operadoresCta": "Operadores",
+      "pixKeyCta": "Chave Pix de saque",
+      "amountLabel": "Valor (Albers)",
+      "gerarQrCta": "Gerar QR Code",
+      "carregarErrorTitle": "Erro ao carregar",
+      "carregarErrorGeneric": "Não foi possível gerar o QR Code. Tente novamente.",
+      "extratoEmpty": "Nenhuma movimentação ainda.",
+      "kycWebViewTitle": "Verificação da empresa",
+      "kycPendingBanner": "Verificação da empresa em análise",
+      "kycRejectedBanner": "Verificação da empresa não aprovada",
+      "abandonCta": "Cancelar cadastro",
+      "abandonConfirmTitle": "Cancelar cadastro da empresa?",
+      "abandonConfirmBody": "Isso libera o CNPJ para um novo cadastro. Essa ação não pode ser desfeita.",
+      "abandonConfirmCta": "Cancelar cadastro",
+      "abandonCancel": "Voltar",
+      "abandonErrorTitle": "Erro ao cancelar",
+      "abandonErrorGeneric": "Não foi possível cancelar o cadastro da empresa. Tente novamente."
+    },
+    "pixKey": {
+      "title": "Chave Pix da empresa",
+      "subtitle": "Essa chave é o destino do dinheiro quando a empresa descarrega Albers de volta pro banco. Só pode ser configurada uma vez.",
+      "typeCnpj": "CNPJ da empresa",
+      "typeRandom": "Aleatória (EVP)",
+      "cnpjLabel": "Confirme o CNPJ da empresa",
+      "cnpjPlaceholder": "00.000.000/0000-00",
+      "cnpjHint": "Precisa ser exatamente o CNPJ já cadastrado desta empresa",
+      "cnpjMismatch": "Esse CNPJ não corresponde ao cadastrado para esta empresa.",
+      "randomHint": "Gera uma chave aleatória nova, própria da subconta da empresa no Asaas.",
+      "submitCta": "Salvar chave Pix",
+      "errorTitle": "Erro ao salvar chave Pix",
+      "errorGeneric": "Não foi possível salvar a chave Pix. Tente novamente.",
+      "successTitle": "Chave Pix configurada!",
+      "doneCta": "Concluir"
+    },
+    "operadores": {
+      "title": "Operadores",
+      "invitePlaceholder": "@handle do operador",
+      "inviteCta": "Convidar",
+      "inviteErrorTitle": "Erro ao convidar",
+      "inviteErrorGeneric": "Não foi possível convidar este usuário. Tente novamente.",
+      "inviteByLinkCta": "Convidar por link (para quem nunca usou o Alber)",
+      "creatingLink": "Gerando link…",
+      "empty": "Nenhum operador cadastrado ainda.",
+      "status": {
+        "pending": "Pendente",
+        "active": "Ativo",
+        "banned": "Bloqueado",
+        "invited": "Convidado"
+      }
+    },
+    "permissoes": {
+      "ver_saldo": "Ver saldo",
+      "ver_extrato": "Ver extrato",
+      "carregar": "Carregar",
+      "descarregar": "Descarregar",
+      "transferir": "Transferir",
+      "receber": "Receber",
+      "pagar": "Pagar",
+      "gerenciar_operadores": "Gerenciar operadores"
+    }
+  },
   "notificacoes": {
     "title": "Notificações",
     "markAllRead": "Marcar todas como lidas",
@@ -882,6 +1019,9 @@
     "suporteEmailLabel": "E-mail",
     "suporteEmail": "contato@asaas.com.br",
     "securityQtd": "4 cadastradas",
+    "sectionEmpresas": "Empresas",
+    "rowEmpresas": "Minhas empresas",
+    "rowEmpresasSublabel": "Contas PJ que você administra ou opera",
     "dados": {
       "title": "Dados cadastrais",
       "name": "Nome completo",

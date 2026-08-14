@@ -26,6 +26,10 @@ export interface AuthUser {
   pixKey:       string  // mascarado — preenchido via endpoint de perfil (futuro)
   pixKeyType:   'cpf' | 'phone' | 'email' | 'random'
   hasPixKey?:   boolean // undefined quando ainda não carregado do perfil (trata como true)
+  // Plano CNPJ (velvet-puzzling-sedgewick): master/operador podem não ter
+  // carteira pessoal. undefined = ainda não carregado do perfil, trata como true
+  // (todo usuário tinha conta pessoal antes desse campo existir).
+  hasPersonalWallet?: boolean
 }
 
 interface AuthState {
@@ -85,6 +89,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           cpfMasked:  '',
           pixKey:     profile.pix_key_masked ?? '',
           pixKeyType: (profile.pix_key_type ?? 'cpf') as AuthUser['pixKeyType'],
+          hasPersonalWallet: profile.has_personal_wallet,
         }
         await authService.saveUser(user as unknown as Record<string, unknown>)
         set({
@@ -117,6 +122,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       cpfMasked:    '',
       pixKey:       '',
       pixKeyType:   'cpf',
+      hasPersonalWallet: res.user.has_personal_wallet,
     }
 
     await authService.saveTokens(res.token, res.refresh_token)

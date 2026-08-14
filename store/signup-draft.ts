@@ -2,6 +2,15 @@
 // Nunca salvar dados sensíveis (PIN hash já é hash, mas pixKey e CPF são plaintext aqui — OK para mock)
 
 export interface SignupDraft {
+  // Etapa 0 — seletor de tipo de conta
+  accountType: 'personal' | 'business'
+  // Só relevante quando accountType === 'business' — false quando a pessoa
+  // só quer ser master da empresa, sem carteira pessoal própria.
+  wantsPersonalWallet: boolean
+  // Presente quando o cadastro veio de um link de convite de operador —
+  // nunca cria carteira pessoal nem empresa própria (plano CNPJ
+  // velvet-puzzling-sedgewick).
+  inviteToken?: string
   // Etapa 1
   name: string
   cpf: string
@@ -16,6 +25,20 @@ export interface SignupDraft {
   neighborhood: string
   city: string
   state: string
+  // Etapa 2.5 — dados da empresa, só quando accountType === 'business'
+  companyName: string
+  companyTradingName: string
+  companyHandle: string
+  cnpj: string
+  companyType: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION'
+  companyIncomeValue: string
+  companyCep: string
+  companyStreet: string
+  companyNumber: string
+  companyComplement: string
+  companyNeighborhood: string
+  companyCity: string
+  companyState: string
   // Etapa 3
   handle: string
   // Etapa 4

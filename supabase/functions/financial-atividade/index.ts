@@ -5,6 +5,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
+import { requireCompanyPermission } from '../_shared/company-permissions.ts'
 
 // tipos por filtro (alinhado com spec atividade.md §5)
 const TIPO_FILTER: Record<string, string[]> = {
@@ -49,10 +50,18 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // ── Query params ────────────────────────────────────────────────────────────
 
-  const url   = new URL(req.url)
-  const tipo  = url.searchParams.get('tipo') ?? 'all'
-  const page  = Math.max(0, parseInt(url.searchParams.get('page')  ?? '0',  10) || 0)
-  const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') ?? '20', 10) || 20))
+  const url       = new URL(req.url)
+  const tipo      = url.searchParams.get('tipo') ?? 'all'
+  const page      = Math.max(0, parseInt(url.searchParams.get('page')  ?? '0',  10) || 0)
+  const limit     = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit') ?? '20', 10) || 20))
+  const companyId = url.searchParams.get('company_id')
+
+  // ── Se for extrato de empresa, verificar permissão ver_extrato ────────────────
+
+  if (companyId) {
+    const access = await requireCompanyPermission(supabaseAdmin, user.id, companyId, 'ver_extrato')
+    if (!access.ok) return err('FORBIDDEN', 'Sem permissão para ver o extrato desta empresa', 403)
+  }
 
   // ── Buscar transações ───────────────────────────────────────────────────────
 
@@ -62,12 +71,17 @@ export async function handleRequest(req: Request): Promise<Response> {
       'id, type, amount, amount_brl, fee_amount, status, reference_id, reference_type, metadata, created_at',
       { count: 'exact' },
     )
-    .eq('user_id', user.id)
     // Atividade é um extrato — só movimentações que de fato aconteceram.
     // pending/processing/failed nunca chegaram a se efetivar e não devem aparecer.
     .in('status', ['completed', 'refunded'])
     .order('created_at', { ascending: false })
     .range(page * limit, page * limit + limit - 1)
+
+  query = companyId
+    ? query.eq('company_id', companyId)
+    // company_id IS NULL evita misturar transações de empresa que este
+    // usuário também operou com o extrato pessoal dele.
+    : query.eq('user_id', user.id).is('company_id', null)
 
   if (tipo !== 'all' && TIPO_FILTER[tipo]) {
     query = query.in('type', TIPO_FILTER[tipo])

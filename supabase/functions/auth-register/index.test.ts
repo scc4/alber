@@ -388,3 +388,267 @@ Deno.test('cadastro sem apiKey da subconta (White Label pendente) segue sem chav
   const res  = await withMock(routes, [], () => handleRequest(makeReq()))
   assertEquals(res.status, 201)
 })
+
+// ── Tests — master/operador sem carteira pessoal (plano CNPJ velvet-puzzling-sedgewick) ─
+
+Deno.test('create_personal_wallet:false não chama a Asaas e grava asaas_account_id nulo', async () => {
+  let capturedUsersInsertBody: Record<string, unknown> | null = null
+  let asaasAccountsCalled = false
+
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+
+    if (url.includes('sandbox.asaas.com/api/v3/accounts')) {
+      asaasAccountsCalled = true
+      return new Response(JSON.stringify(ASAAS_ACCOUNT), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    if (method === 'POST' && url.includes('/rest/v1/users')) {
+      capturedUsersInsertBody = JSON.parse(init!.body as string)
+      return new Response(JSON.stringify(NEW_DB_USER), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
+
+    for (const r of [
+      ...BASE_ROUTES.filter(r => !(r.pattern === '/rest/v1/users' && r.method === 'POST')),
+      { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK },
+    ]) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ create_personal_wallet: false, pix_key: undefined, pix_key_type: undefined }))
+  } finally {
+    globalThis.fetch = orig
+  }
+
+  assertEquals(res.status, 201)
+  assertEquals(asaasAccountsCalled, false)
+  assertEquals(capturedUsersInsertBody!.asaas_account_id, null)
+  assertEquals(capturedUsersInsertBody!.asaas_wallet_id, null)
+  assertEquals(capturedUsersInsertBody!.asaas_api_key_enc, null)
+})
+
+Deno.test('create_personal_wallet:false ainda valida CPF/email/handle duplicados', async () => {
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: [{ id: 'existing-user' }] },
+  ]
+  const res = await withMock(routes, [], () =>
+    handleRequest(makeReq({ create_personal_wallet: false })),
+  )
+  assertEquals(res.status, 409)
+  const body = await res.json()
+  assertEquals(body.code, 'CPF_DUPLICATE')
+})
+
+// ── Tests — @handle da empresa (plano CNPJ velvet-puzzling-sedgewick) ────────
+
+const VALID_COMPANY = {
+  cnpj:         '11222333000181', // válido conforme utils/cnpj.ts
+  handle:       'minhaempresa',
+  company_name: 'Minha Empresa LTDA',
+  company_type: 'LIMITED',
+  income_value: 5000,
+  address: { street: 'Rua Y', number: '200', neighborhood: 'Centro', zip_code: '01000000', city: 'São Paulo', state: 'SP' },
+}
+
+Deno.test('cadastro de empresa sem @handle → 400 COMPANY_MISSING_FIELDS', async () => {
+  // Retorna antes de qualquer query em companies — não precisa mockar a tabela.
+  const { handle: _h, ...companyWithoutHandle } = VALID_COMPANY
+  const res = await withMock([], [], () =>
+    handleRequest(makeReq({ company: companyWithoutHandle })),
+  )
+  assertEquals(res.status, 400)
+  const body = await res.json()
+  assertEquals(body.code, 'COMPANY_MISSING_FIELDS')
+})
+
+Deno.test('cadastro de empresa com @handle em formato inválido → 400 COMPANY_HANDLE_INVALID', async () => {
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    // CNPJ ainda não cadastrado — libera passar da checagem de duplicata
+    if (method === 'GET' && url.includes('/rest/v1/companies')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of BASE_ROUTES) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ company: { ...VALID_COMPANY, handle: 'ab' } })) // < 3 chars
+  } finally {
+    globalThis.fetch = orig
+  }
+  assertEquals(res.status, 400)
+  const body = await res.json()
+  assertEquals(body.code, 'COMPANY_HANDLE_INVALID')
+})
+
+Deno.test('cadastro de empresa com @handle igual ao do próprio representante → 409 COMPANY_HANDLE_TAKEN', async () => {
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && url.includes('/rest/v1/companies')) {
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of BASE_ROUTES) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    // makeReq() usa handle: 'fulano' por padrão — mesmo valor pro handle da empresa
+    res = await handleRequest(makeReq({ company: { ...VALID_COMPANY, handle: 'fulano' } }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  assertEquals(res.status, 409)
+  const body = await res.json()
+  assertEquals(body.code, 'COMPANY_HANDLE_TAKEN')
+})
+
+Deno.test('cadastro de empresa com @handle já usado por outra empresa → 409 COMPANY_HANDLE_TAKEN', async () => {
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && url.includes('/rest/v1/companies')) {
+      // Duplicata de CNPJ: não. Duplicata de handle: sim.
+      if (url.includes('handle=eq.')) {
+        return new Response(JSON.stringify([{ id: 'other-company' }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of BASE_ROUTES) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ company: VALID_COMPANY }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  assertEquals(res.status, 409)
+  const body = await res.json()
+  assertEquals(body.code, 'COMPANY_HANDLE_TAKEN')
+})
+
+// ── Tests — ciclo de vida do KYC de empresa (plano velvet-puzzling-sedgewick) ─
+
+Deno.test('cadastro com CNPJ já em análise por outra conta → 409 CNPJ_UNDER_REVIEW', async () => {
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && url.includes('/rest/v1/companies')) {
+      if (url.includes('cnpj=eq.')) {
+        return new Response(JSON.stringify([{ id: 'other-company', kyc_status: 'pending' }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of BASE_ROUTES) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ company: VALID_COMPANY }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  assertEquals(res.status, 409)
+  const body = await res.json()
+  assertEquals(body.code, 'CNPJ_UNDER_REVIEW')
+})
+
+Deno.test('cadastro com CNPJ de empresa já aprovada → 409 CNPJ_DUPLICATE (não CNPJ_UNDER_REVIEW)', async () => {
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && url.includes('/rest/v1/companies')) {
+      if (url.includes('cnpj=eq.')) {
+        return new Response(JSON.stringify([{ id: 'other-company', kyc_status: 'approved' }]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of BASE_ROUTES) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ company: VALID_COMPANY }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  assertEquals(res.status, 409)
+  const body = await res.json()
+  assertEquals(body.code, 'CNPJ_DUPLICATE')
+})
+
+Deno.test('checagem de CNPJ e handle da empresa filtra deleted_at (rejeitada/abandonada não bloqueia)', async () => {
+  let cnpjQueryUrl = ''
+  let handleQueryUrl = ''
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'GET' && url.includes('/rest/v1/companies')) {
+      if (url.includes('cnpj=eq.')) cnpjQueryUrl = url
+      if (url.includes('handle=eq.')) handleQueryUrl = url
+      return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of BASE_ROUTES) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  try {
+    await handleRequest(makeReq({ company: VALID_COMPANY }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  assertEquals(cnpjQueryUrl.includes('deleted_at=is.null'), true)
+  assertEquals(handleQueryUrl.includes('deleted_at=is.null'), true)
+})

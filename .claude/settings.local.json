@@ -72,7 +72,24 @@
       "Bash(grep -n \"SecurityConfirmation\\\\|security_answer_hash\\\\|pin_hash\\\\|onPass\\\\|handleSecurity\\\\|fetch\\(\\\\`\" \"app/\\(app\\)/perfil/handle.tsx\")",
       "Bash(grep -i \"perfil/seguranca\\\\|perfil\\\\\\\\\\\\\\\\seguranca\")",
       "Bash(grep -n \"// Step 3 — Validity\" \"app/\\(app\\)/split/criar.tsx\")",
-      "Bash(grep -i \"split-create\\\\|split-join\\\\|split/criar\\\\|split\\\\\\\\\\\\\\\\criar\")"
+      "Bash(grep -i \"split-create\\\\|split-join\\\\|split/criar\\\\|split\\\\\\\\\\\\\\\\criar\")",
+      "Bash(deno test *)",
+      "Bash(awk -F'=' '/^ENCRYPTION_KEY=/{print \"ENCRYPTION_KEY_LEN=\"length\\($2\\)} /^ASAAS_API_KEY=/{print \"ASAAS_API_KEY_LEN=\"length\\($2\\)}' .env)",
+      "Bash(openssl rand *)",
+      "Bash(grep -rn \"BFF}/\\\\|forgot_pin\\\\|purpose\" \"app/\\(auth\\)/recuperar/\" supabase/functions/*/index.ts)",
+      "Bash(supabase --version)",
+      "Bash(grep -E \"^\\(dev-decrypt|dev-generate-apikey|dev-save-apikey|fix-answer-hashes\\)$\")",
+      "Bash(deno --version)",
+      "Bash(deno check *)",
+      "WebSearch",
+      "WebFetch(domain:docs.asaas.com)",
+      "Bash(rm \"app/\\(app\\)/empresas/[id]/index.tsx\" \"app/\\(app\\)/empresas/[id]/atividade.tsx\"; ls \"app/\\(app\\)/empresas/[id]/\")",
+      "WebFetch(domain:www.gov.br)",
+      "WebFetch(domain:coboldicas.com.br)",
+      "Bash(npx jest *)",
+      "Bash(npm test *)",
+      "Bash(node_modules/.bin/tsc --version)",
+      "Bash(grep -iE \"\\\\.env|secret|credential|\\\\.pem|\\\\.key$\")"
     ]
   }
 }

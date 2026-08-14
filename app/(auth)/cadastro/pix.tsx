@@ -14,6 +14,9 @@ import { getDraft, clearDraft } from '../../../store/signup-draft'
 import { useAuthStore } from '../../../store/auth.store'
 import * as authService from '../../../services/auth.service'
 import { validateCPF } from '../../../utils/cpf'
+import { normalizeCNPJ } from '../../../utils/cnpj'
+import { parseBRL } from '../../../utils/currency'
+import { resolveInitialRoute } from '../../../hooks/useInitialRoute'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -101,6 +104,12 @@ export default function PixScreen() {
   const { t }        = useTranslation()
   const setSession   = useAuthStore(s => s.setSession)
   const draft        = getDraft()
+  // Master de empresa que optou por não ter carteira pessoal, ou operador
+  // vindo de link de convite (plano CNPJ velvet-puzzling-sedgewick) — pula
+  // toda a escolha de chave Pix de saque, já que não existe carteira pessoal
+  // para sacar.
+  const noPersonalWallet =
+    (draft.accountType === 'business' && draft.wantsPersonalWallet === false) || !!draft.inviteToken
 
   const [pixType, setPixType]             = useState<PixType>('cpf')
   const [pixKey, setPixKey]               = useState<string>(maskCPF(draft.cpf ?? ''))
@@ -138,7 +147,9 @@ export default function PixScreen() {
   }, [isCreating])
 
   const cpfPixValid = pixType !== 'cpf' || validateCPF(pixKey)
-  const isReady = pixKey.trim().length > 0 && asaasDisclosed && cpfPixValid
+  const isReady = noPersonalWallet
+    ? asaasDisclosed
+    : pixKey.trim().length > 0 && asaasDisclosed && cpfPixValid
 
   const handleNext = async () => {
     if (!isReady || isCreating) return
@@ -147,6 +158,10 @@ export default function PixScreen() {
     const d = getDraft()
     if (!d.name || !d.cpf || !d.birth || !d.email || !d.phone ||
         !d.pinHash || !d.security?.length || !d.handle) {
+      Alert.alert(t('auth.onboarding.pix.errorTitle'), t('auth.onboarding.pix.errorGeneric'))
+      return
+    }
+    if (d.accountType === 'business' && (!d.companyName || !d.companyHandle || !d.cnpj || !d.companyType || !d.companyIncomeValue)) {
       Alert.alert(t('auth.onboarding.pix.errorTitle'), t('auth.onboarding.pix.errorGeneric'))
       return
     }
@@ -176,9 +191,32 @@ export default function PixScreen() {
           answer_hash: q.answerHash,
           answer_text: q.answerText,
         })),
-        pix_key:      pixType === 'cpf' ? pixKey.replace(/\D/g, '') : pixKey,
-        pix_key_type: pixType,
+        ...(!noPersonalWallet && {
+          pix_key:      pixType === 'cpf' ? pixKey.replace(/\D/g, '') : pixKey,
+          pix_key_type: pixType,
+        }),
+        create_personal_wallet: !noPersonalWallet,
+        ...(d.inviteToken && { invite_token: d.inviteToken }),
         terms_accepted: true,
+        ...(d.accountType === 'business' && {
+          company: {
+            cnpj:          normalizeCNPJ(d.cnpj ?? ''),
+            handle:        (d.companyHandle ?? '').replace(/^@/, ''),
+            company_name:  d.companyName ?? '',
+            trading_name:  d.companyTradingName || undefined,
+            company_type:  d.companyType!,
+            income_value:  parseBRL(d.companyIncomeValue ?? ''),
+            address: {
+              street:       d.companyStreet ?? '',
+              number:       d.companyNumber ?? 'S/N',
+              complement:   d.companyComplement || undefined,
+              neighborhood: d.companyNeighborhood ?? '',
+              zip_code:     (d.companyCep ?? '').replace(/\D/g, ''),
+              city:         d.companyCity ?? '',
+              state:        d.companyState ?? '',
+            },
+          },
+        }),
       }
 
       type RegisterWithKyc = authService.RegisterResponse & { onboarding_url?: string | null }
@@ -198,12 +236,32 @@ export default function PixScreen() {
           cpfMasked:    '',
           pixKey:       '',
           pixKeyType:   pixType,
+          hasPersonalWallet: !noPersonalWallet,
         },
         res.kyc_status as 'pending' | 'submitted' | 'approved' | 'rejected',
         res.account_status as 'active' | 'evaluation' | 'blocked',
       )
 
       clearDraft()
+
+      if (res.company_error) {
+        // Conta pessoal criada com sucesso — só a empresa teve problema (ex.:
+        // instabilidade no Asaas). Pode ser reaberta depois em "Minhas Empresas".
+        Alert.alert(
+          t('auth.onboarding.pix.companyErrorTitle'),
+          t('auth.onboarding.pix.companyErrorMessage'),
+        )
+      }
+
+      if (res.invite_error) {
+        // Conta pessoal criada com sucesso — só o vínculo com a empresa do
+        // convite falhou (ex.: convite expirou entre abrir o link e concluir
+        // o cadastro). Precisa de um novo convite do master.
+        Alert.alert(
+          t('auth.onboarding.pix.inviteErrorTitle'),
+          t('auth.onboarding.pix.inviteErrorMessage'),
+        )
+      }
 
       if (res.login_required || !res.token) {
         // Conta criada com sucesso no backend, mas o login automático falhou
@@ -219,10 +277,21 @@ export default function PixScreen() {
         return
       }
 
-      if (res.onboarding_url) {
-        router.replace({ pathname: '/(auth)/kyc', params: { url: res.onboarding_url } })
+      // Fila de KYC: pode ter verificação pessoal e de empresa na mesma sessão
+      // de cadastro (plano velvet-puzzling-sedgewick) — pessoal primeiro
+      // (identidade do representante é a base de tudo), depois a da empresa.
+      const kycUrls:   string[] = []
+      const kycLabels: string[] = []
+      if (res.onboarding_url) { kycUrls.push(res.onboarding_url); kycLabels.push('pessoal') }
+      if (res.company_onboarding_url) { kycUrls.push(res.company_onboarding_url); kycLabels.push('empresa') }
+
+      if (kycUrls.length > 0) {
+        router.replace({
+          pathname: '/(auth)/kyc',
+          params: { urls: JSON.stringify(kycUrls), labels: JSON.stringify(kycLabels) },
+        })
       } else {
-        router.replace('/(app)/')
+        router.replace((await resolveInitialRoute()) as never)
       }
     } catch (e: unknown) {
       console.log('[pix.register] caught error:', e)
@@ -254,6 +323,22 @@ export default function PixScreen() {
           'Este @handle já está em uso. Escolha outro.',
           [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/handle') }],
         )
+      } else if (code === 'CNPJ_INVALID' || code === 'CNPJ_DUPLICATE' || code === 'CNPJ_UNDER_REVIEW' || code === 'COMPANY_MISSING_FIELDS') {
+        const message =
+          code === 'CNPJ_DUPLICATE'    ? 'Este CNPJ já possui uma conta.' :
+          code === 'CNPJ_UNDER_REVIEW' ? 'Este CNPJ já está em processo de verificação por outra conta.' :
+          'Confira os dados da empresa e tente novamente.'
+        Alert.alert(
+          title,
+          message,
+          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/dados-empresa') }],
+        )
+      } else if (code === 'COMPANY_HANDLE_INVALID' || code === 'COMPANY_HANDLE_TAKEN') {
+        Alert.alert(
+          title,
+          code === 'COMPANY_HANDLE_TAKEN' ? 'Este @handle da empresa já está em uso. Escolha outro.' : 'O @handle da empresa é inválido.',
+          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/dados-empresa') }],
+        )
       } else if (code === 'ASAAS_ERROR') {
         Alert.alert(title, srvMsg || t('auth.onboarding.pix.errorAsaas'))
       } else {
@@ -267,8 +352,8 @@ export default function PixScreen() {
   return (
     <OnboardShell
       step={5}
-      title={t('auth.onboarding.pix.title')}
-      subtitle={t('auth.onboarding.pix.subtitle')}
+      title={noPersonalWallet ? t('auth.onboarding.pix.titleNoWallet') : t('auth.onboarding.pix.title')}
+      subtitle={noPersonalWallet ? t('auth.onboarding.pix.subtitleNoWallet') : t('auth.onboarding.pix.subtitle')}
       onBack={() => router.back()}
       footer={
         <PrimaryButton
@@ -278,58 +363,62 @@ export default function PixScreen() {
         />
       }
     >
-      {/* Seletor de tipo */}
-      <View style={styles.typeGrid}>
-        {PIX_TYPES.map(({ id, labelKey }) => (
-          <TouchableOpacity
-            key={id}
-            style={[styles.typeBtn, pixType === id && styles.typeBtnActive]}
-            onPress={() => switchType(id)}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.typeBtnText, pixType === id && styles.typeBtnTextActive]}>
-              {t(labelKey)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {!noPersonalWallet && (
+        <>
+          {/* Seletor de tipo */}
+          <View style={styles.typeGrid}>
+            {PIX_TYPES.map(({ id, labelKey }) => (
+              <TouchableOpacity
+                key={id}
+                style={[styles.typeBtn, pixType === id && styles.typeBtnActive]}
+                onPress={() => switchType(id)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.typeBtnText, pixType === id && styles.typeBtnTextActive]}>
+                  {t(labelKey)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-      {/* Campo da chave */}
-      {pixType === 'cpf' && (
-        <Field
-          label={t('auth.onboarding.pix.cpfLabel')}
-          value={pixKey}
-          editable={false}
-          hint={t('auth.onboarding.pix.cpfHint')}
-        />
-      )}
-      {pixType === 'phone' && (
-        <Field
-          label={t('auth.onboarding.pix.phoneLabel')}
-          value={pixKey}
-          onChangeText={v => setPixKey(maskPhone(v))}
-          keyboardType="phone-pad"
-        />
-      )}
-      {pixType === 'email' && (
-        <Field
-          label={t('auth.onboarding.pix.emailLabel')}
-          value={pixKey}
-          onChangeText={v => setPixKey(v.toLowerCase())}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-      )}
-      {pixType === 'random' && (
-        <Field
-          label={t('auth.onboarding.pix.randomLabel')}
-          value={pixKey}
-          editable={false}
-          hint={t('auth.onboarding.pix.randomHint')}
-        />
-      )}
+          {/* Campo da chave */}
+          {pixType === 'cpf' && (
+            <Field
+              label={t('auth.onboarding.pix.cpfLabel')}
+              value={pixKey}
+              editable={false}
+              hint={t('auth.onboarding.pix.cpfHint')}
+            />
+          )}
+          {pixType === 'phone' && (
+            <Field
+              label={t('auth.onboarding.pix.phoneLabel')}
+              value={pixKey}
+              onChangeText={v => setPixKey(maskPhone(v))}
+              keyboardType="phone-pad"
+            />
+          )}
+          {pixType === 'email' && (
+            <Field
+              label={t('auth.onboarding.pix.emailLabel')}
+              value={pixKey}
+              onChangeText={v => setPixKey(v.toLowerCase())}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+          )}
+          {pixType === 'random' && (
+            <Field
+              label={t('auth.onboarding.pix.randomLabel')}
+              value={pixKey}
+              editable={false}
+              hint={t('auth.onboarding.pix.randomHint')}
+            />
+          )}
 
-      <Text style={styles.withdrawalHint}>{t('auth.onboarding.pix.withdrawalHint')}</Text>
+          <Text style={styles.withdrawalHint}>{t('auth.onboarding.pix.withdrawalHint')}</Text>
+        </>
+      )}
 
       {/* Declaração obrigatória Asaas — Playbook BaaS */}
       <TouchableOpacity

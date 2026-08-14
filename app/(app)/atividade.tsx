@@ -19,6 +19,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
+import { useActiveContextStore } from '../../store/active-context.store'
+import { useContextualBalance } from '../../hooks/useContextualBalance'
 import { formatAlbers, formatDateTime } from '../../utils/format'
 import { Header } from '../../components/core/Header'
 import { Eyebrow } from '../../components/shared/Eyebrow'
@@ -223,11 +225,13 @@ async function fetchAtividade(
   tipo: Filter,
   page: number,
   limit: number,
+  companyId?: string,
 ): Promise<{ data: Transaction[]; total: number; hasMore: boolean }> {
   const params = new URLSearchParams({
     tipo,
     page:  String(page),
     limit: String(limit),
+    ...(companyId && { company_id: companyId }),
   })
   const res  = await fetch(`${BFF}/financial-atividade?${params}`, {
     method:  'GET',
@@ -252,8 +256,13 @@ export default function AtividadeScreen() {
   const insets  = useSafeAreaInsets()
 
   const token    = useAuthStore(s => s.token)
-  const balance  = useBalanceStore(s => s.balance)
-  const reserved = useBalanceStore(s => s.blocked)
+  const context  = useActiveContextStore(s => s.context)
+  const contextualBalance = useContextualBalance()
+  const balance  = contextualBalance.balance
+  // Saldo bloqueado em splits só existe no contexto pessoal (splits ainda
+  // não operam em nome de empresa nesta fase).
+  const personalReserved = useBalanceStore(s => s.blocked)
+  const reserved = context.type === 'personal' ? personalReserved : 0
 
   const [filter, setFilter]         = useState<Filter>('all')
   const [transactions, setTx]       = useState<Transaction[]>([])
@@ -272,13 +281,15 @@ export default function AtividadeScreen() {
 
   // ── Fetch ─────────────────────────────────────────────────────────────────
 
+  const companyId = context.type === 'company' ? context.companyId : undefined
+
   const load = useCallback(async (f: Filter, p: number, append: boolean) => {
     if (!token) return
     if (!append) setLoading(true)
     else         setLoadingMore(true)
     setError(null)
     try {
-      const result = await fetchAtividade(token, f, p, PAGE_SIZE)
+      const result = await fetchAtividade(token, f, p, PAGE_SIZE, companyId)
       setTx(prev => append ? [...prev, ...result.data] : result.data)
       setPage(p)
       setHasMore(result.hasMore)
@@ -288,9 +299,9 @@ export default function AtividadeScreen() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [token])
+  }, [token, companyId])
 
-  // Carga inicial
+  // Carga inicial — refaz quando o contexto ativo muda (troca de conta)
   useEffect(() => {
     load('all', 0, false)
   }, [load])

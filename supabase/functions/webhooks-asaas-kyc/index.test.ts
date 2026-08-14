@@ -159,3 +159,72 @@ Deno.test('idempotência — kyc_status já é o novo status → ignora sem toca
   const res = await withMock(routes, undefined, () => handleRequest(makeReq(APPROVED_PAYLOAD)))
   assertEquals(res.status, 200)
 })
+
+// ── Ramo empresa (plano velvet-puzzling-sedgewick — ciclo de vida do KYC) ─────
+
+Deno.test('subconta não encontrada em users, mas encontrada em companies — aprovada: cria EVP, grava em companies', async () => {
+  const apiKeyEnc = await aesEncrypt('sub-api-key-raw', 'test-asaas-parent-key')
+  const NEW_EVP_KEY = 'evp-company-created-key'
+
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: [] },
+    {
+      pattern: '/rest/v1/companies', method: 'GET', status: 200,
+      body: [{ id: 'c1', owner_id: 'owner-1', kyc_status: 'pending', asaas_api_key_enc: apiKeyEnc, asaas_deposit_key: null }],
+    },
+    { pattern: '/rest/v1/companies', method: 'PATCH', status: 200, body: [] },
+    { pattern: '/pix/addressKeys', method: 'POST', status: 200, body: { key: NEW_EVP_KEY, type: 'EVP' } },
+    { pattern: '/functions/v1/push-send', method: 'POST', status: 200, body: {} },
+    { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
+  ]
+
+  const patchBodies: Record<string, unknown>[] = []
+  const pushBodies: Record<string, unknown>[] = []
+  const res = await withMock(routes, (url, method, body) => {
+    if (method === 'PATCH' && url.includes('/rest/v1/companies')) patchBodies.push(body as Record<string, unknown>)
+    if (url.includes('/functions/v1/push-send')) pushBodies.push(body as Record<string, unknown>)
+  }, () => handleRequest(makeReq(APPROVED_PAYLOAD)))
+
+  assertEquals(res.status, 200)
+  const statusPatch = patchBodies.find(b => b.kyc_status === 'approved')
+  assertEquals(statusPatch !== undefined, true)
+  const depositKeyPatch = patchBodies.find(b => 'asaas_deposit_key' in b)
+  assertEquals(depositKeyPatch !== undefined, true)
+  assertEquals(pushBodies[0]?.user_id, 'owner-1')
+})
+
+Deno.test('empresa rejeitada — marca deleted_at (libera CNPJ/handle) além de kyc_status', async () => {
+  const apiKeyEnc = await aesEncrypt('sub-api-key-raw', 'test-asaas-parent-key')
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: [] },
+    {
+      pattern: '/rest/v1/companies', method: 'GET', status: 200,
+      body: [{ id: 'c1', owner_id: 'owner-1', kyc_status: 'pending', asaas_api_key_enc: apiKeyEnc, asaas_deposit_key: null }],
+    },
+    { pattern: '/rest/v1/companies', method: 'PATCH', status: 200, body: [] },
+    { pattern: '/functions/v1/push-send', method: 'POST', status: 200, body: {} },
+    { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
+  ]
+
+  const patchBodies: Record<string, unknown>[] = []
+  let addressKeysCalled = false
+  const res = await withMock(routes, (url, method, body) => {
+    if (method === 'PATCH' && url.includes('/rest/v1/companies')) patchBodies.push(body as Record<string, unknown>)
+    if (url.includes('/pix/addressKeys')) addressKeysCalled = true
+  }, () => handleRequest(makeReq({ event: 'ACCOUNT_STATUS_CHANGED', account: { id: 'asaas-acc-1', status: 'REJECTED' } })))
+
+  assertEquals(res.status, 200)
+  assertEquals(addressKeysCalled, false)
+  const rejectPatch = patchBodies.find(b => b.kyc_status === 'rejected')
+  assertEquals(rejectPatch !== undefined, true)
+  assertEquals(typeof rejectPatch!.deleted_at, 'string')
+})
+
+Deno.test('nem usuário nem empresa encontrados — 200 sem ação', async () => {
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: [] },
+    { pattern: '/rest/v1/companies', method: 'GET', status: 200, body: [] },
+  ]
+  const res = await withMock(routes, undefined, () => handleRequest(makeReq(APPROVED_PAYLOAD)))
+  assertEquals(res.status, 200)
+})

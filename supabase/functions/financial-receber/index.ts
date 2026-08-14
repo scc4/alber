@@ -10,12 +10,16 @@ import { normalizeCpf } from '../_shared/cpf.ts'
 import { transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
+import { resolveWalletContext } from '../_shared/company-permissions.ts'
 
 interface ReceberRequest {
   amount_albers:               number
   payer_identifier:            string  // CPF, @handle ou telefone
   payer_pin_hash:              string  // SHA-256(PIN do pagador) — digitado pelo pagador
   payer_security_answer_hash:  string  // SHA-256(resposta) — digitado pelo pagador
+  // Quando presente, o recebedor é a carteira da empresa. Pagador continua
+  // sempre pessoal nesta fase.
+  company_id?:                 string
 }
 
 interface UserRow {
@@ -117,8 +121,8 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { amount_albers, payer_identifier, payer_pin_hash, payer_security_answer_hash } = body
-  const safePayload = { amount_albers, payer_identifier } as Record<string, unknown>
+  const { amount_albers, payer_identifier, payer_pin_hash, payer_security_answer_hash, company_id } = body
+  const safePayload = { amount_albers, payer_identifier, company_id } as Record<string, unknown>
 
   if (!amount_albers || !payer_identifier || !payer_pin_hash || !payer_security_answer_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -131,13 +135,21 @@ Deno.serve(async (req: Request) => {
 
   const { data: receiver, error: rcvErr } = await supabaseAdmin
     .from('users')
-    .select('id, name, handle, asaas_wallet_id')
+    .select('id, name, handle, asaas_wallet_id, asaas_api_key_enc, kyc_status, account_status, created_at')
     .eq('auth_id', authUser.id)
     .maybeSingle()
 
   if (rcvErr || !receiver) return err('USER_NOT_FOUND', 'Recebedor não encontrado', 404)
 
-  if (!receiver.asaas_wallet_id) {
+  // ── Resolver carteira do recebedor: pessoal ou empresa ────────────────────────
+
+  const receiverWalletResolution = await resolveWalletContext(supabaseAdmin, receiver.id, company_id, 'receber', receiver)
+  if (!receiverWalletResolution.ok) {
+    return err(receiverWalletResolution.code, receiverWalletResolution.message, receiverWalletResolution.status)
+  }
+  const receiverWallet = receiverWalletResolution.wallet
+
+  if (!receiverWallet.asaasWalletId) {
     return err('ACCOUNT_NOT_CONFIGURED', 'Conta do recebedor não configurada', 503)
   }
 
@@ -149,10 +161,10 @@ Deno.serve(async (req: Request) => {
     return err('PAYER_NOT_FOUND', 'Pagador não encontrado', 404)
   }
 
-  // ── Verificar recebedor ≠ pagador ────────────────────────────────────────────
+  // ── Verificar carteira pagadora ≠ carteira recebedora ────────────────────────
 
-  if (payer.id === receiver.id) {
-    return err('SELF_TRANSFER', 'Não é possível receber de si mesmo', 422)
+  if (payer.asaas_wallet_id && payer.asaas_wallet_id === receiverWallet.asaasWalletId) {
+    return err('SELF_TRANSFER', 'Não é possível receber na mesma carteira', 422)
   }
 
   // ── Rate limiting do pagador ─────────────────────────────────────────────────
@@ -290,6 +302,7 @@ Deno.serve(async (req: Request) => {
     .from('transactions')
     .insert({
       user_id:        receiver.id,
+      company_id:     receiverWallet.companyId,
       type:           'receber',
       amount:         amount_albers,
       amount_brl:     amount_albers,
@@ -328,7 +341,7 @@ Deno.serve(async (req: Request) => {
   try {
     await transferToWallet(
       amount_albers,
-      receiver.asaas_wallet_id,
+      receiverWallet.asaasWalletId!,
       `Recebimento Alber — ${receiver.handle}`,
       payerTxId,
       payerApiKey,

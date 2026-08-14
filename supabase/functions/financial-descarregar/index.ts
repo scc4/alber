@@ -10,11 +10,13 @@ import { normalizeCpf } from '../_shared/cpf.ts'
 import { cashoutPix, transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
+import { resolveWalletContext } from '../_shared/company-permissions.ts'
 
 interface DescarregarRequest {
   amount_albers: number
   pin_hash: string
   security_answer_hash: string
+  company_id?: string
 }
 
 const MIN_AMOUNT     = 10
@@ -63,8 +65,8 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { amount_albers, pin_hash, security_answer_hash } = body
-  const safePayload = { amount_albers } as Record<string, unknown>
+  const { amount_albers, pin_hash, security_answer_hash, company_id } = body
+  const safePayload = { amount_albers, company_id } as Record<string, unknown>
 
   if (!amount_albers || !pin_hash || !security_answer_hash) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
@@ -74,32 +76,48 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Buscar dados do usuário ──────────────────────────────────────────────────
+  // PIN e pergunta de segurança são sempre do usuário autenticado (o operador),
+  // mesmo quando a operação atua sobre a carteira de uma empresa.
 
   const { data: user, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, auth_id, asaas_api_key_enc, kyc_status, pix_key, pix_key_type, cpf')
+    .select('id, auth_id, asaas_api_key_enc, kyc_status, account_status, created_at, pix_key, pix_key_type, cpf')
     .eq('auth_id', authUser.id)
     .maybeSingle()
 
   if (userErr || !user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
 
+  // ── Resolver carteira: pessoal ou empresa ─────────────────────────────────────
+
+  const resolution = await resolveWalletContext(supabaseAdmin, user.id, company_id, 'descarregar', user)
+  if (!resolution.ok) return err(resolution.code, resolution.message, resolution.status)
+  const wallet = resolution.wallet
+
   // ── Verificar KYC obrigatório (spec §5.4) ────────────────────────────────────
 
-  if (user.kyc_status !== 'approved') {
+  if (wallet.kycStatus !== 'approved') {
     return err('KYC_REQUIRED', 'Verificação de identidade necessária para descarregar', 403)
   }
 
   // ── Verificar chave Pix cadastrada ───────────────────────────────────────────
+  // Empresas ainda não têm tela de configuração de chave Pix de saque nesta fase.
 
-  if (!user.pix_key || !user.pix_key_type) {
-    return err('PIX_KEY_MISSING', 'Chave Pix não cadastrada — configure em Perfil', 422)
+  if (!wallet.pixKey || !wallet.pixKeyType) {
+    return err(
+      wallet.ownerType === 'company' ? 'COMPANY_PIX_KEY_NOT_CONFIGURED' : 'PIX_KEY_MISSING',
+      wallet.ownerType === 'company'
+        ? 'Chave Pix da empresa ainda não configurada'
+        : 'Chave Pix não cadastrada — configure em Perfil',
+      422,
+    )
   }
 
   // ── Verificar CPF da chave Pix = CPF do usuário (spec §5.4 — validação local) ─
   // Se a chave for do tipo CPF, o CPF da chave deve ser o mesmo titular da conta.
+  // Só se aplica à carteira pessoal — chave CNPJ de empresa não tem esse checo ainda.
 
-  if (user.pix_key_type === 'CPF') {
-    const pixCpfHash = await sha256hex(normalizeCpf(user.pix_key))
+  if (wallet.ownerType === 'personal' && wallet.pixKeyType === 'CPF') {
+    const pixCpfHash = await sha256hex(normalizeCpf(wallet.pixKey))
     if (pixCpfHash !== user.cpf) {
       return err('PIX_CPF_MISMATCH', 'Chave Pix CPF não corresponde ao titular da conta', 422)
     }
@@ -184,11 +202,11 @@ Deno.serve(async (req: Request) => {
 
   // ── Descriptografar API key da subconta ──────────────────────────────────────
 
-  if (!user.asaas_api_key_enc) return err('ACCOUNT_NOT_CONFIGURED', 'Subconta não configurada', 503)
+  if (!wallet.asaasApiKeyEnc) return err('ACCOUNT_NOT_CONFIGURED', 'Subconta não configurada', 503)
 
   let subApiKey: string
   try {
-    subApiKey = await aesDecrypt(user.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+    subApiKey = await aesDecrypt(wallet.asaasApiKeyEnc, Deno.env.get('ASAAS_API_KEY')!)
   } catch (e) {
     console.error('API key decryption failed:', e)
     await logError(supabaseAdmin, 'financial-descarregar', e, safePayload)
@@ -216,12 +234,13 @@ Deno.serve(async (req: Request) => {
     .from('transactions')
     .insert({
       user_id:    user.id,
+      company_id: wallet.companyId,
       type:       'descarregar',
       amount:     amount_albers,
       amount_brl: amount_albers,
       fee_amount: fee,
       status:     'pending',
-      metadata:   { pix_key: user.pix_key, pix_key_type: user.pix_key_type, net_brl: netBrl },
+      metadata:   { pix_key: wallet.pixKey, pix_key_type: wallet.pixKeyType, net_brl: netBrl },
     })
     .select('id')
     .single()
@@ -237,6 +256,7 @@ Deno.serve(async (req: Request) => {
     .from('transactions')
     .insert({
       user_id:        user.id,
+      company_id:     wallet.companyId,
       type:           'fee',
       amount:         fee,
       amount_brl:     fee,
@@ -255,7 +275,7 @@ Deno.serve(async (req: Request) => {
 
   let pixKeyRaw: string
   try {
-    pixKeyRaw = await aesDecrypt(user.pix_key, Deno.env.get('ENCRYPTION_KEY')!)
+    pixKeyRaw = await aesDecrypt(wallet.pixKey, Deno.env.get('ENCRYPTION_KEY')!)
   } catch (e) {
     console.error('pix_key decryption failed:', e)
     await logError(supabaseAdmin, 'financial-descarregar', e, safePayload)
@@ -264,7 +284,7 @@ Deno.serve(async (req: Request) => {
 
   // ── Asaas: cash out via Pix externo (spec 04_api §4.5) ────────────────────────
   // DB stores 'random' for EVP keys; Asaas API requires 'EVP'.
-  const asaasPixType = user.pix_key_type === 'random' ? 'EVP' : user.pix_key_type.toUpperCase()
+  const asaasPixType = wallet.pixKeyType === 'random' ? 'EVP' : wallet.pixKeyType!.toUpperCase()
 
   let transfer: { id: string; status: string }
   try {
@@ -327,7 +347,8 @@ Deno.serve(async (req: Request) => {
       amount_albers,
       fee,
       net_brl: netBrl,
-      pix_key:  user.pix_key,
+      pix_key:  wallet.pixKey,
+      company_id: wallet.companyId,
     },
   })
 
@@ -345,7 +366,7 @@ Deno.serve(async (req: Request) => {
     transaction_id: transactionId,
     amount_sent:    netBrl,
     fee,
-    pix_key:        user.pix_key,
+    pix_key:        wallet.pixKey,
     status:         'processing',
   })
 })

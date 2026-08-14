@@ -18,14 +18,32 @@ import { useTranslation } from 'react-i18next'
 import { Header } from '../../components/core/Header'
 import { BalanceBlock } from '../../components/financial/BalanceBlock'
 import { Eyebrow } from '../../components/shared/Eyebrow'
+import { AccountSwitcherSheet } from '../../components/core/AccountSwitcherSheet'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { useLoungeStore } from '../../store/lounge.store'
 import { useNotificationsStore } from '../../store/notifications.store'
+import { useActiveContextStore } from '../../store/active-context.store'
+import { useAccountSwitcher } from '../../hooks/useAccountSwitcher'
+import { CompanyHomeScreen } from './_company-home'
 import { spaceSkins } from '../../tokens/colors'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 import { typography } from '../../tokens/typography'
+
+// ─── Roteador de contexto ──────────────────────────────────────────────────────
+// Home pessoal e Home de empresa são componentes distintos (a pessoal tem
+// Lounge/Split/KYC — conceitos que não existem pra empresa) — trocar de
+// contexto troca qual deles é renderizado aqui. Nenhuma chamada de rede
+// acontece na troca, só o que já foi buscado (company-list) é reaproveitado.
+
+export default function HomeScreen() {
+  const context = useActiveContextStore(s => s.context)
+  if (context.type === 'company') {
+    return <CompanyHomeScreen companyId={context.companyId} companyName={context.companyName} />
+  }
+  return <PersonalHomeScreen />
+}
 
 // ─── Banner logic ────────────────────────────────────────────────────────────
 
@@ -95,9 +113,10 @@ function resolveBanner(
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
-export default function HomeScreen() {
+function PersonalHomeScreen() {
   const { t } = useTranslation()
   const { user, kycStatus, accountStatus, token } = useAuthStore()
+  const switcher = useAccountSwitcher()
   const {
     balance,
     stale,
@@ -217,10 +236,18 @@ export default function HomeScreen() {
           hasNotification={kycStatus !== 'approved' || unreadCount > 0}
           onLogoPress={() => router.replace('/(app)/')}
           onBell={() => router.push('/(app)/notificacoes' as never)}
-          onAvatarPress={() => {
-            console.log('[home] onAvatarPress fired, navigating to perfil')
-            router.push('/(app)/perfil' as never)
-          }}
+          onAvatarPress={() => router.push('/(app)/perfil' as never)}
+          onSwitcherPress={switcher.canSwitch ? switcher.open : undefined}
+        />
+
+        <AccountSwitcherSheet
+          visible={switcher.visible}
+          onClose={switcher.close}
+          hasPersonalWallet={switcher.hasPersonalWallet}
+          companies={switcher.companies}
+          current={switcher.context}
+          onSelect={switcher.select}
+          onManageCompanies={switcher.openManage}
         />
 
         {/* Banner contextual por prioridade (máx 1 por vez) */}

@@ -8,9 +8,11 @@ import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
 import { createPixAddressKey, createPixStaticQrCode } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
+import { resolveWalletContext } from '../_shared/company-permissions.ts'
 
 interface CarregarRequest {
   amount_albers: number
+  company_id?:   string
 }
 
 const EVALUATION_LIMIT_BRL = 2000
@@ -55,7 +57,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { amount_albers } = body
+  const { amount_albers, company_id } = body
 
   if (!amount_albers || typeof amount_albers !== 'number' || amount_albers <= 0) {
     return err('INVALID_AMOUNT', 'Valor inválido', 400)
@@ -75,25 +77,37 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
   }
 
+  // ── Resolver carteira: pessoal ou empresa ─────────────────────────────────────
+
+  const resolution = await resolveWalletContext(supabaseAdmin, userData.id, company_id, 'carregar', userData)
+  if (!resolution.ok) return err(resolution.code, resolution.message, resolution.status)
+  const wallet = resolution.wallet
+
   // ── Verificar KYC ────────────────────────────────────────────────────────────
 
-  if (userData.kyc_status !== 'approved') {
+  if (wallet.kycStatus !== 'approved') {
     return err('KYC_REQUIRED', 'KYC não aprovado', 403)
   }
 
   // ── Verificar limite do período de avaliação (spec 04_api §3) ────────────────
+  // Limite é por carteira (pessoal ou empresa) — não soma as duas.
 
-  if (userData.account_status === 'evaluation') {
+  if (wallet.accountStatus === 'evaluation') {
     const since = new Date(
-      new Date(userData.created_at).getTime() - EVALUATION_DAYS * 24 * 60 * 60 * 1000,
+      new Date(wallet.createdAt).getTime() - EVALUATION_DAYS * 24 * 60 * 60 * 1000,
     )
-    const { data: evalTxs, error: evalErr } = await supabaseAdmin
+    let evalQuery = supabaseAdmin
       .from('transactions')
       .select('amount_brl')
-      .eq('user_id', userData.id)
       .eq('type', 'carregar')
       .eq('status', 'completed')
       .gte('created_at', since.toISOString())
+
+    evalQuery = wallet.ownerType === 'company'
+      ? evalQuery.eq('company_id', wallet.companyId!)
+      : evalQuery.eq('user_id', userData.id).is('company_id', null)
+
+    const { data: evalTxs, error: evalErr } = await evalQuery
 
     if (evalErr) {
       console.error('Evaluation limit query failed:', evalErr)
@@ -115,7 +129,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // ── Descriptografar API key da subconta ──────────────────────────────────────
 
-  if (!userData.asaas_api_key_enc) {
+  if (!wallet.asaasApiKeyEnc) {
     return err('ACCOUNT_NOT_CONFIGURED', 'Subconta financeira não configurada', 503)
   }
 
@@ -123,7 +137,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')!
   let subApiKey: string
   try {
-    subApiKey = await aesDecrypt(userData.asaas_api_key_enc, apiKeySecret)
+    subApiKey = await aesDecrypt(wallet.asaasApiKeyEnc, apiKeySecret)
   } catch (e) {
     console.error('API key decryption failed:', e)
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)
@@ -136,27 +150,28 @@ export async function handleRequest(req: Request): Promise<Response> {
   // recebimento e a Asaas rejeita com "Chave Pix não encontrada".
 
   let pixKeyRaw: string
-  if (userData.asaas_deposit_key) {
+  if (wallet.asaasDepositKey) {
     try {
-      pixKeyRaw = await aesDecrypt(userData.asaas_deposit_key, pixKeySecret)
+      pixKeyRaw = await aesDecrypt(wallet.asaasDepositKey, pixKeySecret)
     } catch (e) {
       console.error('asaas_deposit_key decryption failed:', e)
       return err('CRYPTO_ERROR', 'Erro ao ler chave Pix', 500)
     }
   } else {
-    // Fallback: auth-register não conseguiu registrar no cadastro (ex.: KYC
-    // ainda pendente naquele momento) — cria agora, mesmo fluxo do webhook KYC.
+    // Fallback: auth-register/company-create não conseguiram registrar no
+    // cadastro (ex.: KYC ainda pendente naquele momento) — cria agora, mesmo
+    // fluxo do webhook KYC.
     try {
       const created   = await createPixAddressKey('EVP', subApiKey)
       pixKeyRaw       = created.key
       const encrypted = await aesEncrypt(pixKeyRaw, pixKeySecret)
       await supabaseAdmin
-        .from('users')
+        .from(wallet.ownerType === 'company' ? 'companies' : 'users')
         .update({ asaas_deposit_key: encrypted })
-        .eq('id', userData.id)
-      console.log(`[carregar] chave Pix de recebimento (EVP) criada para usuário ${userData.id}`)
+        .eq('id', wallet.companyId ?? userData.id)
+      console.log(`[carregar] chave Pix de recebimento (EVP) criada para ${wallet.ownerType} ${wallet.companyId ?? userData.id}`)
     } catch (e) {
-      await logError(supabaseAdmin, 'financial-carregar', e, { user_id: userData.id, step: 'create_deposit_key' })
+      await logError(supabaseAdmin, 'financial-carregar', e, { user_id: userData.id, company_id: wallet.companyId, step: 'create_deposit_key' })
       return err('PIX_KEY_FAILED', 'Erro ao configurar chave Pix', 503)
     }
   }
@@ -190,6 +205,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     .from('transactions')
     .insert({
       user_id:          userData.id,
+      company_id:       wallet.companyId,
       type:             'carregar',
       amount:           amount_albers,
       amount_brl:       amountBrl,

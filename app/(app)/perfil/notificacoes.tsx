@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
+import { useAuthStore } from '../../../store/auth.store'
+import * as authService from '../../../services/auth.service'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -72,7 +74,34 @@ function Section({ title, children }: SectionProps) {
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export default function NotificacoesScreen() {
-  const { t } = useTranslation()
+  const { t }  = useTranslation()
+  const token  = useAuthStore(s => s.token)
+
+  // Único toggle desta tela que persiste de verdade — os demais (abaixo)
+  // ainda são só de interface, sem back-end de preferências por enquanto.
+  const [marketingOptIn, setMarketingOptIn] = useState(false)
+  const [marketingSaving, setMarketingSaving] = useState(false)
+
+  useEffect(() => {
+    if (!token) return
+    authService.fetchUserProfile(token).then(profile => {
+      if (profile) setMarketingOptIn(profile.marketing_opt_in)
+    })
+  }, [token])
+
+  const handleMarketingChange = async (value: boolean) => {
+    if (!token || marketingSaving) return
+    const previous = marketingOptIn
+    setMarketingOptIn(value) // otimista
+    setMarketingSaving(true)
+    try {
+      await authService.updateMarketingOptIn(token, value)
+    } catch {
+      setMarketingOptIn(previous) // reverte se o back-end recusar
+    } finally {
+      setMarketingSaving(false)
+    }
+  }
 
   const [notif, setNotif] = useState<NotifState>({
     txReceive:        true,
@@ -131,6 +160,17 @@ export default function NotificacoesScreen() {
           <ToggleRow label={t('perfil.notificacoes.loungeMessage')} value={notif.loungeMessage} onChange={set('loungeMessage')} />
           <ToggleRow label={t('perfil.notificacoes.loungeEvent')}   value={notif.loungeEvent}   onChange={set('loungeEvent')} />
           <ToggleRow label={t('perfil.notificacoes.loungeRequest')} value={notif.loungeRequest} onChange={set('loungeRequest')} />
+        </Section>
+
+        {/* Comunicação de marketing — consentimento separado do aceite obrigatório do cadastro (LGPD) */}
+        <Section title={t('perfil.notificacoes.sectionComunicacao')}>
+          <ToggleRow
+            label={t('perfil.notificacoes.marketingOptIn')}
+            value={marketingOptIn}
+            disabled={marketingSaving}
+            onChange={handleMarketingChange}
+          />
+          <Text style={styles.secNote}>{t('perfil.notificacoes.marketingOptInNote')}</Text>
         </Section>
 
         {/* Conta */}

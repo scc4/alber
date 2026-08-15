@@ -211,6 +211,68 @@ Deno.test('cadastro completo — login na 1ª tentativa → token presente, sem 
   assertEquals(data.user_id, '22222222-2222-4222-8222-222222222222')
 })
 
+// Item 19 do plano de correções (consentimentos separados): marketing_opt_in
+// nunca é assumido true — só grava o que veio explicitamente no request.
+Deno.test('marketing_opt_in true → users insert grava marketing_opt_in true + updated_at', async () => {
+  const userInsertBodies: Record<string, unknown>[] = []
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (url.includes('/rest/v1/users') && method === 'POST') {
+      const body = init?.body ? JSON.parse(init.body as string) : {}
+      userInsertBodies.push(body)
+      return new Response(JSON.stringify(NEW_DB_USER), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of [...BASE_ROUTES, { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK }]) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  try {
+    await handleRequest(makeReq({ marketing_opt_in: true }))
+  } finally {
+    globalThis.fetch = orig
+  }
+
+  assertEquals(userInsertBodies[0]?.marketing_opt_in, true)
+  assertEquals(typeof userInsertBodies[0]?.marketing_opt_in_updated_at, 'string')
+})
+
+Deno.test('marketing_opt_in ausente → users insert grava false, sem updated_at (nunca assume opt-in)', async () => {
+  const userInsertBodies: Record<string, unknown>[] = []
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (url.includes('/rest/v1/users') && method === 'POST') {
+      const body = init?.body ? JSON.parse(init.body as string) : {}
+      userInsertBodies.push(body)
+      return new Response(JSON.stringify(NEW_DB_USER), { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of [...BASE_ROUTES, { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK }]) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  try {
+    await handleRequest(makeReq())
+  } finally {
+    globalThis.fetch = orig
+  }
+
+  assertEquals(userInsertBodies[0]?.marketing_opt_in, false)
+  assertEquals(userInsertBodies[0]?.marketing_opt_in_updated_at, null)
+})
+
 Deno.test('login falha na 1ª tentativa e recupera no retry → token presente (valida o fix 4a)', async () => {
   const routes = BASE_ROUTES
   const sequences: SequenceRoute[] = [

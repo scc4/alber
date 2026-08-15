@@ -81,6 +81,9 @@ export interface RegisterInput {
   pix_key?:           string
   pix_key_type?:      'cpf' | 'phone' | 'email' | 'random'
   terms_accepted:     boolean
+  // Consentimento opcional e separado do aceite obrigatório de Termos/Privacidade
+  // (item 19 da revisão de QA) — nunca pré-marcado, só true por ação explícita.
+  marketing_opt_in?:  boolean
   // false quando a pessoa só quer ser master/operador de empresa, sem
   // carteira pessoal própria (plano CNPJ velvet-puzzling-sedgewick).
   create_personal_wallet?: boolean
@@ -213,6 +216,7 @@ export interface UserProfileResponse {
   pix_key_type:   string
   has_pix_key:    boolean
   has_personal_wallet: boolean
+  marketing_opt_in: boolean
 }
 
 export async function fetchUserProfile(token: string): Promise<UserProfileResponse | null> {
@@ -223,6 +227,13 @@ export async function fetchUserProfile(token: string): Promise<UserProfileRespon
     if (!res.ok) return null
     return (await res.json()) as UserProfileResponse
   } catch { return null }
+}
+
+// Item 19 — liga/desliga o consentimento de marketing a qualquer momento,
+// separado do aceite obrigatório feito no cadastro.
+export async function updateMarketingOptIn(token: string, optIn: boolean): Promise<boolean> {
+  const res = await post<{ marketing_opt_in: boolean }>('perfil-update-marketing', { marketing_opt_in: optIn }, token)
+  return res.marketing_opt_in
 }
 
 // ── Challenge de pergunta de segurança (requer PIN correto) ──────────────────

@@ -35,6 +35,9 @@ interface RegisterRequest {
   pix_key?: string
   pix_key_type?: 'cpf' | 'phone' | 'email' | 'random'
   terms_accepted: boolean
+  // Consentimento opcional e separado do aceite obrigatório de Termos/Privacidade
+  // (item 19 da revisão de QA) — nunca pré-marcado, só true por ação explícita.
+  marketing_opt_in?: boolean
   // Presente quando o cadastro escolheu "Empresa" no seletor de tipo de conta —
   // o usuário acima vira o master da empresa (plano CNPJ velvet-puzzling-sedgewick).
   company?: CreateCompanyInput
@@ -119,7 +122,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   const {
     name, email, cpf, birth_date, phone, address,
     handle, pin_hash, security_questions, pix_key, pix_key_type, terms_accepted,
-    company, create_personal_wallet, invite_token,
+    company, create_personal_wallet, invite_token, marketing_opt_in,
   } = body
 
   // Convite de operador nunca cria carteira pessoal nem empresa própria.
@@ -522,6 +525,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       kyc_status:        'pending',
       account_status:    'evaluation',
       onboarding_url:    onboardingUrl,
+      marketing_opt_in:            marketing_opt_in === true,
+      marketing_opt_in_updated_at: marketing_opt_in != null ? new Date().toISOString() : null,
     })
     .select('id')
     .single()

@@ -158,6 +158,7 @@ export default function TermsScreen() {
         create_personal_wallet: !noPersonalWallet,
         ...(d.inviteToken && { invite_token: d.inviteToken }),
         terms_accepted: true,
+        marketing_opt_in: marketingOptIn,
         ...(d.accountType === 'business' && {
           company: {
             cnpj:          normalizeCNPJ(d.cnpj ?? ''),

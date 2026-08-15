@@ -1,22 +1,18 @@
 // Design: /design/auth.jsx — StepPix
 // Spec: /specs/06_modules/onboarding.md seção 3.8
 // Spec: /specs/03_backend.md §4.1
-// Último passo do cadastro — chama auth-register e inicia sessão
+// Escolha da chave Pix de saque pessoal — salva no draft e segue pra
+// cadastro/terms.tsx, que é quem de fato chama auth-register.
 
-import { useEffect, useRef, useState } from 'react'
-import { Alert, Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { useEffect, useState } from 'react'
+import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { OnboardShell } from '../../../components/core/OnboardShell'
 import { Field } from '../../../components/core/Field'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
-import { getDraft, clearDraft } from '../../../store/signup-draft'
-import { useAuthStore } from '../../../store/auth.store'
-import * as authService from '../../../services/auth.service'
+import { getDraft, updateDraft } from '../../../store/signup-draft'
 import { validateCPF } from '../../../utils/cpf'
-import { normalizeCNPJ } from '../../../utils/cnpj'
-import { parseBRL } from '../../../utils/currency'
-import { resolveInitialRoute } from '../../../hooks/useInitialRoute'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -46,12 +42,6 @@ function generateUUID(): string {
   })
 }
 
-// DD/MM/YYYY → YYYY-MM-DD
-function parseBirthDate(dmy: string): string {
-  const [d, m, y] = dmy.split('/')
-  return `${y}-${m?.padStart(2,'0')}-${d?.padStart(2,'0')}`
-}
-
 const PIX_TYPES: { id: PixType; labelKey: string }[] = [
   { id: 'cpf',    labelKey: 'auth.onboarding.pix.cpf' },
   { id: 'phone',  labelKey: 'auth.onboarding.pix.phone' },
@@ -59,50 +49,10 @@ const PIX_TYPES: { id: PixType; labelKey: string }[] = [
   { id: 'random', labelKey: 'auth.onboarding.pix.random' },
 ]
 
-const CREATING_STEPS_KEYS = [
-  'auth.onboarding.creating.step1',
-  'auth.onboarding.creating.step2',
-  'auth.onboarding.creating.step3',
-  'auth.onboarding.creating.step4',
-]
-
-// ── Tela de criação em progresso ──────────────────────────────────────────────
-
-function CreatingScreen({ step }: { step: number }) {
-  const { t } = useTranslation()
-  const opacity = useRef(new Animated.Value(0)).current
-
-  useEffect(() => {
-    Animated.sequence([
-      Animated.timing(opacity, { toValue: 1, duration: 300, useNativeDriver: true }),
-    ]).start()
-    return () => { opacity.setValue(0) }
-  }, [step]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  return (
-    <View style={creating.root}>
-      <View style={creating.center}>
-        <View style={creating.dotsRow}>
-          {CREATING_STEPS_KEYS.map((_, i) => (
-            <View
-              key={i}
-              style={[creating.dot, i <= step ? creating.dotActive : creating.dotIdle]}
-            />
-          ))}
-        </View>
-        <Animated.Text style={[creating.label, { opacity }]}>
-          {t(CREATING_STEPS_KEYS[step] ?? CREATING_STEPS_KEYS[0])}
-        </Animated.Text>
-      </View>
-    </View>
-  )
-}
-
 // ── Tela principal ────────────────────────────────────────────────────────────
 
 export default function PixScreen() {
   const { t }        = useTranslation()
-  const setSession   = useAuthStore(s => s.setSession)
   const draft        = getDraft()
   // Master de empresa que optou por não ter carteira pessoal, ou operador
   // vindo de link de convite (plano CNPJ velvet-puzzling-sedgewick) — pula
@@ -111,14 +61,10 @@ export default function PixScreen() {
   const noPersonalWallet =
     (draft.accountType === 'business' && draft.wantsPersonalWallet === false) || !!draft.inviteToken
 
-  const [pixType, setPixType]             = useState<PixType>('cpf')
-  const [pixKey, setPixKey]               = useState<string>(maskCPF(draft.cpf ?? ''))
-  const [isCreating, setIsCreating]       = useState(false)
-  const [creatingStep, setCreatingStep]   = useState(0)
+  const [pixType, setPixType]             = useState<PixType>(draft.pixType ?? 'cpf')
+  const [pixKey, setPixKey]               = useState<string>(draft.pixKey || maskCPF(draft.cpf ?? ''))
   const [asaasDisclosed, setAsaasDisclosed] = useState(false)
   const [showAsaasModal, setShowAsaasModal] = useState(false)
-
-  const stepTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const switchType = (type: PixType) => {
     setPixType(type)
@@ -134,221 +80,21 @@ export default function PixScreen() {
     if (pixType === 'random' && !pixKey) setPixKey(generateUUID())
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => {
-    if (isCreating) {
-      setCreatingStep(0)
-      stepTimer.current = setInterval(() => {
-        setCreatingStep(s => Math.min(s + 1, CREATING_STEPS_KEYS.length - 1))
-      }, 1400)
-    } else {
-      if (stepTimer.current) clearInterval(stepTimer.current)
-    }
-    return () => { if (stepTimer.current) clearInterval(stepTimer.current) }
-  }, [isCreating])
-
   const cpfPixValid = pixType !== 'cpf' || validateCPF(pixKey)
   const isReady = noPersonalWallet
     ? asaasDisclosed
     : pixKey.trim().length > 0 && asaasDisclosed && cpfPixValid
 
-  const handleNext = async () => {
-    if (!isReady || isCreating) return
-
-    // Validação mínima antes de chamar o backend
-    const d = getDraft()
-    if (!d.name || !d.cpf || !d.birth || !d.email || !d.phone ||
-        !d.pinHash || !d.security?.length || !d.handle) {
-      Alert.alert(t('auth.onboarding.pix.errorTitle'), t('auth.onboarding.pix.errorGeneric'))
-      return
+  const handleNext = () => {
+    if (!isReady) return
+    if (!noPersonalWallet) {
+      updateDraft({
+        pixType,
+        pixKey: pixType === 'cpf' ? pixKey.replace(/\D/g, '') : pixKey,
+      })
     }
-    if (d.accountType === 'business' && (!d.companyName || !d.companyHandle || !d.cnpj || !d.companyType || !d.companyIncomeValue)) {
-      Alert.alert(t('auth.onboarding.pix.errorTitle'), t('auth.onboarding.pix.errorGeneric'))
-      return
-    }
-
-    setIsCreating(true)
-
-    try {
-      const input: authService.RegisterInput = {
-        name:       d.name,
-        email:      d.email,
-        cpf:        d.cpf.replace(/\D/g, ''),
-        birth_date: parseBirthDate(d.birth),
-        phone:      d.phone.replace(/\D/g, ''),
-        address: {
-          street:       d.street ?? '',
-          number:       d.number ?? 'S/N',
-          complement:   d.complement || undefined,
-          neighborhood: d.neighborhood ?? '',
-          zip_code:     (d.cep ?? '').replace(/\D/g, ''),
-          city:         d.city ?? '',
-          state:        d.state ?? '',
-        },
-        handle:             d.handle.replace(/^@/, ''),
-        pin_hash:           d.pinHash,
-        security_questions: d.security.map(q => ({
-          question:    q.question,
-          answer_hash: q.answerHash,
-          answer_text: q.answerText,
-        })),
-        ...(!noPersonalWallet && {
-          pix_key:      pixType === 'cpf' ? pixKey.replace(/\D/g, '') : pixKey,
-          pix_key_type: pixType,
-        }),
-        create_personal_wallet: !noPersonalWallet,
-        ...(d.inviteToken && { invite_token: d.inviteToken }),
-        terms_accepted: true,
-        ...(d.accountType === 'business' && {
-          company: {
-            cnpj:          normalizeCNPJ(d.cnpj ?? ''),
-            handle:        (d.companyHandle ?? '').replace(/^@/, ''),
-            company_name:  d.companyName ?? '',
-            trading_name:  d.companyTradingName || undefined,
-            company_type:  d.companyType!,
-            income_value:  parseBRL(d.companyIncomeValue ?? ''),
-            address: {
-              street:       d.companyStreet ?? '',
-              number:       d.companyNumber ?? 'S/N',
-              complement:   d.companyComplement || undefined,
-              neighborhood: d.companyNeighborhood ?? '',
-              zip_code:     (d.companyCep ?? '').replace(/\D/g, ''),
-              city:         d.companyCity ?? '',
-              state:        d.companyState ?? '',
-            },
-            ...(d.companyPixType && { pix_key_type: d.companyPixType }),
-          },
-        }),
-      }
-
-      type RegisterWithKyc = authService.RegisterResponse & { onboarding_url?: string | null }
-      const res = await authService.register(input) as RegisterWithKyc
-
-      await authService.saveSecurityQuestions(d.security.map(q => q.question))
-      await authService.saveSecurityAnswers(d.securityAnswers ?? [])
-
-      await setSession(
-        res.token,
-        res.refresh_token,
-        {
-          id:           res.user_id,
-          name:         d.name,
-          handle:       `@${input.handle}`,
-          email:        d.email,
-          cpfMasked:    '',
-          pixKey:       '',
-          pixKeyType:   pixType,
-          hasPersonalWallet: !noPersonalWallet,
-        },
-        res.kyc_status as 'pending' | 'submitted' | 'approved' | 'rejected',
-        res.account_status as 'active' | 'evaluation' | 'blocked',
-      )
-
-      clearDraft()
-
-      if (res.company_error) {
-        // Conta pessoal criada com sucesso — só a empresa teve problema (ex.:
-        // instabilidade no Asaas). Pode ser reaberta depois em "Minhas Empresas".
-        Alert.alert(
-          t('auth.onboarding.pix.companyErrorTitle'),
-          t('auth.onboarding.pix.companyErrorMessage'),
-        )
-      }
-
-      if (res.invite_error) {
-        // Conta pessoal criada com sucesso — só o vínculo com a empresa do
-        // convite falhou (ex.: convite expirou entre abrir o link e concluir
-        // o cadastro). Precisa de um novo convite do master.
-        Alert.alert(
-          t('auth.onboarding.pix.inviteErrorTitle'),
-          t('auth.onboarding.pix.inviteErrorMessage'),
-        )
-      }
-
-      if (res.login_required || !res.token) {
-        // Conta criada com sucesso no backend, mas o login automático falhou
-        // (ex.: instabilidade transitória). Não é um erro de cadastro.
-        Alert.alert(
-          t('auth.onboarding.pix.loginRequiredTitle'),
-          t('auth.onboarding.pix.loginRequiredMessage'),
-          [{
-            text: t('auth.onboarding.pix.loginRequiredButton'),
-            onPress: () => router.replace({ pathname: '/(auth)/login', params: { cpf: input.cpf } }),
-          }],
-        )
-        return
-      }
-
-      // Fila de KYC: pode ter verificação pessoal e de empresa na mesma sessão
-      // de cadastro (plano velvet-puzzling-sedgewick) — pessoal primeiro
-      // (identidade do representante é a base de tudo), depois a da empresa.
-      const kycUrls:   string[] = []
-      const kycLabels: string[] = []
-      if (res.onboarding_url) { kycUrls.push(res.onboarding_url); kycLabels.push('pessoal') }
-      if (res.company_onboarding_url) { kycUrls.push(res.company_onboarding_url); kycLabels.push('empresa') }
-
-      if (kycUrls.length > 0) {
-        router.replace({
-          pathname: '/(auth)/kyc',
-          params: { urls: JSON.stringify(kycUrls), labels: JSON.stringify(kycLabels) },
-        })
-      } else {
-        router.replace((await resolveInitialRoute()) as never)
-      }
-    } catch (e: unknown) {
-      console.log('[pix.register] caught error:', e)
-      setIsCreating(false)
-
-      const isBff = e instanceof authService.BffError
-      const code  = isBff ? e.code    : 'UNKNOWN'
-      const srvMsg = isBff ? e.message : ''
-      const title = t('auth.onboarding.pix.errorTitle')
-
-      if (code === 'CPF_DUPLICATE' || code === 'CPF_IN_USE') {
-        Alert.alert(
-          title,
-          'Este CPF já possui uma conta. Recuperar acesso?',
-          [
-            { text: 'Fechar', style: 'cancel' },
-            { text: 'Fazer login', onPress: () => router.replace('/(auth)/login') },
-          ],
-        )
-      } else if (code === 'EMAIL_IN_USE') {
-        Alert.alert(
-          title,
-          'Este e-mail já está em uso. Tente outro e-mail.',
-          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/dados') }],
-        )
-      } else if (code === 'HANDLE_TAKEN') {
-        Alert.alert(
-          title,
-          'Este @handle já está em uso. Escolha outro.',
-          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/handle') }],
-        )
-      } else if (code === 'CNPJ_INVALID' || code === 'CNPJ_DUPLICATE' || code === 'CNPJ_UNDER_REVIEW' || code === 'COMPANY_MISSING_FIELDS') {
-        const message =
-          code === 'CNPJ_DUPLICATE'    ? 'Este CNPJ já possui uma conta.' :
-          code === 'CNPJ_UNDER_REVIEW' ? 'Este CNPJ já está em processo de verificação por outra conta.' :
-          'Confira os dados da empresa e tente novamente.'
-        Alert.alert(
-          title,
-          message,
-          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/dados-empresa') }],
-        )
-      } else if (code === 'COMPANY_HANDLE_INVALID' || code === 'COMPANY_HANDLE_TAKEN') {
-        Alert.alert(
-          title,
-          code === 'COMPANY_HANDLE_TAKEN' ? 'Este @handle da empresa já está em uso. Escolha outro.' : 'O @handle da empresa é inválido.',
-          [{ text: 'OK', onPress: () => router.push('/(auth)/cadastro/dados-empresa') }],
-        )
-      } else if (code === 'ASAAS_ERROR') {
-        Alert.alert(title, srvMsg || t('auth.onboarding.pix.errorAsaas'))
-      } else {
-        Alert.alert(title, t('auth.onboarding.pix.errorGeneric'))
-      }
-    }
+    router.push('/(auth)/cadastro/terms')
   }
-
-  if (isCreating) return <CreatingScreen step={creatingStep} />
 
   return (
     <OnboardShell
@@ -366,6 +112,8 @@ export default function PixScreen() {
     >
       {!noPersonalWallet && (
         <>
+          <Text style={styles.withdrawalHint}>{t('auth.onboarding.pix.albersExplainer')}</Text>
+
           {/* Seletor de tipo */}
           <View style={styles.typeGrid}>
             {PIX_TYPES.map(({ id, labelKey }) => (
@@ -585,7 +333,6 @@ const styles = StyleSheet.create({
     color: colors.white[100],
     fontFamily: typography.fontFamily.primary,
   },
-
   typeGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -615,38 +362,5 @@ const styles = StyleSheet.create({
   },
   typeBtnTextActive: {
     fontWeight: '600',
-  },
-})
-
-const creating = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colors.black[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  center: {
-    alignItems: 'center',
-    gap: spacing.xl,
-    paddingHorizontal: spacing.xl,
-  },
-  dotsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  dotActive: { backgroundColor: colors.white[100] },
-  dotIdle:   { backgroundColor: 'rgba(255,255,255,0.15)' },
-  label: {
-    fontSize: 17,
-    fontWeight: '500',
-    color: colors.white[100],
-    fontFamily: typography.fontFamily.primary,
-    textAlign: 'center',
-    letterSpacing: -0.02 * 17,
   },
 })

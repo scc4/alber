@@ -58,19 +58,22 @@ function Header({ label, onBack }: HeaderProps) {
 // ── PinStep ───────────────────────────────────────────────────────────────────
 
 interface PinStepProps {
-  eyebrow:    string
-  title:      string
-  mode?:      'secure' | 'setup'
-  error?:     string | null
-  onComplete: (hash: string) => void
+  eyebrow:      string
+  title:        string
+  mode?:        'secure' | 'setup'
+  error?:       string | null
+  onComplete:   (hash: string) => void
+  /** Rejeita sequências óbvias (111111, 123456…) — só faz sentido ao definir um PIN novo. */
+  checkObvious?: boolean
+  onObvious?:    () => void
 }
 
-function PinStep({ eyebrow, title, mode = 'secure', error, onComplete }: PinStepProps) {
+function PinStep({ eyebrow, title, mode = 'secure', error, onComplete, checkObvious = false, onObvious }: PinStepProps) {
   return (
     <View style={styles.pinWrap}>
       <Text style={styles.stepEyebrow}>{eyebrow}</Text>
       <Text style={styles.stepTitle}>{title}</Text>
-      <PINInput mode={mode} onComplete={onComplete} error={error} checkObvious={false} />
+      <PINInput mode={mode} onComplete={onComplete} error={error} checkObvious={checkObvious} onObvious={onObvious} />
     </View>
   )
 }
@@ -359,7 +362,7 @@ export default function SegurancaScreen() {
     switch (mode) {
       case 'pin_current':  setMode('main');         break
       case 'pin_new':      setMode('pin_current');  break
-      case 'pin_confirm':  setMode('pin_new');      break
+      case 'pin_confirm':  setPinError(null); setMode('pin_new'); break
       case 'pin_security': setMode('pin_confirm');  break
       case 'pin_sms':      setMode('pin_security'); break
       case 'pin_success':  setMode('main');         break
@@ -542,6 +545,9 @@ export default function SegurancaScreen() {
           eyebrow={t('perfil.seguranca.newPin')}
           title={t('perfil.seguranca.newPinSub')}
           mode="setup"
+          error={pinError}
+          checkObvious
+          onObvious={() => setPinError(t('auth.onboarding.pin.obvious'))}
           onComplete={handleNewPin}
         />
       )}

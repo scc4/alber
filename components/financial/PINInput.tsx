@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native'
+import { usePreventScreenCapture } from 'expo-screen-capture'
 import { sha256Hex, legacyDevHash } from '../../utils/crypto'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
@@ -101,6 +102,13 @@ export function PINInput({
   const [securePairs, setSecurePairs] = useState<[number, number][]>(() => generatePairs())
   const [setupKeys,   setSetupKeys]   = useState<number[]>(() => generateShuffledDigits())
   const shakeX = useRef(new Animated.Value(0)).current
+
+  // Android: bloqueia captura de tela de verdade (FLAG_SECURE) enquanto o PIN
+  // está na tela — sem isso a mensagem "SCREENSHOT BLOQUEADA" abaixo era só
+  // decorativa. iOS não expõe API pra bloquear screenshot comum (limitação da
+  // Apple, não deste app) — aqui o hook ao menos escurece a tela durante
+  // gravação de tela.
+  usePreventScreenCapture()
 
   const entryCount = mode === 'secure' ? clickedPairs.length : digits.length
 

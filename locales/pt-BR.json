@@ -15,10 +15,10 @@
         "title": "Que tipo de conta você quer abrir?",
         "subtitle": "Você pode abrir uma conta pessoal ou uma conta para sua empresa.",
         "personalTitle": "Pessoa física",
-        "personalDescription": "Sua carteira digital pessoal, no seu CPF.",
+        "personalDescription": "Sua conta pessoal, no seu CPF.",
         "businessTitle": "Empresa",
         "businessDescription": "Uma conta no CNPJ da sua empresa, com você como responsável. Depois é possível convidar outras pessoas para operar.",
-        "alsoPersonalWallet": "Também quero uma carteira pessoal para mim (opcional)"
+        "alsoPersonalWallet": "Também quero uma conta pessoal para mim (opcional)"
       },
       "verificarCpf": {
         "title": "CPF do responsável",
@@ -74,7 +74,7 @@
       },
       "dados": {
         "title": "Dados pessoais",
-        "subtitle": "Suas informações ficam protegidas e são usadas apenas para criar sua conta.",
+        "subtitle": "Usamos essas informações para criar e verificar sua conta, incluindo checagens exigidas por lei (KYC). Veja o detalhe completo na nossa Política de Privacidade.",
         "name": "Nome completo",
         "namePlaceholder": "Seu nome e sobrenome",
         "nameError": "Informe nome e sobrenome",
@@ -148,8 +148,9 @@
       "pix": {
         "title": "Sua chave Pix para saques",
         "subtitle": "Esta chave será usada para transferir seus Albers de volta para sua conta bancária quando quiser sacar.",
+        "albersExplainer": "Albers representam, na proporção de 1 para 1, o saldo em reais que você mantém no Alber.",
         "titleNoWallet": "Quase lá",
-        "subtitleNoWallet": "Você optou por não ter uma carteira pessoal — só a conta da sua empresa será criada. Confirme abaixo para concluir.",
+        "subtitleNoWallet": "Você optou por não ter uma conta pessoal — só a conta da sua empresa será criada. Confirme abaixo para concluir.",
         "cpf": "CPF",
         "phone": "Telefone",
         "email": "E-mail",
@@ -187,8 +188,13 @@
         "privacy": "Li e aceito a {{link_priv}}",
         "privacyPolicy": "Política de Privacidade",
         "majority": "Declaro ter mais de 18 anos e que as informações fornecidas são verdadeiras",
+        "financialTransparency": "Saiba quem guarda e processa seu dinheiro",
+        "marketingOptIn": "Aceito receber novidades e ofertas do Alber por e-mail e push (opcional)",
         "create": "Criar minha conta",
-        "close": "Fechar"
+        "close": "Fechar",
+        "termsOfUseBody": "Este documento estabelece as regras para uso do aplicativo Alber. Ao criar sua conta, você concorda com as condições aqui descritas.\n\nSua conta é pessoal e intransferível. Você é responsável por manter o sigilo do seu PIN e respostas de segurança.\n\nO Alber permite o envio e recebimento de Albers entre membros, integração com clubes (Spaces), criação de splits, eventos e gestão de saldo. Operações de carregar e descarregar requerem verificação KYC aprovada.\n\nReservamo-nos o direito de suspender contas que apresentem atividade suspeita ou violem estes termos.\n\n[Texto provisório — revisar com jurídico antes de publicar.]",
+        "privacyPolicyBody": "Coletamos seus dados pessoais (nome, CPF, data de nascimento, e-mail, telefone e endereço) para criar sua conta e cumprir exigências legais de identificação de clientes (KYC) e prevenção à lavagem de dinheiro e financiamento do terrorismo (PLD/FT).\n\nSeus dados financeiros são processados pela ASAAS GESTÃO FINANCEIRA INSTITUIÇÃO DE PAGAMENTOS S.A., instituição de pagamento autorizada pelo Banco Central do Brasil, que atua como nossa parceira de infraestrutura financeira (BaaS). A ALBER SERVIÇOS DIGITAIS LTDA não guarda seu dinheiro diretamente.\n\nVocê pode solicitar acesso, correção ou exclusão dos seus dados a qualquer momento, nos termos da Lei Geral de Proteção de Dados (LGPD).\n\n[Texto provisório — revisar com jurídico antes de publicar.]",
+        "financialTransparencyBody": "O saldo em Albers que você vê no app representa, na proporção de 1 para 1, dinheiro em reais mantido em conta de pagamento na ASAAS GESTÃO FINANCEIRA INSTITUIÇÃO DE PAGAMENTOS S.A., instituição de pagamento autorizada pelo Banco Central do Brasil.\n\nA ALBER SERVIÇOS DIGITAIS LTDA atua exclusivamente como integradora tecnológica — organiza a experiência do app, mas não é instituição financeira ou de pagamento e não custodia o seu dinheiro.\n\n[Texto provisório — revisar com jurídico antes de publicar.]"
       },
       "creating": {
         "step1": "Criando sua conta…",

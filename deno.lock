@@ -70,6 +70,7 @@
         "npm:expo-linking@~56.0.15",
         "npm:expo-notifications@~56.0.19",
         "npm:expo-router@~56.2.13",
+        "npm:expo-screen-capture@~56.0.4",
         "npm:expo-secure-store@~56.0.4",
         "npm:expo-splash-screen@~56.0.12",
         "npm:expo-status-bar@~56.0.4",

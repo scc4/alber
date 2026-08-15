@@ -138,6 +138,40 @@ export async function setCompanyPixKey(
   return post('company-set-pix-key', { company_id: companyId, type, cnpj }, token)
 }
 
+// Melhoria 1 — abre uma empresa numa conta pessoal já existente (usuário
+// autenticado via CPF+PIN+pergunta de segurança), sem repetir o cadastro
+// pessoal. Reaproveita a mesma validação/criação de auth-register do lado do
+// servidor (createCompanyForOwner).
+export interface CreateCompanyPayload {
+  cnpj:          string
+  handle:        string
+  company_name:  string
+  trading_name?: string
+  company_type:  'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION'
+  income_value:  number
+  address: {
+    street:       string
+    number:       string
+    complement?:  string
+    neighborhood: string
+    zip_code:     string
+    city?:        string
+    state?:       string
+  }
+  pix_key_type?: 'cnpj' | 'random'
+}
+
+export interface CreateCompanyResponse {
+  company_id:             string
+  company_account_status: string
+  company_kyc_status:     string
+  company_onboarding_url: string | null
+}
+
+export async function createCompany(token: string, company: CreateCompanyPayload): Promise<CreateCompanyResponse> {
+  return post('company-create', { company }, token)
+}
+
 // Cancela o próprio cadastro de empresa antes da aprovação do KYC (plano
 // velvet-puzzling-sedgewick) — só o master, e só enquanto kyc_status != 'approved'.
 export async function abandonCompany(token: string, companyId: string): Promise<{ success: boolean }> {

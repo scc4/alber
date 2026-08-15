@@ -20,6 +20,22 @@
         "businessDescription": "Uma conta no CNPJ da sua empresa, com você como responsável. Depois é possível convidar outras pessoas para operar.",
         "alsoPersonalWallet": "Também quero uma carteira pessoal para mim (opcional)"
       },
+      "verificarCpf": {
+        "title": "CPF do responsável",
+        "subtitle": "Informe o CPF de quem vai responder pela empresa. Se você já tem conta Alber, vamos só confirmar sua identidade.",
+        "cpf": "CPF do responsável",
+        "cpfPlaceholder": "000.000.000-00",
+        "cpfError": "CPF inválido",
+        "checking": "Verificando…",
+        "errorGeneric": "Não foi possível verificar o CPF. Tente novamente.",
+        "foundTitle": "Você já tem uma conta Alber",
+        "foundSubtitle": "Confirme sua identidade para abrir a empresa na sua conta.",
+        "pinTitle": "Digite seu PIN",
+        "accountBlockedTitle": "Conta bloqueada",
+        "accountBlockedMessage": "Login bloqueado até {{time}} após tentativas excessivas.",
+        "invalidTitle": "Não foi possível confirmar",
+        "invalidMessage": "PIN ou resposta de segurança incorretos."
+      },
       "dadosEmpresa": {
         "title": "Dados da empresa",
         "subtitle": "Essas informações são usadas para abrir a conta financeira da sua empresa.",
@@ -43,6 +59,18 @@
         "incomeValuePlaceholder": "R$ 0,00",
         "incomeValueHint": "Exigido para abertura da conta financeira",
         "addressSection": "Endereço da empresa"
+      },
+      "empresaPix": {
+        "title": "Chave Pix de saque da empresa",
+        "subtitle": "Usada quando a empresa quiser sacar Albers de volta para uma conta bancária.",
+        "typeCnpj": "CNPJ",
+        "typeRandom": "Aleatória",
+        "randomHint": "Gerada automaticamente na subconta da empresa.",
+        "errorTitle": "Erro ao criar empresa",
+        "errorGeneric": "Não foi possível criar a empresa. Tente novamente.",
+        "cnpjDuplicate": "Este CNPJ já possui uma conta.",
+        "cnpjUnderReview": "Este CNPJ já está em processo de verificação por outra conta.",
+        "handleTaken": "Este @handle da empresa já está em uso. Escolha outro."
       },
       "dados": {
         "title": "Dados pessoais",

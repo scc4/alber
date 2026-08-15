@@ -1,7 +1,9 @@
 // Plano CNPJ (velvet-puzzling-sedgewick)
 // Dados da empresa — só entra no fluxo quando accountType === 'business'
-// (ver tipo-conta.tsx). Roda depois de endereco.tsx: o endereço da empresa
-// vem pré-preenchido com o endereço pessoal do representante, editável.
+// (ver tipo-conta.tsx). O endereço da empresa vem primeiro (CEP no topo,
+// igual ao padrão de endereco.tsx) — não é mais herdado do endereço pessoal,
+// já que este passo também é usado por quem já tem conta e nunca preencheu
+// um endereço pessoal nesta sessão (verificar-cpf.tsx, Melhoria 1).
 
 import { useEffect, useState } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
@@ -47,23 +49,25 @@ export default function DadosEmpresaScreen() {
   const { t } = useTranslation()
   const draft = getDraft()
 
+  // Endereço da empresa — CEP primeiro, igual ao padrão de endereco.tsx.
+  const [cep, setCep]                   = useState(draft.companyCep ?? '')
+  const [street, setStreet]             = useState(draft.companyStreet ?? '')
+  const [number, setNumber]             = useState(draft.companyNumber ?? '')
+  const [complement, setComplement]     = useState(draft.companyComplement ?? '')
+  const [neighborhood, setNeighborhood] = useState(draft.companyNeighborhood ?? '')
+  const [city, setCity]                 = useState(draft.companyCity ?? '')
+  const [uf, setUf]                     = useState(draft.companyState ?? '')
+  const [cepLoading, setCepLoading]     = useState(false)
+  const [cepLoaded, setCepLoaded]       = useState(false)
+  const [cepError, setCepError]         = useState<string | null>(null)
+  const [manualCity, setManualCity]     = useState(false)
+
   const [companyName, setCompanyName]     = useState(draft.companyName ?? '')
   const [tradingName, setTradingName]     = useState(draft.companyTradingName ?? '')
   const [companyHandle, setCompanyHandle] = useState(draft.companyHandle ?? '')
   const [cnpj, setCnpj]                   = useState(draft.cnpj ?? '')
   const [companyType, setCompanyType]     = useState<CompanyType | null>(draft.companyType ?? null)
   const [incomeValue, setIncomeValue]     = useState(draft.companyIncomeValue ?? '')
-
-  // Endereço da empresa — pré-preenchido com o endereço pessoal já coletado
-  const [cep, setCep]                   = useState(draft.companyCep ?? draft.cep ?? '')
-  const [street, setStreet]             = useState(draft.companyStreet ?? draft.street ?? '')
-  const [number, setNumber]             = useState(draft.companyNumber ?? draft.number ?? '')
-  const [complement, setComplement]     = useState(draft.companyComplement ?? draft.complement ?? '')
-  const [neighborhood, setNeighborhood] = useState(draft.companyNeighborhood ?? draft.neighborhood ?? '')
-  const [city, setCity]                 = useState(draft.companyCity ?? draft.city ?? '')
-  const [uf, setUf]                     = useState(draft.companyState ?? draft.state ?? '')
-  const [cepLoading, setCepLoading]     = useState(false)
-  const [manualCity, setManualCity]     = useState(true) // já vem preenchido — edição livre por padrão
 
   const [touched, setTouch] = useState<Record<string, boolean>>({})
   const touch = (field: string) => setTouch(t2 => ({ ...t2, [field]: true }))
@@ -73,26 +77,46 @@ export default function DadosEmpresaScreen() {
 
   useEffect(() => {
     const digits = cep.replace(/\D/g, '')
-    if (digits.length < 8) return
+
+    if (digits.length < 8) {
+      if (cepLoaded) {
+        setStreet(''); setNeighborhood(''); setCity(''); setUf('')
+        setCepLoaded(false); setCepError(null); setManualCity(false)
+      }
+      return
+    }
+
+    if (cepLoaded) return
 
     const controller = new AbortController()
     setCepLoading(true)
+    setCepError(null)
+    setManualCity(false)
+
     fetch(`https://viacep.com.br/ws/${digits}/json/`, { signal: controller.signal })
       .then(res => res.json())
       .then((data: Record<string, unknown>) => {
-        if (!data.erro) {
-          setStreet(String(data.logradouro ?? street))
-          setNeighborhood(String(data.bairro ?? neighborhood))
-          setCity(String(data.localidade ?? city))
-          setUf(String(data.uf ?? uf))
+        if (data.erro) {
+          setStreet(''); setNeighborhood(''); setCity(''); setUf('')
+          setCepError(t('auth.onboarding.endereco.cepNotFound'))
+        } else {
+          setStreet(String(data.logradouro ?? ''))
+          setNeighborhood(String(data.bairro ?? ''))
+          setCity(String(data.localidade ?? ''))
+          setUf(String(data.uf ?? ''))
+          setCepLoaded(true)
         }
       })
-      .catch(() => {})
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name === 'AbortError') return
+        setCepError(t('auth.onboarding.endereco.cepNetworkError'))
+        setManualCity(true)
+      })
       .finally(() => setCepLoading(false))
 
     return () => controller.abort()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cep])
+  }, [cep, cepLoaded, t])
 
   const companyHandleValid = validHandleFormat(companyHandle)
 
@@ -102,17 +126,17 @@ export default function DadosEmpresaScreen() {
   }
 
   const isReady =
-    companyName.trim().length > 1 &&
-    companyHandleValid &&
-    cnpjValid &&
-    companyType !== null &&
-    parseBRL(incomeValue) > 0 &&
     cep.replace(/\D/g, '').length === 8 &&
     street.trim().length > 0 &&
     number.trim().length > 0 &&
     neighborhood.trim().length > 0 &&
     city.trim().length > 0 &&
-    uf.trim().length > 0
+    uf.trim().length > 0 &&
+    companyName.trim().length > 1 &&
+    companyHandleValid &&
+    cnpjValid &&
+    companyType !== null &&
+    parseBRL(incomeValue) > 0
 
   const handleNext = () => {
     if (!isReady || !companyType) return
@@ -131,7 +155,7 @@ export default function DadosEmpresaScreen() {
       companyCity: city,
       companyState: uf,
     })
-    router.push('/(auth)/cadastro/handle')
+    router.push('/(auth)/cadastro/empresa-pix')
   }
 
   return (
@@ -148,12 +172,84 @@ export default function DadosEmpresaScreen() {
         />
       }
     >
+      <Text style={styles.sectionTitle}>{t('auth.onboarding.dadosEmpresa.addressSection')}</Text>
+
+      <Field
+        label={t('auth.onboarding.endereco.cep')}
+        value={cep}
+        onChangeText={v => {
+          setCep(maskCEP(v))
+          setCepLoaded(false)
+          setCepError(null)
+          setManualCity(false)
+        }}
+        placeholder={t('auth.onboarding.endereco.cepPlaceholder')}
+        keyboardType="numeric"
+        autoFocus
+        loading={cepLoading}
+        success={cepLoaded}
+        error={cepError}
+        hint={cepLoaded ? t('auth.onboarding.endereco.cepFound') : null}
+      />
+
+      <Field
+        label={t('auth.onboarding.endereco.street')}
+        value={street}
+        onChangeText={setStreet}
+        editable={!cepLoading}
+      />
+
+      <View style={styles.row}>
+        <View style={styles.col40}>
+          <Field
+            label={t('auth.onboarding.endereco.number')}
+            value={number}
+            onChangeText={setNumber}
+            keyboardType="numeric"
+          />
+        </View>
+        <View style={styles.col60}>
+          <Field
+            label={t('auth.onboarding.endereco.complement')}
+            value={complement}
+            onChangeText={setComplement}
+          />
+        </View>
+      </View>
+
+      <Field
+        label={t('auth.onboarding.endereco.neighborhood')}
+        value={neighborhood}
+        onChangeText={setNeighborhood}
+        editable={!cepLoading}
+      />
+
+      <View style={styles.row}>
+        <View style={styles.col60}>
+          <Field
+            label={t('auth.onboarding.endereco.city')}
+            value={city}
+            onChangeText={setCity}
+            editable={manualCity && !cepLoading}
+            readOnly={!manualCity}
+          />
+        </View>
+        <View style={styles.col30}>
+          <Field
+            label={t('auth.onboarding.endereco.state')}
+            value={uf}
+            onChangeText={setUf}
+            editable={manualCity && !cepLoading}
+            readOnly={!manualCity}
+          />
+        </View>
+      </View>
+
       <Field
         label={t('auth.onboarding.dadosEmpresa.companyName')}
         value={companyName}
         onChangeText={setCompanyName}
         placeholder={t('auth.onboarding.dadosEmpresa.companyNamePlaceholder')}
-        autoFocus
       />
 
       <Field
@@ -217,68 +313,6 @@ export default function DadosEmpresaScreen() {
         keyboardType="numeric"
         hint={t('auth.onboarding.dadosEmpresa.incomeValueHint')}
       />
-
-      <Text style={styles.sectionTitle}>{t('auth.onboarding.dadosEmpresa.addressSection')}</Text>
-
-      <Field
-        label={t('auth.onboarding.endereco.cep')}
-        value={cep}
-        onChangeText={v => setCep(maskCEP(v))}
-        placeholder={t('auth.onboarding.endereco.cepPlaceholder')}
-        keyboardType="numeric"
-        loading={cepLoading}
-      />
-
-      <Field
-        label={t('auth.onboarding.endereco.street')}
-        value={street}
-        onChangeText={setStreet}
-        editable={!cepLoading}
-      />
-
-      <View style={styles.row}>
-        <View style={styles.col40}>
-          <Field
-            label={t('auth.onboarding.endereco.number')}
-            value={number}
-            onChangeText={setNumber}
-            keyboardType="numeric"
-          />
-        </View>
-        <View style={styles.col60}>
-          <Field
-            label={t('auth.onboarding.endereco.complement')}
-            value={complement}
-            onChangeText={setComplement}
-          />
-        </View>
-      </View>
-
-      <Field
-        label={t('auth.onboarding.endereco.neighborhood')}
-        value={neighborhood}
-        onChangeText={setNeighborhood}
-        editable={!cepLoading}
-      />
-
-      <View style={styles.row}>
-        <View style={styles.col60}>
-          <Field
-            label={t('auth.onboarding.endereco.city')}
-            value={city}
-            onChangeText={setCity}
-            editable={manualCity && !cepLoading}
-          />
-        </View>
-        <View style={styles.col30}>
-          <Field
-            label={t('auth.onboarding.endereco.state')}
-            value={uf}
-            onChangeText={setUf}
-            editable={manualCity && !cepLoading}
-          />
-        </View>
-      </View>
     </OnboardShell>
   )
 }
@@ -301,7 +335,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.white[100],
     fontFamily: typography.fontFamily.primary,
-    marginTop: spacing.sm,
     marginBottom: spacing.md,
   },
   typeGrid: {

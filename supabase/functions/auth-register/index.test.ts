@@ -652,3 +652,49 @@ Deno.test('checagem de CNPJ e handle da empresa filtra deleted_at (rejeitada/aba
   assertEquals(cnpjQueryUrl.includes('deleted_at=is.null'), true)
   assertEquals(handleQueryUrl.includes('deleted_at=is.null'), true)
 })
+
+// Item 6 do plano (chave Pix própria da empresa): confirma que company.pix_key_type
+// enviado no cadastro bundlado (auth-register) chega até o insert de `companies`,
+// igual ao caminho equivalente em company-create (mesma função compartilhada).
+Deno.test('cadastro de empresa com pix_key_type "cnpj" → companies insert grava pix_key/pix_key_type', async () => {
+  const companyInsertBodies: Record<string, unknown>[] = []
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (url.includes('/rest/v1/companies')) {
+      if (method === 'GET') return new Response(JSON.stringify([]), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      if (method === 'POST') {
+        const body = init?.body ? JSON.parse(init.body as string) : {}
+        companyInsertBodies.push(body)
+        return new Response(JSON.stringify({ id: 'company-1' }), { status: 201, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    // Busca do "dono" da empresa dentro de createCompanyForOwner (id=eq.<userId>,
+    // select id/email/phone) — distinta das checagens de duplicata de CPF/e-mail/
+    // handle, que também batem em /rest/v1/users mas devem continuar vazias (BASE_ROUTES).
+    if (method === 'GET' && url.includes('/rest/v1/users') && url.includes('id=eq.')) {
+      return new Response(JSON.stringify(NEW_DB_USER), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    for (const r of BASE_ROUTES) {
+      const methodOk = !r.method || r.method.toUpperCase() === method
+      if (methodOk && url.includes(r.pattern)) {
+        return new Response(JSON.stringify(r.body), { status: r.status, headers: { 'Content-Type': 'application/json' } })
+      }
+    }
+    return new Response(JSON.stringify({ error: `Unmocked ${method} ${url}` }), { status: 500 })
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ company: { ...VALID_COMPANY, pix_key_type: 'cnpj' } }))
+  } finally {
+    globalThis.fetch = orig
+  }
+
+  assertEquals(res.status, 201)
+  const resBody = await res.json()
+  assertEquals(resBody.company_id, 'company-1')
+  assertEquals(companyInsertBodies[0]?.pix_key_type, 'cnpj')
+  assertEquals(typeof companyInsertBodies[0]?.pix_key, 'string')
+})

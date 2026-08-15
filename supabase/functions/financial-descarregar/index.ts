@@ -321,7 +321,7 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Atualizar status das transações ──────────────────────────────────────────
-  // descarregar → 'processing' (webhook TRANSFER_CONFIRMED atualizará para 'completed')
+  // descarregar → 'processing' (webhook TRANSFER_DONE atualizará para 'completed')
   // asaas_payment_id guarda o id do transfer Asaas para reconciliação no webhook.
   // fee → 'completed' imediatamente (foi debitado da subconta com sucesso)
 

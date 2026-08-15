@@ -10,17 +10,17 @@ import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 
 const HANDLED_EVENTS  = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
-const TRANSFER_EVENTS = new Set(['TRANSFER_CONFIRMED', 'TRANSFER_FAILED'])
+const TRANSFER_EVENTS = new Set(['TRANSFER_DONE', 'TRANSFER_FAILED'])
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
-
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
     return new Response('Method Not Allowed', { status: 405 })
   }
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   // ── Validar token do webhook (spec 03_backend §6) ────────────────────────────
   // Asaas envia o authToken configurado no header 'asaas-access-token'.
@@ -66,7 +66,7 @@ Deno.serve(async (req: Request) => {
 
   const { event, transfer } = payload
 
-  // ── TRANSFER_CONFIRMED / TRANSFER_FAILED — conclusão do Descarregar ──────────
+  // ── TRANSFER_DONE / TRANSFER_FAILED — conclusão do Descarregar ───────────────
   // Descarregar fica 'processing' até este webhook confirmar (ou falhar) o Pix
   // de saída. Não há saldo local a estornar: o saldo em Albers é lido ao vivo
   // da subconta Asaas (ver financial-descarregar), então uma falha de transfer
@@ -84,7 +84,7 @@ Deno.serve(async (req: Request) => {
       return new Response('OK', { status: 200 })
     }
 
-    const newStatus = event === 'TRANSFER_CONFIRMED' ? 'completed' : 'failed'
+    const newStatus = event === 'TRANSFER_DONE' ? 'completed' : 'failed'
 
     await supabaseAdmin.from('transactions').update({ status: newStatus }).eq('id', tx.id)
 
@@ -246,4 +246,8 @@ Deno.serve(async (req: Request) => {
   )
 
   return new Response('OK', { status: 200 })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

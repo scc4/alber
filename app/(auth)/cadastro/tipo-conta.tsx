@@ -30,7 +30,9 @@ export default function TipoContaScreen() {
       // carteira pessoal (é o propósito da conta).
       wantsPersonalWallet: selected === 'business' ? wantsPersonalWallet : true,
     })
-    router.push('/(auth)/cadastro/dados')
+    // Empresa passa primeiro pela checagem de CPF do responsável (Melhoria 1)
+    // — se a conta já existir, pula o cadastro pessoal e vai direto pra empresa.
+    router.push(selected === 'business' ? '/(auth)/cadastro/verificar-cpf' : '/(auth)/cadastro/dados')
   }
 
   return (

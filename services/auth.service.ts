@@ -104,6 +104,10 @@ export interface RegisterInput {
       city?:        string
       state?:       string
     }
+    // Chave Pix de SAQUE da própria empresa — nunca cpf/phone/email (só faz
+    // sentido CNPJ ou aleatória para pessoa jurídica). Opcional: ausente =
+    // empresa criada sem chave configurada (master configura depois).
+    pix_key_type?: 'cnpj' | 'random'
   }
 }
 
@@ -161,6 +165,16 @@ export async function login(
     cpf, pin_hash, security_answer_hash,
     ...(security_answer_hash_legacy ? { security_answer_hash_legacy } : {}),
   })
+}
+
+// ── Checagem de CPF já cadastrado (Melhoria 1 — cadastro de empresa) ─────────
+// Primeiro passo do cadastro de empresa: descobre se o CPF do responsável já
+// tem conta ativa, sem vazar mais nenhum dado — se tiver, o app pede login
+// (PIN + pergunta de segurança) em vez de forçar um cadastro pessoal novo.
+
+export async function checkCpfExists(cpf: string): Promise<boolean> {
+  const res = await post<{ exists: boolean }>('auth-check-cpf', { cpf })
+  return res.exists
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────

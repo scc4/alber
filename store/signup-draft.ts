@@ -11,6 +11,11 @@ export interface SignupDraft {
   // nunca cria carteira pessoal nem empresa própria (plano CNPJ
   // velvet-puzzling-sedgewick).
   inviteToken?: string
+  // Melhoria 1 — CPF do responsável já tem conta ativa: a pessoa fez login
+  // (PIN + pergunta de segurança) em vez de preencher o cadastro pessoal de
+  // novo. Pula direto para os dados da empresa; a sessão real já está no
+  // auth.store (não duplicada aqui).
+  existingAccountFlow?: boolean
   // Etapa 1
   name: string
   cpf: string
@@ -39,6 +44,9 @@ export interface SignupDraft {
   companyNeighborhood: string
   companyCity: string
   companyState: string
+  // Chave Pix de SAQUE da própria empresa — nunca cpf/phone/email, só CNPJ ou
+  // aleatória (item 6 do plano de correções).
+  companyPixType: 'cnpj' | 'random'
   // Etapa 3
   handle: string
   // Etapa 4

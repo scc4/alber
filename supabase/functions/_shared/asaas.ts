@@ -125,7 +125,7 @@ export async function createAsaasAccount(
           'PAYMENT_CONFIRMED',
           'PAYMENT_RECEIVED',
           'PAYMENT_REFUNDED',
-          'TRANSFER_CONFIRMED',
+          'TRANSFER_DONE',
           'TRANSFER_FAILED',
         ],
       },

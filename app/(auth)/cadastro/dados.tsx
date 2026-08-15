@@ -9,7 +9,7 @@ import { OnboardShell } from '../../../components/core/OnboardShell'
 import { Field } from '../../../components/core/Field'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { DatePickerField, formatDateBR } from '../../../components/shared/DatePickerField'
-import { updateDraft } from '../../../store/signup-draft'
+import { getDraft, updateDraft } from '../../../store/signup-draft'
 import { validateCPF } from '../../../utils/cpf'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
@@ -41,8 +41,13 @@ function maxBirthDate(): Date {
 export default function DadosScreen() {
   const { t } = useTranslation()
 
+  // CPF já pode vir preenchido pela checagem prévia do cadastro de empresa
+  // (verificar-cpf.tsx, Melhoria 1) — evita digitar de novo o que já foi validado.
   const [name, setName]       = useState('')
-  const [cpf, setCpf]         = useState('')
+  const [cpf, setCpf]         = useState(() => {
+    const draftCpf = getDraft().cpf
+    return draftCpf ? maskCPF(draftCpf) : ''
+  })
   const [birthDate, setBirth] = useState<Date | null>(null)
   const [email, setEmail]     = useState('')
   const [phone, setPhone]     = useState('')

@@ -215,6 +215,7 @@ export default function PixScreen() {
               city:         d.companyCity ?? '',
               state:        d.companyState ?? '',
             },
+            ...(d.companyPixType && { pix_key_type: d.companyPixType }),
           },
         }),
       }

@@ -50,7 +50,7 @@ Conta Pai Alber
     url, email, apiVersion: 'v3', enabled: true,
     authToken: string,
     events: ['PAYMENT_CONFIRMED','PAYMENT_RECEIVED',
-             'PAYMENT_REFUNDED','TRANSFER_CONFIRMED','TRANSFER_FAILED']
+             'PAYMENT_REFUNDED','TRANSFER_DONE','TRANSFER_FAILED']
   }]
 }
 

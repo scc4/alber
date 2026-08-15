@@ -34,6 +34,11 @@ export interface CreateCompanyInput {
   company_type: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION'
   income_value: number
   address: CompanyAddressInput
+  // Chave Pix de SAQUE da própria empresa (nunca cpf/phone/email — só faz
+  // sentido CNPJ ou aleatória para uma pessoa jurídica). Opcional: se ausente,
+  // a empresa é criada sem chave configurada, igual ao comportamento de
+  // sempre (o master configura depois via company-set-pix-key).
+  pix_key_type?: 'cnpj' | 'random'
 }
 
 // Mesmo formato do handle pessoal (ver app/(auth)/cadastro/handle.tsx):
@@ -76,6 +81,10 @@ export async function createCompanyForOwner(
 
   if (!VALID_COMPANY_TYPES.includes(input.company_type)) {
     return { ok: false, code: 'INVALID_COMPANY_TYPE', message: 'company_type inválido', status: 400 }
+  }
+
+  if (input.pix_key_type != null && input.pix_key_type !== 'cnpj' && input.pix_key_type !== 'random') {
+    return { ok: false, code: 'INVALID_PIX_KEY_TYPE', message: 'Chave Pix da empresa deve ser cnpj ou random', status: 400 }
   }
 
   const handleNorm = input.handle.toLowerCase().replace(/^@/, '')
@@ -131,12 +140,20 @@ export async function createCompanyForOwner(
   const pixWebhookUrl  = `${supabaseUrl}/functions/v1/webhooks-asaas-pix`
   const ownerPhone     = (owner.phone ?? '').replace(/\D/g, '')
 
+  // A Asaas exige e-mail único por subconta dentro da mesma conta pai — usar o
+  // e-mail pessoal do dono aqui colide com a subconta pessoal dele (sempre:
+  // toda empresa tem um dono que, se tem carteira pessoal, já usou esse e-mail
+  // na própria subconta). O CNPJ é único por definição, então serve de base
+  // pra um endereço sintético só da empresa (mesmo domínio-placeholder já usado
+  // pelo campo `email` dos webhooks, ver createAsaasAccount).
+  const companyAsaasEmail = `empresa-${cnpjClean}@usealber.com`
+
   let asaasAccount: { id: string; apiKey: string; walletId: string }
   try {
     asaasAccount = await createAsaasAccount(
       {
         name:          input.company_name,
-        email:         owner.email,
+        email:         companyAsaasEmail,
         cpfCnpj:       cnpjClean,
         companyType:   input.company_type,
         tradingName:   input.trading_name,
@@ -194,6 +211,26 @@ export async function createCompanyForOwner(
     }
   }
 
+  // ── Chave Pix de SAQUE da empresa (distinta da de recebimento acima) ─────────
+  // 'cnpj': reusa o próprio CNPJ já validado — nenhuma chamada à Asaas necessária.
+  // 'random': registra uma EVP nova na subconta (igual company-set-pix-key faria
+  // depois, só que já no cadastro). Best-effort: falha aqui não derruba a criação
+  // da empresa — fica sem chave e o master configura depois manualmente.
+  let withdrawalKeyEnc:  string | null = null
+  let withdrawalKeyType: 'cnpj' | 'random' | null = null
+  if (input.pix_key_type === 'cnpj') {
+    withdrawalKeyEnc  = await aesEncrypt(cnpjClean, pixKeySecret)
+    withdrawalKeyType = 'cnpj'
+  } else if (input.pix_key_type === 'random' && asaasAccount.apiKey) {
+    try {
+      const { key } = await createPixAddressKey('EVP', asaasAccount.apiKey)
+      withdrawalKeyEnc  = await aesEncrypt(key, pixKeySecret)
+      withdrawalKeyType = 'random'
+    } catch (e) {
+      console.warn('[company-create] erro ao registrar chave Pix de saque (não-crítico):', e)
+    }
+  }
+
   let onboardingUrl: string | null = null
   if (asaasAccount.apiKey) {
     try {
@@ -221,6 +258,8 @@ export async function createCompanyForOwner(
       asaas_wallet_id:   asaasAccount.walletId,
       asaas_api_key_enc: asaasApiKeyEnc,
       asaas_deposit_key: depositKeyEnc,
+      pix_key:           withdrawalKeyEnc,
+      pix_key_type:      withdrawalKeyType,
       cnpj:              cnpjHash,
       handle:            handleNorm,
       company_name:      input.company_name.trim(),

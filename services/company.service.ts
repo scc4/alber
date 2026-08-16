@@ -141,9 +141,17 @@ export async function setCompanyPixKey(
   token: string,
   companyId: string,
   type: 'cnpj' | 'random',
+  pinHash: string,
+  securityAnswerHash: string,
   cnpj?: string,
 ): Promise<{ pix_key_masked: string; pix_key_type: string }> {
-  return post('company-set-pix-key', { company_id: companyId, type, cnpj }, token)
+  return post('company-set-pix-key', {
+    company_id: companyId,
+    type,
+    cnpj,
+    pin_hash: pinHash,
+    security_answer_hash: securityAnswerHash,
+  }, token)
 }
 
 // Melhoria 1 — abre uma empresa numa conta pessoal já existente (usuário

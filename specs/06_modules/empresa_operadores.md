@@ -179,9 +179,14 @@ operador `active`, usado para popular o seletor de conta (Header) e a tela
 Configuração separada de `pix_key` pessoal — `companies.pix_key` começa nula
 e `financial-descarregar` retorna `COMPANY_PIX_KEY_NOT_CONFIGURED` enquanto
 isso. Tela `app/(app)/empresas/[id]/pix.tsx` (dentro do app, pós-cadastro) e
-`app/(auth)/cadastro/empresa-pix.tsx` (durante o cadastro). **Só o master
-configura** — não delegável nem a um operador com a permissão `descarregar`
-(decisão explícita: mais sensível que operação do dia a dia). Dois tipos:
+`app/(auth)/cadastro/empresa-pix.tsx` (durante o cadastro — só escolhe o
+`pix_key_type`, a chave em si é gravada por `company-create`, sem o passo de
+PIN/segurança abaixo). **Só o master configura** — não delegável nem a um
+operador com a permissão `descarregar`, e `POST company-set-pix-key` exige
+**PIN + confirmação de segurança do master** (05_security.md §4 "Cadastrar/
+trocar chave Pix"), mesmo padrão de `perfil-update-pix` — sempre PIN/pergunta
+do **master autenticado**, nunca da empresa, que não tem PIN próprio (decisão
+explícita: mais sensível que operação do dia a dia). Dois tipos:
 
 - `cnpj`: reconfirma que o CNPJ digitado bate com o hash já cadastrado da
   empresa (sem chamada à Asaas).
@@ -276,7 +281,7 @@ módulo fechado:
 | EMP-07 | Master (ou operador com `gerenciar_operadores`) pode alterar a matriz de permissões de um operador já `active`, a qualquer momento, não só no convite |
 | EMP-08 | Alteração de permissões faz merge parcial — chaves não enviadas permanecem como estavam |
 | EMP-09 | Toda alteração de permissões gera registro em `audit_logs` |
-| EMP-10 | Chave Pix de saque da empresa só pode ser configurada pelo master, uma única vez |
+| EMP-10 | Chave Pix de saque da empresa só pode ser configurada pelo master, uma única vez, exigindo PIN + confirmação de segurança do master |
 | EMP-11 | Troca de contexto (pessoal ↔ empresa) no app não substitui a validação de permissão no backend a cada request |
 | EMP-12 | KYC de empresa rejeitado pela Asaas libera CNPJ/handle automaticamente para novo cadastro |
 | EMP-13 | Master pode abandonar o cadastro da própria empresa antes do KYC ser aprovado; depois de aprovado, não |

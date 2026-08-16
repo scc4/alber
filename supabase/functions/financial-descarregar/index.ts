@@ -100,7 +100,8 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Verificar chave Pix cadastrada ───────────────────────────────────────────
-  // Empresas ainda não têm tela de configuração de chave Pix de saque nesta fase.
+  // Empresas configuram a chave de saque em empresas/[id]/pix.tsx
+  // (company-set-pix-key) — chega aqui só se o master ainda não passou por lá.
 
   if (!wallet.pixKey || !wallet.pixKeyType) {
     return err(

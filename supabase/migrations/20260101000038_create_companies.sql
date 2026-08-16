@@ -44,9 +44,10 @@ CREATE TABLE public.companies (
   -- Faturamento mensal declarado (exigido pelo Asaas como incomeValue)
   income_value      NUMERIC(12, 2) NOT NULL,
 
-  -- Chave Pix de SAQUE da empresa (destino do descarregar) — ainda sem tela
-  -- própria de configuração nesta fase; financial-descarregar retorna
-  -- COMPANY_PIX_KEY_NOT_CONFIGURED enquanto nula.
+  -- Chave Pix de SAQUE da empresa (destino do descarregar). Configurada pelo
+  -- master em empresas/[id]/pix.tsx via company-set-pix-key (PIN + confirmação
+  -- de segurança); financial-descarregar retorna COMPANY_PIX_KEY_NOT_CONFIGURED
+  -- enquanto nula.
   pix_key           TEXT,
   pix_key_type      TEXT        CHECK (pix_key_type IN ('cpf', 'phone', 'email', 'random', 'cnpj')),
 

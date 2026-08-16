@@ -970,6 +970,8 @@
       "cnpjHint": "Precisa ser exatamente o CNPJ já cadastrado desta empresa",
       "cnpjMismatch": "Esse CNPJ não corresponde ao cadastrado para esta empresa.",
       "randomHint": "Gera uma chave aleatória nova, própria da subconta da empresa no Asaas.",
+      "pinSubtitle": "Confirme seu PIN para continuar.",
+      "securityEyebrow": "Confirmação de segurança",
       "submitCta": "Salvar chave Pix",
       "errorTitle": "Erro ao salvar chave Pix",
       "errorGeneric": "Não foi possível salvar a chave Pix. Tente novamente.",

@@ -10,26 +10,38 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { aesDecrypt, aesEncrypt, sha256hex } from '../_shared/crypto.ts'
+import {
+  aesDecrypt, aesEncrypt, sha256hex,
+  bcryptVerify, tryParsePairsPayload, verifyPinWithPairs,
+} from '../_shared/crypto.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { createPixAddressKey } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 
 interface SetPixKeyRequest {
-  company_id: string
-  type:       'cnpj' | 'random'
-  cnpj?:      string // obrigatório quando type === 'cnpj'
+  company_id:            string
+  type:                  'cnpj' | 'random'
+  cnpj?:                 string // obrigatório quando type === 'cnpj'
+  pin_hash:              string
+  security_answer_hash:  string
 }
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
+// deno-lint-ignore no-explicit-any
+async function logAudit(admin: any, userId: string, eventType: string, metadata: Record<string, unknown>) {
+  try {
+    await admin.from('audit_logs').insert({ user_id: userId, event_type: eventType, metadata })
+  } catch { /* não-crítico */ }
+}
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -53,10 +65,13 @@ Deno.serve(async (req: Request) => {
   if (!body.company_id || !body.type || !['cnpj', 'random'].includes(body.type)) {
     return err('MISSING_FIELDS', 'company_id e type são obrigatórios', 400)
   }
+  if (!body.pin_hash || !body.security_answer_hash) {
+    return err('MISSING_FIELDS', 'pin_hash e security_answer_hash são obrigatórios', 400)
+  }
 
   const { data: caller } = await supabaseAdmin
     .from('users')
-    .select('id')
+    .select('id, auth_id')
     .eq('auth_id', authUser.id)
     .maybeSingle()
   if (!caller) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
@@ -74,6 +89,46 @@ Deno.serve(async (req: Request) => {
   if (!company) return err('COMPANY_NOT_FOUND', 'Empresa não encontrada', 404)
   if (company.owner_id !== caller.id) return err('FORBIDDEN', 'Só o master pode configurar a chave Pix da empresa', 403)
   if (company.pix_key) return err('PIX_KEY_EXISTS', 'Chave Pix já cadastrada', 409)
+
+  // ── Autenticação dupla (spec 05_security.md §4: "Cadastrar/trocar chave Pix"
+  // exige PIN + confirmação de segurança) — PIN e pergunta são sempre do
+  // master autenticado, nunca da empresa. Mesmo padrão de perfil-update-pix.
+
+  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(caller.auth_id)
+  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
+  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+
+  if (!pinBcrypt) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+
+  let pinOk = false
+  const pairs = tryParsePairsPayload(body.pin_hash)
+  if (pairs) {
+    if (!pinSha256) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    const result = await verifyPinWithPairs(pinSha256, pairs)
+    pinOk = result.ok
+  } else {
+    pinOk = pinSha256 ? body.pin_hash === pinSha256 : await bcryptVerify(body.pin_hash, pinBcrypt)
+  }
+  if (!pinOk) {
+    await logAudit(supabaseAdmin, caller.id, 'company_pix_key_pin_failed', { company_id: company.id })
+    return err('INVALID_CREDENTIALS', 'PIN incorreto', 401)
+  }
+
+  const { data: questions } = await supabaseAdmin
+    .from('security_questions')
+    .select('answer_hash')
+    .eq('user_id', caller.id)
+
+  if (!questions?.length) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+
+  const answerOk = (await Promise.all(
+    questions.map(q => bcryptVerify(body.security_answer_hash, q.answer_hash))
+  )).some(Boolean)
+
+  if (!answerOk) {
+    await logAudit(supabaseAdmin, caller.id, 'company_pix_key_security_failed', { company_id: company.id })
+    return err('INVALID_CREDENTIALS', 'Resposta de segurança incorreta', 401)
+  }
 
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')!
 
@@ -99,6 +154,8 @@ Deno.serve(async (req: Request) => {
       return err('DB_ERROR', 'Erro ao salvar chave Pix', 500)
     }
 
+    await logAudit(supabaseAdmin, caller.id, 'company_pix_key_changed', { company_id: company.id, pix_key_type: 'cnpj' })
+
     return json({ pix_key_masked: `${cnpjClean.slice(0, 8)}***`, pix_key_type: 'cnpj' })
   }
 
@@ -123,9 +180,13 @@ Deno.serve(async (req: Request) => {
       return err('DB_ERROR', 'Erro ao salvar chave Pix', 500)
     }
 
+    await logAudit(supabaseAdmin, caller.id, 'company_pix_key_changed', { company_id: company.id, pix_key_type: 'random' })
+
     return json({ pix_key_masked: `${key.slice(0, 8)}...`, pix_key_type: 'random' })
   } catch (e) {
     await logError(supabaseAdmin, 'company-set-pix-key', e, { company_id: company.id })
     return err('PIX_KEY_CREATION_FAILED', 'Não foi possível criar a chave Pix', 500)
   }
-})
+}
+
+Deno.serve(handleRequest)

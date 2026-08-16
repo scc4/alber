@@ -1,7 +1,8 @@
 // Plano CNPJ (velvet-puzzling-sedgewick)
 // Configuração da chave Pix de SAQUE da empresa — só o master acessa.
-// Libera o financial-descarregar (que hoje bloqueia com
-// COMPANY_PIX_KEY_NOT_CONFIGURED enquanto a empresa não tiver uma).
+// Libera o financial-descarregar. Exige PIN + confirmação de segurança do
+// master (spec 05_security.md §4 "Cadastrar/trocar chave Pix"), mesmo
+// padrão do fluxo Pix pessoal em perfil/seguranca.tsx.
 
 import { useState } from 'react'
 import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
@@ -10,6 +11,8 @@ import { useTranslation } from 'react-i18next'
 import { Header } from '../../../../components/core/Header'
 import { Field } from '../../../../components/core/Field'
 import { PrimaryButton } from '../../../../components/core/PrimaryButton'
+import { PINInput } from '../../../../components/financial/PINInput'
+import { SecurityConfirmation } from '../../../../components/financial/SecurityConfirmation'
 import { useAuthStore } from '../../../../store/auth.store'
 import * as companyService from '../../../../services/company.service'
 import { BffError } from '../../../../services/auth.service'
@@ -20,41 +23,67 @@ import { spacing } from '../../../../tokens/spacing'
 import { typography } from '../../../../tokens/typography'
 
 type KeyType = 'cnpj' | 'random'
+type Step    = 'input' | 'pin' | 'security' | 'success'
 
 export default function EmpresaPixKeyScreen() {
   const { t }  = useTranslation()
   const { id } = useLocalSearchParams<{ id: string }>()
   const token  = useAuthStore(s => s.token)
+  const user   = useAuthStore(s => s.user)
 
+  const [step, setStep]       = useState<Step>('input')
   const [type, setType]       = useState<KeyType>('cnpj')
   const [cnpj, setCnpj]       = useState('')
-  const [saving, setSaving]   = useState(false)
+  const [pinHash, setPinHash] = useState('')
+  const [submitting, setSubmitting]   = useState(false)
+  const [wrongAnswer, setWrongAnswer] = useState(false)
   const [result, setResult]   = useState<{ pix_key_masked: string; pix_key_type: string } | null>(null)
 
   const cnpjValid = validateCNPJ(cnpj)
   const isReady = type === 'random' || cnpjValid
 
-  const handleSubmit = async () => {
-    if (!token || !id || !isReady || saving) return
-    setSaving(true)
+  const handlePin = (hash: string) => {
+    setPinHash(hash)
+    setStep('security')
+  }
+
+  const handleSecurity = async (answerHash: string) => {
+    if (!token || !id || submitting) return
+    setSubmitting(true)
     try {
       const res = await companyService.setCompanyPixKey(
-        token, id, type,
+        token, id, type, pinHash, answerHash,
         type === 'cnpj' ? normalizeCNPJ(cnpj) : undefined,
       )
       setResult(res)
+      setStep('success')
     } catch (e) {
       const isBff = e instanceof BffError
-      const message = isBff
-        ? (e.code === 'CNPJ_MISMATCH' ? t('empresas.pixKey.cnpjMismatch') : e.message)
-        : t('empresas.pixKey.errorGeneric')
-      Alert.alert(t('empresas.pixKey.errorTitle'), message)
+
+      if (isBff && e.code === 'INVALID_CREDENTIALS') {
+        if (e.message?.includes('PIN')) {
+          setStep('pin')
+        } else {
+          setWrongAnswer(true)
+          setTimeout(() => setWrongAnswer(false), 1800)
+        }
+        return
+      }
+
+      if (isBff && e.code === 'CNPJ_MISMATCH') {
+        Alert.alert(t('empresas.pixKey.errorTitle'), t('empresas.pixKey.cnpjMismatch'))
+        setStep('input')
+        return
+      }
+
+      Alert.alert(t('empresas.pixKey.errorTitle'), isBff ? e.message : t('empresas.pixKey.errorGeneric'))
+      setStep('input')
     } finally {
-      setSaving(false)
+      setSubmitting(false)
     }
   }
 
-  if (result) {
+  if (step === 'success' && result) {
     return (
       <View style={styles.root}>
         <Header variant="title" title={t('empresas.pixKey.title')} onBack={() => router.back()} />
@@ -62,6 +91,36 @@ export default function EmpresaPixKeyScreen() {
           <Text style={styles.successTitle}>{t('empresas.pixKey.successTitle')}</Text>
           <Text style={styles.successBody}>{result.pix_key_masked}</Text>
           <PrimaryButton label={t('empresas.pixKey.doneCta')} onPress={() => router.back()} />
+        </View>
+      </View>
+    )
+  }
+
+  if (step === 'pin') {
+    return (
+      <View style={styles.root}>
+        <Header variant="title" title={t('empresas.pixKey.title')} onBack={() => setStep('input')} />
+        <View style={styles.content}>
+          <Text style={styles.subtitle}>{t('empresas.pixKey.pinSubtitle')}</Text>
+          <PINInput mode="secure" onComplete={handlePin} />
+        </View>
+      </View>
+    )
+  }
+
+  if (step === 'security') {
+    return (
+      <View style={styles.root}>
+        <Header variant="title" title={t('empresas.pixKey.title')} onBack={() => setStep('pin')} />
+        <View style={styles.content}>
+          <SecurityConfirmation
+            identifier={`@${user?.handle ?? ''}`}
+            pinHash={pinHash}
+            eyebrow={t('empresas.pixKey.securityEyebrow')}
+            submitting={submitting}
+            wrongAnswer={wrongAnswer}
+            onPass={handleSecurity}
+          />
         </View>
       </View>
     )
@@ -109,8 +168,8 @@ export default function EmpresaPixKeyScreen() {
 
         <PrimaryButton
           label={t('empresas.pixKey.submitCta')}
-          onPress={handleSubmit}
-          state={!isReady ? 'disabled' : saving ? 'loading' : 'default'}
+          onPress={() => setStep('pin')}
+          state={!isReady ? 'disabled' : 'default'}
         />
       </View>
     </View>

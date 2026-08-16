@@ -145,6 +145,7 @@ alber/
 | Achar | 06_modules/achar.md | ✅ Fechado |
 | Atividade | 06_modules/atividade.md | ✅ Fechado |
 | Perfil | 06_modules/perfil.md | ✅ Fechado |
+| Empresa / Operadores (PJ) | 06_modules/empresa_operadores.md | ⚠️ Implementado, pós-MVP — ver lacunas §11 do spec |
 
 ---
 

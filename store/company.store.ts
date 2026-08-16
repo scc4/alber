@@ -24,6 +24,7 @@ interface CompanyState {
   fetchBalance:    (companyId: string) => Promise<void>
   fetchOperators:  (companyId: string) => Promise<void>
   setOperatorPermissions: (companyId: string, operatorUserId: string, permissions: CompanyPermissions) => Promise<void>
+  removeOperator:  (companyId: string, operatorUserId: string) => Promise<void>
   abandonCompany:  (companyId: string) => Promise<void>
 }
 
@@ -83,6 +84,17 @@ export const useCompanyStore = create<CompanyState>((set, get) => ({
     set({
       operators: get().operators.map(o =>
         o.user_id === operatorUserId ? { ...o, permissions: { ...o.permissions, ...permissions } } : o,
+      ),
+    })
+  },
+
+  removeOperator: async (companyId, operatorUserId) => {
+    const token = useAuthStore.getState().token
+    if (!token) return
+    await companyService.removeOperator(token, companyId, operatorUserId)
+    set({
+      operators: get().operators.map(o =>
+        o.user_id === operatorUserId ? { ...o, status: 'banned', permissions: {} } : o,
       ),
     })
   },

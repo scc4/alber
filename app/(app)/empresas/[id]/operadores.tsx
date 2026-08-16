@@ -30,11 +30,13 @@ export default function OperadoresScreen() {
   const operatorsStatus = useCompanyStore(s => s.operatorsStatus)
   const fetchOperators  = useCompanyStore(s => s.fetchOperators)
   const setPermissions  = useCompanyStore(s => s.setOperatorPermissions)
+  const removeOperator  = useCompanyStore(s => s.removeOperator)
 
   const [handle, setHandle]         = useState('')
   const [inviting, setInviting]     = useState(false)
   const [creatingLink, setCreatingLink] = useState(false)
   const [expanded, setExpanded]     = useState<string | null>(null)
+  const [removing, setRemoving]     = useState<string | null>(null)
 
   useEffect(() => {
     if (id) fetchOperators(id)
@@ -76,6 +78,33 @@ export default function OperadoresScreen() {
   const togglePermission = (operatorUserId: string, key: string, value: boolean) => {
     if (!id) return
     setPermissions(id, operatorUserId, { [key]: value })
+  }
+
+  const handleRemove = (operatorUserId: string, name: string) => {
+    if (!id) return
+    Alert.alert(
+      t('empresas.operadores.removeConfirmTitle'),
+      t('empresas.operadores.removeConfirmBody', { name }),
+      [
+        { text: t('empresas.operadores.removeCancel'), style: 'cancel' },
+        {
+          text: t('empresas.operadores.removeConfirmCta'),
+          style: 'destructive',
+          onPress: async () => {
+            setRemoving(operatorUserId)
+            try {
+              await removeOperator(id, operatorUserId)
+              setExpanded(null)
+            } catch (e) {
+              const isBff = e instanceof BffError
+              Alert.alert(t('empresas.operadores.removeErrorTitle'), isBff ? e.message : t('empresas.operadores.removeErrorGeneric'))
+            } finally {
+              setRemoving(null)
+            }
+          },
+        },
+      ],
+    )
   }
 
   return (
@@ -130,11 +159,24 @@ export default function OperadoresScreen() {
                     <Switch
                       value={op.permissions?.[key] === true}
                       onValueChange={v => togglePermission(op.user_id!, key, v)}
+                      disabled={op.status === 'banned'}
                       trackColor={{ false: 'rgba(255,255,255,0.15)', true: colors.white[100] }}
                       thumbColor={colors.black[100]}
                     />
                   </View>
                 ))}
+
+                {op.status !== 'banned' && (
+                  <TouchableOpacity
+                    style={styles.removeBtn}
+                    onPress={() => handleRemove(op.user_id!, op.name ?? op.handle ?? '')}
+                    disabled={removing === op.user_id}
+                  >
+                    <Text style={styles.removeBtnText}>
+                      {removing === op.user_id ? t('empresas.operadores.removing') : t('empresas.operadores.removeCta')}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
           </View>
@@ -219,5 +261,15 @@ const styles = StyleSheet.create({
     color: colors.white[100],
     fontFamily: typography.fontFamily.primary,
     fontSize: 13.5,
+  },
+  removeBtn: {
+    marginTop: spacing.xs,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  removeBtnText: {
+    color: colors.state.error,
+    fontFamily: typography.fontFamily.primary,
+    fontSize: 13,
   },
 })

@@ -129,6 +129,14 @@ export async function setOperatorPermissions(
   }, token)
 }
 
+export async function removeOperator(
+  token: string,
+  companyId: string,
+  operatorUserId: string,
+): Promise<{ operator_user_id: string; status: string }> {
+  return post('company-operator-remove', { company_id: companyId, operator_user_id: operatorUserId }, token)
+}
+
 export async function setCompanyPixKey(
   token: string,
   companyId: string,

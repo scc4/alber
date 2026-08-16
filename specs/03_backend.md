@@ -98,7 +98,8 @@ CREATE TABLE security_questions (
 ```sql
 CREATE TABLE transactions (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          UUID REFERENCES users(id),
+  user_id          UUID REFERENCES users(id),  -- sempre quem executou a ação, mesmo em transações de empresa
+  company_id       UUID REFERENCES companies(id), -- NULL = transação pessoal; ver 3.10b
   type             TEXT NOT NULL,
   amount           NUMERIC(10,2) NOT NULL,
   amount_brl       NUMERIC(10,2),
@@ -232,6 +233,60 @@ CREATE TABLE rates (
   updated_by UUID REFERENCES users(id)
 );
 ```
+
+### 3.10b companies
+```sql
+CREATE TABLE companies (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id          UUID NOT NULL REFERENCES users(id),  -- master, acesso total implícito
+  asaas_account_id  TEXT UNIQUE NOT NULL,
+  cnpj              TEXT NOT NULL,       -- hash SHA-256, único entre linhas com deleted_at IS NULL
+  handle            TEXT NOT NULL,       -- único entre linhas com deleted_at IS NULL, cruza com users.handle na aplicação
+  company_name      TEXT NOT NULL,
+  trading_name      TEXT,
+  company_type      TEXT NOT NULL,       -- MEI | LIMITED | INDIVIDUAL | ASSOCIATION
+  pix_key           TEXT,                -- chave de SAQUE, configurável uma única vez pelo master
+  pix_key_type      TEXT,
+  asaas_deposit_key TEXT,                -- chave de RECEBIMENTO, sempre EVP, mesmo padrão de users.asaas_deposit_key
+  kyc_status        TEXT DEFAULT 'pending',
+  account_status    TEXT DEFAULT 'evaluation',
+  deleted_at        TIMESTAMPTZ,         -- KYC rejeitado (automático) ou company-abandon (manual) — ver 06_modules/empresa_operadores.md §8
+  created_at        TIMESTAMPTZ DEFAULT now(),
+  updated_at        TIMESTAMPTZ DEFAULT now()
+);
+```
+
+### 3.10c company_operators
+```sql
+CREATE TABLE company_operators (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id  UUID REFERENCES companies(id) ON DELETE CASCADE,
+  user_id     UUID REFERENCES users(id),
+  status      TEXT DEFAULT 'pending',   -- pending | active | banned | invited ('banned' = removido via company-operator-remove, reversível por reconvite)
+  permissions JSONB DEFAULT '{}',       -- matriz por funcionalidade, fail-closed — chaves em _shared/company-permissions.ts
+  joined_at   TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(company_id, user_id)
+);
+```
+Master nunca aparece nesta tabela. Detalhe completo do fluxo de convite,
+matriz de permissões e edição pelo master em 06_modules/empresa_operadores.md.
+
+### 3.10d company_invites
+```sql
+CREATE TABLE company_invites (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id  UUID REFERENCES companies(id) ON DELETE CASCADE,
+  token       TEXT UNIQUE NOT NULL,
+  permissions JSONB DEFAULT '{}',       -- aplicadas ao aceitar, via auth-register
+  status      TEXT DEFAULT 'pending',   -- pending | consumed | revoked
+  expires_at  TIMESTAMPTZ NOT NULL,     -- 7 dias
+  created_by  UUID REFERENCES users(id),
+  consumed_by UUID REFERENCES users(id)
+);
+```
+Convite por link, para quem ainda não tem `users.id` — diferente do convite
+por @handle, que já cria a linha direto em `company_operators`.
 
 ### 3.10 audit_logs
 ```sql

@@ -990,7 +990,15 @@
         "active": "Ativo",
         "banned": "Bloqueado",
         "invited": "Convidado"
-      }
+      },
+      "removeCta": "Remover operador",
+      "removing": "Removendo…",
+      "removeConfirmTitle": "Remover operador?",
+      "removeConfirmBody": "{{name}} perde acesso imediatamente a todas as funcionalidades da empresa. Você pode convidar essa pessoa de novo depois, se quiser.",
+      "removeConfirmCta": "Remover",
+      "removeCancel": "Cancelar",
+      "removeErrorTitle": "Erro ao remover",
+      "removeErrorGeneric": "Não foi possível remover este operador. Tente novamente."
     },
     "permissoes": {
       "ver_saldo": "Ver saldo",

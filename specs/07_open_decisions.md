@@ -52,6 +52,21 @@ do BI (membro comum, dono de Lounge, admin) e profundidade dos dados.
 - Integração com Consumir (parceiros do Lounge)
 - Múltiplos níveis de membership
 
+### 2.3 Empresa / Operadores (PJ)
+**Implementado:** cadastro de conta PJ (master), convite de operador por
+@handle ou link, matriz de permissões por operador (editável a qualquer
+momento pelo master, não só no convite), remoção/revogação de acesso de
+operador (`company-operator-remove`, reversível via reconvite), troca de
+contexto pessoal↔empresa, chave Pix de saque própria, ciclo de vida do KYC
+(rejeição automática libera CNPJ/handle, abandono manual pelo master). Spec
+completa em 06_modules/empresa_operadores.md.
+**Lacunas identificadas ao documentar (v1.0 desta spec, 15/08/2026):**
+- Permissão `pagar` da matriz não tem nenhuma funcionalidade associada ainda.
+- Nenhum evento de analytics instrumentado no módulo.
+- Handle/razão social da empresa e titularidade do master não são editáveis
+  nesta versão.
+Ver 06_modules/empresa_operadores.md §11 para detalhe completo.
+
 ---
 
 ## 3. Painel administrativo
@@ -139,6 +154,8 @@ subconta→subconta por dia/mês.
 | Transferir (direto) | Implementado no MVP — ver 06_modules/transferir.md | ✅ |
 | Consumir (parceiros) | Removido do MVP — ver seção 1.2 | Alta futura |
 | BI / Analytics | Removido do MVP — ver seção 1.3 | Média futura |
+| Transferência de titularidade (master) de empresa | Não existe, só via suporte — ver 2.3 | Baixa |
+| Analytics de Empresa/Operadores | Nenhum evento instrumentado — ver 2.3 | Média |
 
 ---
 

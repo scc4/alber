@@ -12,6 +12,7 @@ import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../../store/auth.store'
 import * as authService from '../../../services/auth.service'
+import type { NotificationPrefs } from '../../../services/auth.service'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -28,6 +29,43 @@ interface NotifState {
   loungeEvent:      boolean
   loungeRequest:    boolean
   contaKyc:         boolean
+}
+
+// UI (camelCase) ↔ coluna real em users / category em push-send (ver
+// _shared/push.ts NotifCategory) — mapeamento 1:1, sem agregação.
+const NOTIF_KEY_MAP: Record<keyof NotifState, keyof NotificationPrefs> = {
+  txReceive:        'notif_tx_receive',
+  txSend:            'notif_tx_send',
+  txCarregar:        'notif_tx_carregar',
+  txDescarregar:     'notif_tx_descarregar',
+  splitParticipant:  'notif_split_participant',
+  splitExpired:      'notif_split_expired',
+  splitClosed:       'notif_split_closed',
+  loungeMessage:     'notif_lounge_message',
+  loungeEvent:       'notif_lounge_event',
+  loungeRequest:     'notif_lounge_request',
+  contaKyc:          'notif_conta_kyc',
+}
+
+const DEFAULT_NOTIF: NotifState = {
+  txReceive:        true,
+  txSend:           true,
+  txCarregar:       true,
+  txDescarregar:    true,
+  splitParticipant: true,
+  splitExpired:     true,
+  splitClosed:      false,
+  loungeMessage:    true,
+  loungeEvent:      true,
+  loungeRequest:    false,
+  contaKyc:         true,
+}
+
+function toNotifState(prefs: NotificationPrefs): NotifState {
+  const entries = Object.entries(NOTIF_KEY_MAP) as [keyof NotifState, keyof NotificationPrefs][]
+  const result = { ...DEFAULT_NOTIF }
+  for (const [uiKey, apiKey] of entries) result[uiKey] = prefs[apiKey]
+  return result
 }
 
 // ── ToggleRow ─────────────────────────────────────────────────────────────────
@@ -77,15 +115,18 @@ export default function NotificacoesScreen() {
   const { t }  = useTranslation()
   const token  = useAuthStore(s => s.token)
 
-  // Único toggle desta tela que persiste de verdade — os demais (abaixo)
-  // ainda são só de interface, sem back-end de preferências por enquanto.
-  const [marketingOptIn, setMarketingOptIn] = useState(false)
+  const [notif, setNotif] = useState<NotifState>(DEFAULT_NOTIF)
+  const [savingKeys, setSavingKeys] = useState<Set<keyof NotifState>>(new Set())
+
+  const [marketingOptIn, setMarketingOptIn]   = useState(false)
   const [marketingSaving, setMarketingSaving] = useState(false)
 
   useEffect(() => {
     if (!token) return
     authService.fetchUserProfile(token).then(profile => {
-      if (profile) setMarketingOptIn(profile.marketing_opt_in)
+      if (!profile) return
+      setMarketingOptIn(profile.marketing_opt_in)
+      setNotif(toNotifState(profile.notification_prefs))
     })
   }, [token])
 
@@ -103,22 +144,19 @@ export default function NotificacoesScreen() {
     }
   }
 
-  const [notif, setNotif] = useState<NotifState>({
-    txReceive:        true,
-    txSend:           true,
-    txCarregar:       true,
-    txDescarregar:    true,
-    splitParticipant: true,
-    splitExpired:     true,
-    splitClosed:      false,
-    loungeMessage:    true,
-    loungeEvent:      true,
-    loungeRequest:    false,
-    contaKyc:         true,
-  })
-
-  const set = (key: keyof NotifState) => (value: boolean) =>
-    setNotif(prev => ({ ...prev, [key]: value }))
+  const handleToggle = (key: keyof NotifState) => async (value: boolean) => {
+    if (!token || savingKeys.has(key)) return
+    const previous = notif[key]
+    setNotif(prev => ({ ...prev, [key]: value })) // otimista
+    setSavingKeys(prev => new Set(prev).add(key))
+    try {
+      await authService.updateNotificationPrefs(token, { [NOTIF_KEY_MAP[key]]: value })
+    } catch {
+      setNotif(prev => ({ ...prev, [key]: previous })) // reverte se o back-end recusar
+    } finally {
+      setSavingKeys(prev => { const next = new Set(prev); next.delete(key); return next })
+    }
+  }
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -142,24 +180,24 @@ export default function NotificacoesScreen() {
       >
         {/* Transações */}
         <Section title={t('perfil.notificacoes.sectionTransacoes')}>
-          <ToggleRow label={t('perfil.notificacoes.txReceive')}     value={notif.txReceive}     onChange={set('txReceive')} />
-          <ToggleRow label={t('perfil.notificacoes.txSend')}        value={notif.txSend}        onChange={set('txSend')} />
-          <ToggleRow label={t('perfil.notificacoes.txCarregar')}    value={notif.txCarregar}    onChange={set('txCarregar')} />
-          <ToggleRow label={t('perfil.notificacoes.txDescarregar')} value={notif.txDescarregar} onChange={set('txDescarregar')} />
+          <ToggleRow label={t('perfil.notificacoes.txReceive')}     value={notif.txReceive}     disabled={savingKeys.has('txReceive')}     onChange={handleToggle('txReceive')} />
+          <ToggleRow label={t('perfil.notificacoes.txSend')}        value={notif.txSend}        disabled={savingKeys.has('txSend')}        onChange={handleToggle('txSend')} />
+          <ToggleRow label={t('perfil.notificacoes.txCarregar')}    value={notif.txCarregar}    disabled={savingKeys.has('txCarregar')}    onChange={handleToggle('txCarregar')} />
+          <ToggleRow label={t('perfil.notificacoes.txDescarregar')} value={notif.txDescarregar} disabled={savingKeys.has('txDescarregar')} onChange={handleToggle('txDescarregar')} />
         </Section>
 
         {/* Splits */}
         <Section title={t('perfil.notificacoes.sectionSplits')}>
-          <ToggleRow label={t('perfil.notificacoes.splitParticipant')} value={notif.splitParticipant} onChange={set('splitParticipant')} />
-          <ToggleRow label={t('perfil.notificacoes.splitExpired')}     value={notif.splitExpired}     onChange={set('splitExpired')} />
-          <ToggleRow label={t('perfil.notificacoes.splitClosed')}      value={notif.splitClosed}      onChange={set('splitClosed')} />
+          <ToggleRow label={t('perfil.notificacoes.splitParticipant')} value={notif.splitParticipant} disabled={savingKeys.has('splitParticipant')} onChange={handleToggle('splitParticipant')} />
+          <ToggleRow label={t('perfil.notificacoes.splitExpired')}     value={notif.splitExpired}     disabled={savingKeys.has('splitExpired')}     onChange={handleToggle('splitExpired')} />
+          <ToggleRow label={t('perfil.notificacoes.splitClosed')}      value={notif.splitClosed}      disabled={savingKeys.has('splitClosed')}      onChange={handleToggle('splitClosed')} />
         </Section>
 
         {/* Lounges */}
         <Section title={t('perfil.notificacoes.sectionLounges')}>
-          <ToggleRow label={t('perfil.notificacoes.loungeMessage')} value={notif.loungeMessage} onChange={set('loungeMessage')} />
-          <ToggleRow label={t('perfil.notificacoes.loungeEvent')}   value={notif.loungeEvent}   onChange={set('loungeEvent')} />
-          <ToggleRow label={t('perfil.notificacoes.loungeRequest')} value={notif.loungeRequest} onChange={set('loungeRequest')} />
+          <ToggleRow label={t('perfil.notificacoes.loungeMessage')} value={notif.loungeMessage} disabled={savingKeys.has('loungeMessage')} onChange={handleToggle('loungeMessage')} />
+          <ToggleRow label={t('perfil.notificacoes.loungeEvent')}   value={notif.loungeEvent}   disabled={savingKeys.has('loungeEvent')}   onChange={handleToggle('loungeEvent')} />
+          <ToggleRow label={t('perfil.notificacoes.loungeRequest')} value={notif.loungeRequest} disabled={savingKeys.has('loungeRequest')} onChange={handleToggle('loungeRequest')} />
         </Section>
 
         {/* Comunicação de marketing — consentimento separado do aceite obrigatório do cadastro (LGPD) */}
@@ -175,7 +213,7 @@ export default function NotificacoesScreen() {
 
         {/* Conta */}
         <Section title={t('perfil.notificacoes.sectionConta')}>
-          <ToggleRow label={t('perfil.notificacoes.contaKyc')} value={notif.contaKyc} onChange={set('contaKyc')} />
+          <ToggleRow label={t('perfil.notificacoes.contaKyc')} value={notif.contaKyc} disabled={savingKeys.has('contaKyc')} onChange={handleToggle('contaKyc')} />
         </Section>
 
         {/* Segurança — não desabilitáveis */}

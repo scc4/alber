@@ -109,6 +109,7 @@ Deno.serve(async (req: Request) => {
       `${caller.handle} recusou o convite pro split "${split.name}"`,
       { route: `/(app)/split/${split.id}` },
       'invite',
+      'split_participant',
     ).catch(() => {})
 
     return json({ split_id: split.id, status: 'declined' })
@@ -240,6 +241,7 @@ Deno.serve(async (req: Request) => {
     `${caller.handle} entrou no split "${split.name}"`,
     { route: `/(app)/split/${split.id}` },
     'invite',
+    'split_participant',
   ).catch(() => {})
 
   return json({ split_id: split.id, status: 'accepted' })

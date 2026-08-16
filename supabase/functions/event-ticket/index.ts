@@ -404,6 +404,8 @@ Deno.serve(async (req: Request) => {
     'Ingresso confirmado!',
     `Seu ingresso para o evento foi confirmado.`,
     { route: `/(app)/lounge/evento/${body.event_id}` },
+    undefined,
+    'lounge_event',
   )
 
   return json({

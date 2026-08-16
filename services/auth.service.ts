@@ -204,6 +204,23 @@ export async function getStoredUser(): Promise<Record<string, unknown> | null> {
   } catch { return null }
 }
 
+// Perfil > Notificações — cada campo gate a categoria correspondente em
+// push-send (ver _shared/push.ts NotifCategory). Sem coluna própria =
+// não-configurável (segurança), não aparece aqui.
+export interface NotificationPrefs {
+  notif_tx_receive:        boolean
+  notif_tx_send:           boolean
+  notif_tx_carregar:       boolean
+  notif_tx_descarregar:    boolean
+  notif_split_participant: boolean
+  notif_split_expired:     boolean
+  notif_split_closed:      boolean
+  notif_lounge_message:    boolean
+  notif_lounge_event:      boolean
+  notif_lounge_request:    boolean
+  notif_conta_kyc:         boolean
+}
+
 export interface UserProfileResponse {
   id:             string
   name:           string
@@ -217,6 +234,7 @@ export interface UserProfileResponse {
   has_pix_key:    boolean
   has_personal_wallet: boolean
   marketing_opt_in: boolean
+  notification_prefs: NotificationPrefs
 }
 
 export async function fetchUserProfile(token: string): Promise<UserProfileResponse | null> {
@@ -234,6 +252,15 @@ export async function fetchUserProfile(token: string): Promise<UserProfileRespon
 export async function updateMarketingOptIn(token: string, optIn: boolean): Promise<boolean> {
   const res = await post<{ marketing_opt_in: boolean }>('perfil-update-marketing', { marketing_opt_in: optIn }, token)
   return res.marketing_opt_in
+}
+
+// Aceita qualquer subconjunto — só atualiza o que foi enviado. Retorna o
+// estado completo já persistido (útil pra ressincronizar a UI).
+export async function updateNotificationPrefs(
+  token: string,
+  prefs: Partial<NotificationPrefs>,
+): Promise<NotificationPrefs> {
+  return post<NotificationPrefs>('perfil-update-notification-prefs', prefs, token)
 }
 
 // ── Challenge de pergunta de segurança (requer PIN correto) ──────────────────

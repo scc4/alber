@@ -169,6 +169,8 @@ export async function handleRequest(req: Request): Promise<Response> {
           'Evento cancelado',
           `O evento "${event.name}" foi cancelado. Seu saldo foi reembolsado.`,
           { route: '/(app)/atividade' },
+          undefined,
+          'lounge_event',
         )
 
         refunded_count++
@@ -198,6 +200,8 @@ export async function handleRequest(req: Request): Promise<Response> {
           'Evento cancelado',
           `O evento "${event.name}" foi cancelado.`,
           { route: '/(app)/atividade' },
+          undefined,
+          'lounge_event',
         )
       )
     )

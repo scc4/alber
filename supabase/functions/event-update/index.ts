@@ -137,6 +137,8 @@ export async function handleRequest(req: Request): Promise<Response> {
           'Evento atualizado',
           `O evento "${updated.name}" foi atualizado. Verifique as novas informações.`,
           { route: `/(app)/lounge/evento/${event_id}` },
+          undefined,
+          'lounge_event',
         )
       )
     )

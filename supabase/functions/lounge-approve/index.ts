@@ -116,6 +116,7 @@ Deno.serve(async (req: Request) => {
           'Sua solicitação de entrada foi aprovada.',
           { route: `/(app)/lounge/${target.space_id}` },
           'invite',
+          'lounge_request',
         )
       : sendPush(
           target.user_id,
@@ -123,6 +124,7 @@ Deno.serve(async (req: Request) => {
           'Sua solicitação de entrada no Lounge não foi aprovada.',
           undefined,
           'invite',
+          'lounge_request',
         ),
   ])
 

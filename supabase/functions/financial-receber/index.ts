@@ -392,6 +392,7 @@ Deno.serve(async (req: Request) => {
       `Você pagou ${amount_albers} Albers para ${receiver.handle}`,
       { route: '/(app)/atividade' },
       'transaction',
+      'tx_send',
     ),
     sendPush(
       receiver.id,
@@ -399,6 +400,7 @@ Deno.serve(async (req: Request) => {
       `${payer.name} pagou ${amount_albers} Albers para você`,
       { route: '/(app)/atividade' },
       'transaction',
+      'tx_receive',
     ),
   ])
 

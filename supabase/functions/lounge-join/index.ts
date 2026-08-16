@@ -160,6 +160,7 @@ Deno.serve(async (req: Request) => {
       `${user.name ?? user.handle} quer entrar no seu Lounge.`,
       { route: `/(app)/lounge/${space.id}` },
       'invite',
+      'lounge_request',
     ),
   ])
 

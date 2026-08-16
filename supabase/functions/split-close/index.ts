@@ -250,7 +250,7 @@ Deno.serve(async (req: Request) => {
   const participantIds = Object.keys(allocations).filter(id => id !== user.id)
   Promise.allSettled(
     participantIds.map(pid =>
-      sendPush(pid, 'Split encerrado', `O split "${split.name}" foi fechado.`, { route: `/(app)/split/${split_id}` })
+      sendPush(pid, 'Split encerrado', `O split "${split.name}" foi fechado.`, { route: `/(app)/split/${split_id}` }, undefined, 'split_closed')
     )
   ).catch(() => {})
 

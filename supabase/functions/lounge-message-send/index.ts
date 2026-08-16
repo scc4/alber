@@ -101,7 +101,7 @@ Deno.serve(async (req: Request) => {
   const authorLabel = caller.name ?? caller.handle ?? 'Gestor'
 
   const pushPromises = (members ?? []).map(m =>
-    sendPush(m.user_id, authorLabel, preview, { route: `/(app)/lounge/${space_id}` })
+    sendPush(m.user_id, authorLabel, preview, { route: `/(app)/lounge/${space_id}` }, undefined, 'lounge_message')
   )
 
   await Promise.allSettled([

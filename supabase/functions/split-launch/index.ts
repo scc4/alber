@@ -200,6 +200,9 @@ Deno.serve(async (req: Request) => {
         p.user_id,
         `Novo lançamento: ${description.trim()}`,
         `${user.handle} lançou R$ ${valueRounded.toFixed(2)} — sua parte: R$ ${perPerson.toFixed(2)}`,
+        undefined,
+        undefined,
+        'split_participant',
       ),
     )
   Promise.allSettled(pushes).catch(() => {})

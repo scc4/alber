@@ -10,17 +10,35 @@ import { json, err } from '../_shared/cors.ts'
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send'
 
-const supabaseAdmin = createClient(
-  Deno.env.get('SUPABASE_URL')!,
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-)
+type NotifCategory =
+  | 'tx_receive' | 'tx_send' | 'tx_carregar' | 'tx_descarregar'
+  | 'split_participant' | 'split_closed'
+  | 'lounge_message' | 'lounge_event' | 'lounge_request'
+  | 'conta_kyc'
+
+// category → coluna users.notif_* que precisa estar true pra essa notificação
+// sair. Ausente/não-mapeada = não-configurável, sempre envia (segurança, convites
+// sem categoria própria na tela de preferências).
+const CATEGORY_COLUMN: Record<NotifCategory, string> = {
+  tx_receive:         'notif_tx_receive',
+  tx_send:            'notif_tx_send',
+  tx_carregar:        'notif_tx_carregar',
+  tx_descarregar:     'notif_tx_descarregar',
+  split_participant:  'notif_split_participant',
+  split_closed:       'notif_split_closed',
+  lounge_message:     'notif_lounge_message',
+  lounge_event:       'notif_lounge_event',
+  lounge_request:     'notif_lounge_request',
+  conta_kyc:          'notif_conta_kyc',
+}
 
 interface PushSendRequest {
-  user_id: string
-  title:   string
-  body:    string
-  data?:   Record<string, string>
-  type?:   'transaction' | 'invite' | 'other'
+  user_id:   string
+  title:     string
+  body:      string
+  data?:     Record<string, string>
+  type?:     'transaction' | 'invite' | 'other'
+  category?: NotifCategory
 }
 
 interface ExpoReceipt {
@@ -29,8 +47,13 @@ interface ExpoReceipt {
   details?: { error?: string }
 }
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== 'POST') return err('METHOD_NOT_ALLOWED', 'Use POST', 405)
+
+  const supabaseAdmin = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
 
   // ── Verificar que é chamada interna (service role key) ───────────────────────
 
@@ -49,9 +72,27 @@ Deno.serve(async (req: Request) => {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { user_id, title, body: msgBody, data, type } = body
+  const { user_id, title, body: msgBody, data, type, category } = body
   if (!user_id || !title || !msgBody) {
     return err('MISSING_FIELDS', 'user_id, title e body são obrigatórios', 400)
+  }
+
+  // ── Checar preferência do usuário (Perfil > Notificações) ────────────────────
+  // category ausente/sem coluna mapeada = notificação não-configurável, sempre
+  // envia (segurança, convites sem categoria própria na tela de preferências).
+
+  if (category && CATEGORY_COLUMN[category]) {
+    const column = CATEGORY_COLUMN[category]
+    const { data: prefRow } = await supabaseAdmin
+      .from('users')
+      .select(column)
+      .eq('id', user_id)
+      .maybeSingle()
+
+    const enabled = (prefRow as Record<string, boolean> | null)?.[column] ?? true
+    if (!enabled) {
+      return json({ sent: 0, reason: 'muted', category })
+    }
   }
 
   // ── Registrar notificação in-app (independe de haver token ativo) ────────────
@@ -123,4 +164,8 @@ Deno.serve(async (req: Request) => {
   console.log(`[push-send] user=${user_id} sent=${sent}/${tokens.length}`)
 
   return json({ sent, total: tokens.length })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

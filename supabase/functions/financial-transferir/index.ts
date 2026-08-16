@@ -402,6 +402,7 @@ Deno.serve(async (req: Request) => {
     `${sender.name} transferiu ${amount_albers} Albers para ${recipient.kind === 'company' ? recipient.name : 'você'}`,
     { route: '/(app)/atividade' },
     'transaction',
+    'tx_receive',
   )
 
   // ── Audit log ────────────────────────────────────────────────────────────────

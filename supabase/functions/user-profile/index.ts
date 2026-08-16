@@ -34,7 +34,13 @@ Deno.serve(async (req: Request) => {
 
   const { data: user, error: userErr } = await supabaseAdmin
     .from('users')
-    .select('id, name, handle, email, phone, birth_date, pix_key, pix_key_type, kyc_status, account_status, created_at, asaas_account_id, marketing_opt_in')
+    .select(`
+      id, name, handle, email, phone, birth_date, pix_key, pix_key_type,
+      kyc_status, account_status, created_at, asaas_account_id, marketing_opt_in,
+      notif_tx_receive, notif_tx_send, notif_tx_carregar, notif_tx_descarregar,
+      notif_split_participant, notif_split_expired, notif_split_closed,
+      notif_lounge_message, notif_lounge_event, notif_lounge_request, notif_conta_kyc
+    `)
     .eq('auth_id', authUser.id)
     .maybeSingle()
 
@@ -68,6 +74,19 @@ Deno.serve(async (req: Request) => {
     has_pix_key:    !!user.pix_key,
     has_personal_wallet: !!user.asaas_account_id,
     marketing_opt_in: user.marketing_opt_in ?? false,
+    notification_prefs: {
+      notif_tx_receive:        user.notif_tx_receive        ?? true,
+      notif_tx_send:           user.notif_tx_send           ?? true,
+      notif_tx_carregar:       user.notif_tx_carregar       ?? true,
+      notif_tx_descarregar:    user.notif_tx_descarregar    ?? true,
+      notif_split_participant: user.notif_split_participant ?? true,
+      notif_split_expired:     user.notif_split_expired     ?? true,
+      notif_split_closed:      user.notif_split_closed      ?? false,
+      notif_lounge_message:    user.notif_lounge_message    ?? true,
+      notif_lounge_event:      user.notif_lounge_event      ?? true,
+      notif_lounge_request:    user.notif_lounge_request    ?? false,
+      notif_conta_kyc:         user.notif_conta_kyc         ?? true,
+    },
   })
 })
 

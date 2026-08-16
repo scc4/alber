@@ -270,6 +270,7 @@ Deno.serve(async (req: Request) => {
       `${owner.handle} te convidou pro split "${name.trim()}" — aprove para entrar`,
       { route: `/(app)/split/${splitId}` },
       'invite',
+      'split_participant',
     ).catch(() => {})
   }
 

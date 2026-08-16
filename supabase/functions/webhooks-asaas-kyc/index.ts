@@ -181,6 +181,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       'Conta verificada!',
       'Sua conta foi verificada! Já pode usar o Alber.',
       { route: '/(app)/perfil/kyc' },
+      undefined,
+      'conta_kyc',
     )
   } else {
     await sendPush(
@@ -188,6 +190,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       'Verificação não aprovada',
       'Sua verificação de identidade não foi concluída. Acesse o app para mais informações.',
       { route: '/(app)/perfil/kyc' },
+      undefined,
+      'conta_kyc',
     )
   }
 
@@ -289,6 +293,8 @@ async function handleCompanyKyc(
       'Empresa verificada!',
       'A verificação da sua empresa foi concluída. Já pode usar o Alber.',
       { route: `/(app)/empresas/${companyData.id}` },
+      undefined,
+      'conta_kyc',
     )
   } else {
     await sendPush(
@@ -296,6 +302,8 @@ async function handleCompanyKyc(
       'Verificação da empresa não aprovada',
       'A verificação de identidade da empresa não foi concluída. Acesse o app para mais informações.',
       { route: `/(app)/empresas/${companyData.id}` },
+      undefined,
+      'conta_kyc',
     )
   }
 

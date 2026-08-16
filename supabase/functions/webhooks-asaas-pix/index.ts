@@ -102,6 +102,7 @@ export async function handleRequest(req: Request): Promise<Response> {
         : 'Não foi possível concluir o envio do seu Pix. Tente novamente.',
       { route: '/(app)/atividade' },
       'transaction',
+      'tx_descarregar',
     )
 
     return new Response('OK', { status: 200 })
@@ -243,6 +244,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     `Seus ${amountAlbers} Albers foram carregados com sucesso.`,
     { route: '/(app)/atividade' },
     'transaction',
+    'tx_carregar',
   )
 
   return new Response('OK', { status: 200 })

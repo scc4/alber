@@ -235,6 +235,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     `Escaneie o QR Code para carregar ${amount_albers} Albers`,
     { route: '/(app)/atividade' },
     'transaction',
+    'tx_carregar',
   )
 
   // ── ETAPA 4 — Retornar ao app ────────────────────────────────────────────────

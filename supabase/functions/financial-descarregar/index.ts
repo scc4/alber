@@ -360,6 +360,7 @@ Deno.serve(async (req: Request) => {
     `${amount_albers} Albers serão enviados para sua chave Pix`,
     { route: '/(app)/atividade' },
     'transaction',
+    'tx_descarregar',
   )
 
   return json({

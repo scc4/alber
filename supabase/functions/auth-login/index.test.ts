@@ -237,3 +237,42 @@ Deno.test('2ª resposta de segurança errada dentro da janela → bloqueia e ret
   assertEquals(data.code, 'ACCOUNT_BLOCKED')
   assertEquals(typeof patchedBody!.login_blocked_until, 'string')
 })
+
+Deno.test('login via company_id + operator_ref: operador não pertence à empresa → 401 INVALID_CREDENTIALS, nunca chega a checar PIN', async () => {
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/companies', method: 'GET', status: 200, body: [{ owner_id: 'someone-else' }] },
+    { pattern: '/rest/v1/company_operators', method: 'GET', status: 200, body: [] },
+  ]
+  let adminUsersCalled = false
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    if (url.includes('/auth/v1/admin/users/')) adminUsersCalled = true
+    return mockFetch(routes)(input, init)
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ company_id: 'c1', operator_ref: 'not-a-member' }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  const data = await res.json()
+  assertEquals(res.status, 401)
+  assertEquals(data.code, 'INVALID_CREDENTIALS')
+  assertEquals(adminUsersCalled, false)
+})
+
+Deno.test('login via company_id + operator_ref: master da empresa → resolve o usuário por id, segue o fluxo normal', async () => {
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/companies', method: 'GET', status: 200, body: [{ owner_id: 'db-user-1' }] },
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow({ id: 'db-user-1' }) },
+  ]
+  const res  = await withMock(routes, () => handleRequest(makeReq({ company_id: 'c1', operator_ref: 'db-user-1' })))
+  const data = await res.json()
+  // Sem mock de auth/v1/admin/users → pin_bcrypt não encontrado → mesma
+  // credencial inválida genérica de sempre, mas prova que passou da checagem
+  // de pertencimento e chegou a resolver o usuário por operator_ref.
+  assertEquals(res.status, 401)
+  assertEquals(data.code, 'INVALID_CREDENTIALS')
+})

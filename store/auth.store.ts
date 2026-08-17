@@ -41,7 +41,7 @@ interface AuthState {
   isLoadingSession: boolean
 
   // Actions
-  login:            (cpf: string, pinHash: string, securityAnswerHash: string, securityAnswerHashLegacy?: string) => Promise<void>
+  login:            (cpfOrOperator: string | authService.OperatorLoginRef, pinHash: string, securityAnswerHash: string, securityAnswerHashLegacy?: string) => Promise<void>
   setSession:       (token: string | null, refreshToken: string | null, user: AuthUser, kycStatus: KycStatus, accountStatus: AccountStatus) => Promise<void>
   loadSession:      () => Promise<void>
   logout:           () => Promise<void>

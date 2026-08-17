@@ -158,14 +158,25 @@ export interface LoginResponse {
   }
 }
 
+// Login "como empresa" — a pessoa já escolheu qual operador ela é na tela de
+// seleção (ver lookupCompanyIdentifier), então em vez de cpf/@handle o app
+// manda company_id + operatorRef (o user_id devolvido no lookup).
+export interface OperatorLoginRef {
+  companyId:   string
+  operatorRef: string
+}
+
 export async function login(
-  cpf:                         string,
+  cpfOrOperator:                string | OperatorLoginRef,
   pin_hash:                    string,
   security_answer_hash:        string,
   security_answer_hash_legacy?: string,
 ): Promise<LoginResponse> {
+  const identity = typeof cpfOrOperator === 'string'
+    ? { cpf: cpfOrOperator }
+    : { company_id: cpfOrOperator.companyId, operator_ref: cpfOrOperator.operatorRef }
   return post<LoginResponse>('auth-login', {
-    cpf, pin_hash, security_answer_hash,
+    ...identity, pin_hash, security_answer_hash,
     ...(security_answer_hash_legacy ? { security_answer_hash_legacy } : {}),
   })
 }
@@ -178,6 +189,38 @@ export async function login(
 export async function checkCpfExists(cpf: string): Promise<boolean> {
   const res = await post<{ exists: boolean }>('auth-check-cpf', { cpf })
   return res.exists
+}
+
+// ── Login "como empresa" — primeiro passo (CNPJ ou @handle de empresa) ──────
+// Chamado a partir da tela de login quando o identificador digitado não é um
+// CPF: descobre se é uma empresa e, se for, traz master + operadores ativos
+// com nomes já mascarados pelo backend (nunca em texto puro).
+
+export interface CompanyLookupOperator {
+  ref:         string
+  masked_name: string
+  role:        'master' | 'operator'
+}
+
+export type CompanyLookupResult =
+  | { kind: 'not_company' }
+  | { kind: 'company'; companyId: string; companyName: string; operators: CompanyLookupOperator[] }
+
+export async function lookupCompanyIdentifier(identifier: string): Promise<CompanyLookupResult> {
+  const res = await post<{
+    kind: 'not_company' | 'company'
+    company_id?:   string
+    company_name?: string
+    operators?:    CompanyLookupOperator[]
+  }>('auth-company-lookup', { identifier })
+
+  if (res.kind !== 'company' || !res.company_id || !res.company_name) return { kind: 'not_company' }
+  return {
+    kind:        'company',
+    companyId:   res.company_id,
+    companyName: res.company_name,
+    operators:   res.operators ?? [],
+  }
 }
 
 // ── Logout ────────────────────────────────────────────────────────────────────
@@ -279,10 +322,13 @@ export type SecurityChallengeResult =
   | { type: 'error' }                     // falha de rede/servidor — retry genérico faz sentido
 
 export async function fetchSecurityChallenge(
-  identifier: string,
+  identifierOrOperator: string | OperatorLoginRef,
   pinHash: string,
   excludeQuestionId?: string,
 ): Promise<SecurityChallengeResult> {
+  const identity = typeof identifierOrOperator === 'string'
+    ? { identifier: identifierOrOperator }
+    : { company_id: identifierOrOperator.companyId, operator_ref: identifierOrOperator.operatorRef }
   try {
     const res = await fetch(`${BFF}/auth-question`, {
       method: 'POST',
@@ -291,7 +337,7 @@ export async function fetchSecurityChallenge(
         'apikey': ANON_KEY,
         'Authorization': `Bearer ${ANON_KEY}`,
       },
-      body: JSON.stringify({ identifier, pin_hash: pinHash, exclude_question_id: excludeQuestionId }),
+      body: JSON.stringify({ ...identity, pin_hash: pinHash, exclude_question_id: excludeQuestionId }),
     })
     if (!res.ok) return { type: 'error' }
     const data = await res.json() as {

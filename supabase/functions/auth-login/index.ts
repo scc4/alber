@@ -9,12 +9,17 @@ import {
   isCurrentlyBlocked, recordFailureAndMaybeBlock,
   PIN_FAILURE_THRESHOLD, SECURITY_FAILURE_THRESHOLD, LOGIN_BLOCK_MINUTES,
 } from '../_shared/login-lockout.ts'
+import { isCompanyMember } from '../_shared/operator-login.ts'
 
 interface LoginRequest {
-  cpf: string
+  cpf?: string
   pin_hash: string
   security_answer_hash: string
   security_answer_hash_legacy?: string   // dev-fallback hash — migração de contas antigas
+  // Login "como empresa" — a pessoa já escolheu qual operador ela é na tela
+  // de seleção (ver auth-company-lookup), em vez de digitar cpf/@handle.
+  company_id?:   string
+  operator_ref?: string
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -61,48 +66,74 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('INVALID_BODY', 'JSON inválido', 400)
   }
 
-  const { cpf, pin_hash, security_answer_hash, security_answer_hash_legacy } = body
+  const { cpf, pin_hash, security_answer_hash, security_answer_hash_legacy, company_id, operator_ref } = body
 
-  if (!cpf || !pin_hash || !security_answer_hash) {
+  if (!pin_hash || !security_answer_hash) {
+    return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
+  }
+  if (!cpf && !(company_id && operator_ref)) {
     return err('MISSING_FIELDS', 'Campos obrigatórios ausentes', 400)
   }
 
-  // ── Detectar tipo de identificador (CPF ou @handle) ─────────────────────────
-
-  const cpfClean    = normalizeCpf(cpf)
-  const handleClean = cpf.replace(/^@/, '').toLowerCase()
-  const isHandleId  = !validateCpf(cpfClean) && /^[a-z][a-z0-9_]{2,}$/.test(handleClean)
-
-  if (!validateCpf(cpfClean) && !isHandleId) {
-    console.error('[auth-login] FAIL:invalid_identifier raw=', cpf)
-    return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
-  }
-
   // ── Localizar usuário ────────────────────────────────────────────────────────
+  // Dois caminhos: cpf (cpf/@handle pessoal, fluxo de sempre) ou
+  // company_id + operator_ref (login "como empresa" — a pessoa já escolheu
+  // qual operador ela é na tela de seleção, ver auth-company-lookup).
+
+  const USER_COLUMNS = 'id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until, asaas_account_id'
 
   let user: { id: string; auth_id: string; name: string; email: string; handle: string; kyc_status: string; account_status: string; deleted_at: string | null; login_blocked_until: string | null; asaas_account_id: string | null } | null = null
 
-  if (isHandleId) {
+  if (company_id && operator_ref) {
+    if (!(await isCompanyMember(supabaseAdmin, company_id, operator_ref))) {
+      console.error('[auth-login] FAIL:operator_not_member company_id=', company_id)
+      return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    }
     const { data } = await supabaseAdmin
       .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until, asaas_account_id')
-      .eq('handle', handleClean)
+      .select(USER_COLUMNS)
+      .eq('id', operator_ref)
       .maybeSingle()
     user = data
-    console.log('[auth-login] lookup by handle=', handleClean, 'found=', !!user)
+    console.log('[auth-login] lookup by operator_ref found=', !!user)
   } else {
-    const cpfHash = await sha256hex(cpfClean)
-    const { data } = await supabaseAdmin
-      .from('users')
-      .select('id, auth_id, name, email, handle, kyc_status, account_status, deleted_at, login_blocked_until, asaas_account_id')
-      .eq('cpf', cpfHash)
-      .maybeSingle()
-    user = data
-    console.log('[auth-login] lookup by cpf found=', !!user)
+    // ── Detectar tipo de identificador (CPF ou @handle) ─────────────────────
+    const cpfClean    = normalizeCpf(cpf!)
+    const handleClean = cpf!.replace(/^@/, '').toLowerCase()
+    const isHandleId  = !validateCpf(cpfClean) && /^[a-z][a-z0-9_]{2,}$/.test(handleClean)
+
+    if (!validateCpf(cpfClean) && !isHandleId) {
+      console.error('[auth-login] FAIL:invalid_identifier raw=', cpf)
+      return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    }
+
+    if (isHandleId) {
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select(USER_COLUMNS)
+        .eq('handle', handleClean)
+        .maybeSingle()
+      user = data
+      console.log('[auth-login] lookup by handle=', handleClean, 'found=', !!user)
+    } else {
+      const cpfHash = await sha256hex(cpfClean)
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select(USER_COLUMNS)
+        .eq('cpf', cpfHash)
+        .maybeSingle()
+      user = data
+      console.log('[auth-login] lookup by cpf found=', !!user)
+    }
+
+    if (!user) {
+      console.error('[auth-login] FAIL:user_not_found identifier=', isHandleId ? `@${handleClean}` : `cpf[${cpfClean.length}]`)
+      return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
+    }
   }
 
   if (!user) {
-    console.error('[auth-login] FAIL:user_not_found identifier=', isHandleId ? `@${handleClean}` : `cpf[${cpfClean.length}]`)
+    console.error('[auth-login] FAIL:user_not_found operator_ref=', operator_ref)
     return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
   }
 

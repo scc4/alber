@@ -17,7 +17,9 @@ import { router, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { Header } from '../../components/core/Header'
 import { BalanceBlock } from '../../components/financial/BalanceBlock'
+import { ActionRow, ReceberIcon, CarregarIcon, TransferirIcon, SplitIcon } from '../../components/financial/ActionRow'
 import { Eyebrow } from '../../components/shared/Eyebrow'
+import { HomeBanner, BannerData } from '../../components/shared/HomeBanner'
 import { AccountSwitcherSheet } from '../../components/core/AccountSwitcherSheet'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
@@ -46,14 +48,6 @@ export default function HomeScreen() {
 }
 
 // ─── Banner logic ────────────────────────────────────────────────────────────
-
-type BannerData = {
-  tone: 'warning' | 'error' | 'info'
-  text: string
-  cta: string
-  dismissible: boolean
-  target: string
-}
 
 function resolveBanner(
   kycStatus: string,
@@ -252,15 +246,13 @@ function PersonalHomeScreen() {
 
         {/* Banner contextual por prioridade (máx 1 por vez) */}
         {banner != null && (
-          <View style={styles.bannerWrap}>
-            <HomeBanner
-              banner={banner}
-              onPress={() => {
-                if (banner.target) router.push(banner.target as never)
-              }}
-              onDismiss={banner.dismissible ? () => setDismissedBanner(true) : undefined}
-            />
-          </View>
+          <HomeBanner
+            banner={banner}
+            onPress={() => {
+              if (banner.target) router.push(banner.target as never)
+            }}
+            onDismiss={banner.dismissible ? () => setDismissedBanner(true) : undefined}
+          />
         )}
 
         {/* Bloco de saldo */}
@@ -363,127 +355,6 @@ function PersonalHomeScreen() {
   )
 }
 
-// ─── HomeBanner ───────────────────────────────────────────────────────────────
-
-interface HomeBannerProps {
-  banner: BannerData
-  onPress: () => void
-  onDismiss?: () => void
-}
-
-function HomeBanner({ banner, onPress, onDismiss }: HomeBannerProps) {
-  const tones = {
-    warning: { color: colors.warning[500],  bg: 'rgba(245,158,11,0.07)', border: 'rgba(245,158,11,0.22)' },
-    error:   { color: colors.state.error,   bg: 'rgba(239,68,68,0.07)',  border: 'rgba(239,68,68,0.22)' },
-    info:    { color: 'rgba(255,255,255,0.65)', bg: 'rgba(255,255,255,0.04)', border: 'rgba(255,255,255,0.10)' },
-  }
-  const t = tones[banner.tone]
-
-  return (
-    <Pressable
-      onPress={onPress}
-      style={[styles.banner, { backgroundColor: t.bg, borderColor: t.border }]}
-      accessibilityRole="button"
-    >
-      <View style={[styles.bannerDot, { backgroundColor: t.color }]} />
-      <Text style={[styles.bannerText, { color: t.color }]}>{banner.text}</Text>
-      <Text style={[styles.bannerCta, { color: t.color }]}>{banner.cta}</Text>
-      {onDismiss != null && (
-        <Pressable onPress={onDismiss} hitSlop={8} style={styles.bannerClose}>
-          <Text style={[styles.bannerCloseText, { color: t.color }]}>✕</Text>
-        </Pressable>
-      )}
-    </Pressable>
-  )
-}
-
-// ─── ActionRow ────────────────────────────────────────────────────────────────
-
-interface ActionRowProps {
-  icon: React.ReactNode
-  label: string
-  sublabel?: string
-  onPress: () => void
-  disabled?: boolean
-}
-
-function ActionRow({ icon, label, sublabel, onPress, disabled }: ActionRowProps) {
-  return (
-    <Pressable
-      onPress={disabled ? undefined : onPress}
-      style={({ pressed }) => [styles.actionRow, disabled && styles.actionRowDisabled, pressed && styles.actionRowPressed]}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{ disabled }}
-    >
-      <View style={styles.actionIcon}>{icon}</View>
-      <View style={styles.actionLabel}>
-        <Text style={styles.actionText}>{label}</Text>
-        {sublabel != null && <Text style={styles.actionSublabel}>{sublabel}</Text>}
-      </View>
-      <Text style={styles.actionChevron}>›</Text>
-    </Pressable>
-  )
-}
-
-// ─── Action icons (puro View) ─────────────────────────────────────────────────
-
-const AI = 'rgba(255,255,255,0.8)'
-const AW = 1.5
-
-function ReceberIcon() {
-  // Seta para baixo: linha vertical + V-chevron
-  return (
-    <View style={aiv.root}>
-      <View style={[aiv.line, { top: 2, left: 9, height: 10 }]} />
-      <View style={[aiv.arm, { bottom: 2, left: 4,  transform: [{ rotate: '40deg'  }] }]} />
-      <View style={[aiv.arm, { bottom: 2, right: 4, transform: [{ rotate: '-40deg' }] }]} />
-    </View>
-  )
-}
-
-function CarregarIcon() {
-  // Seta para cima: ^-chevron + linha vertical
-  return (
-    <View style={aiv.root}>
-      <View style={[aiv.arm, { top: 2, left: 4,  transform: [{ rotate: '-40deg' }] }]} />
-      <View style={[aiv.arm, { top: 2, right: 4, transform: [{ rotate: '40deg'  }] }]} />
-      <View style={[aiv.line, { bottom: 2, left: 9, height: 10 }]} />
-    </View>
-  )
-}
-
-function TransferirIcon() {
-  // Seta para a direita: linha horizontal + >-chevron
-  return (
-    <View style={aiv.root}>
-      <View style={[aiv.hline, { top: 9, left: 2, width: 11 }]} />
-      <View style={[aiv.arm, { top: 4,  right: 2, transform: [{ rotate: '40deg'  }] }]} />
-      <View style={[aiv.arm, { bottom: 4, right: 2, transform: [{ rotate: '-40deg' }] }]} />
-    </View>
-  )
-}
-
-function SplitIcon() {
-  // Barra vertical esquerda + duas setas direita (cima e baixo)
-  return (
-    <View style={aiv.root}>
-      <View style={[aiv.line, { top: 2, left: 2, height: 16 }]} />
-      <View style={[aiv.hline, { top: 4, left: 4, width: 8 }]} />
-      <View style={[aiv.hline, { bottom: 4, left: 4, width: 8 }]} />
-      <View style={[aiv.arm, { top: 2,    right: 2, transform: [{ rotate: '40deg'  }] }]} />
-      <View style={[aiv.arm, { bottom: 2, right: 2, transform: [{ rotate: '-40deg' }] }]} />
-    </View>
-  )
-}
-
-const aiv = StyleSheet.create({
-  root:  { width: 20, height: 20 },
-  line:  { position: 'absolute', width: AW, backgroundColor: AI, borderRadius: 1 },
-  hline: { position: 'absolute', height: AW, backgroundColor: AI, borderRadius: 1 },
-  arm:   { position: 'absolute', width: 7, height: AW, backgroundColor: AI, borderRadius: 1 },
-})
-
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -505,45 +376,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
 
-  // Banner
-  bannerWrap: {
-    paddingHorizontal: spacing.lg,
-    paddingTop: 14,
-  },
-  banner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 10,
-    paddingHorizontal: 14,
-    borderRadius: spacing.radius.md,
-    borderWidth: 0.5,
-  },
-  bannerDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    flexShrink: 0,
-  },
-  bannerText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 16,
-    fontFamily: typography.fontFamily.primary,
-  },
-  bannerCta: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.22,
-    fontFamily: typography.fontFamily.primary,
-  },
-  bannerClose: {
-    paddingLeft: 6,
-  },
-  bannerCloseText: {
-    fontSize: 11,
-    fontFamily: typography.fontFamily.primary,
-  },
 
   // Lounge
   loungeSection: {
@@ -598,45 +430,5 @@ const styles = StyleSheet.create({
   // Actions
   actionsWrap: {
     paddingHorizontal: spacing.lg,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    paddingVertical: 15,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.07)',
-  },
-  actionRowDisabled: {
-    opacity: 0.4,
-  },
-  actionRowPressed: {
-    opacity: 0.55,
-  },
-  actionIcon: {
-    width: 20,
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionLabel: {
-    flex: 1,
-  },
-  actionText: {
-    fontSize: 16,
-    color: 'rgba(255,255,255,0.9)',
-    fontWeight: '400',
-    fontFamily: typography.fontFamily.primary,
-  },
-  actionSublabel: {
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.4)',
-    marginTop: 2,
-    fontFamily: typography.fontFamily.primary,
-  },
-  actionChevron: {
-    fontSize: 18,
-    color: 'rgba(255,255,255,0.2)',
-    fontFamily: typography.fontFamily.primary,
   },
 })

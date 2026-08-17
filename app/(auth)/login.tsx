@@ -24,6 +24,7 @@ import { PINInput } from '../../components/financial/PINInput'
 import { PrimaryButton } from '../../components/core/PrimaryButton'
 import { Field } from '../../components/core/Field'
 import { useAuthStore } from '../../store/auth.store'
+import { useActiveContextStore } from '../../store/active-context.store'
 import * as authService from '../../services/auth.service'
 import { sha256Hex, normalizeSecurityAnswer, legacyDevHash } from '../../utils/crypto'
 import { resolveInitialRoute } from '../../hooks/useInitialRoute'
@@ -32,7 +33,8 @@ import { colors } from '../../tokens/colors'
 import { typography } from '../../tokens/typography'
 import { spacing } from '../../tokens/spacing'
 
-type Phase = 'id' | 'pin' | 'security'
+type Phase = 'id' | 'operator' | 'pin' | 'security'
+type IdentifierKind = 'cpf' | 'cnpj' | 'handle' | 'invalid'
 
 function maskCPF(v: string) {
   v = v.replace(/\D/g, '').slice(0, 11)
@@ -40,6 +42,26 @@ function maskCPF(v: string) {
   if (v.length > 6) return `${v.slice(0,3)}.${v.slice(3,6)}.${v.slice(6)}`
   if (v.length > 3) return `${v.slice(0,3)}.${v.slice(3)}`
   return v
+}
+
+// CNPJ numérico só ganha máscara visual — o formato alfanumérico novo da
+// Receita (raro ainda) é aceito sem máscara, só maiúsculas (ver _shared/cnpj.ts).
+function maskCNPJDigits(v: string) {
+  if (v.length > 12) return `${v.slice(0,2)}.${v.slice(2,5)}.${v.slice(5,8)}/${v.slice(8,12)}-${v.slice(12)}`
+  if (v.length > 8)  return `${v.slice(0,2)}.${v.slice(2,5)}.${v.slice(5,8)}/${v.slice(8)}`
+  if (v.length > 5)  return `${v.slice(0,2)}.${v.slice(2,5)}.${v.slice(5)}`
+  if (v.length > 2)  return `${v.slice(0,2)}.${v.slice(2)}`
+  return v
+}
+
+// Classifica o identificador digitado — decide se o "Continuar" segue direto
+// pro PIN (cpf) ou primeiro consulta auth-company-lookup (cnpj/handle).
+function classifyIdentifier(v: string): IdentifierKind {
+  if (v.startsWith('@')) return 'handle'
+  const clean = v.replace(/[^0-9A-Za-z]/g, '')
+  if (/^\d{11}$/.test(clean)) return 'cpf'
+  if (/^[0-9A-Za-z]{14}$/.test(clean)) return 'cnpj'
+  return 'invalid'
 }
 
 export default function LoginScreen() {
@@ -50,6 +72,11 @@ export default function LoginScreen() {
 
   const [phase, setPhase]           = useState<Phase>('id')
   const [identifier, setIdentifier] = useState(params.cpf ? maskCPF(params.cpf) : '')
+  const [identifierError, setIdentifierError] = useState<string | null>(null)
+  const [lookupLoading, setLookupLoading]     = useState(false)
+  const [companyContext, setCompanyContext]   = useState<{ companyId: string; companyName: string } | null>(null)
+  const [operators, setOperators]             = useState<authService.CompanyLookupOperator[]>([])
+  const [selectedOperatorRef, setSelectedOperatorRef] = useState<string | null>(null)
   const [pinHash, setPinHash]       = useState('')
   const [pinMode, setPinMode]       = useState<'secure' | 'setup'>('secure')
   const [challenge, setChallenge]     = useState<authService.SecurityChallenge | null>(null)
@@ -61,18 +88,23 @@ export default function LoginScreen() {
   const [pinError, setPinError]       = useState<string | null>(null)
   const pinErrKey = useRef(0)
 
+  const identifierKind = classifyIdentifier(identifier)
+  const isValid = identifierKind !== 'invalid'
   const isHandle = identifier.startsWith('@')
-  const isValid  = isHandle
-    ? identifier.replace(/^@/, '').length >= 3
-    : identifier.replace(/\D/g, '').length === 11
+
+  // Identidade usada pra continuar o login (PIN/pergunta de segurança) —
+  // ou o cpf/@handle digitado, ou o operador escolhido no fluxo de empresa.
+  const loginIdentity = (): string | authService.OperatorLoginRef =>
+    companyContext && selectedOperatorRef
+      ? { companyId: companyContext.companyId, operatorRef: selectedOperatorRef }
+      : (isHandle ? identifier : identifier.replace(/\D/g, ''))
 
   // Busca um challenge novo — usado ao entrar na fase security e ao errar uma
   // resposta (excludeQuestionId evita repetir a mesma pergunta).
   const loadChallenge = (excludeQuestionId?: string) => {
     setChallengeError(false)
     setChallengeLoading(true)
-    const cpfOrHandle = identifier.startsWith('@') ? identifier : identifier.replace(/\D/g, '')
-    authService.fetchSecurityChallenge(cpfOrHandle, pinHash, excludeQuestionId)
+    authService.fetchSecurityChallenge(loginIdentity(), pinHash, excludeQuestionId)
       .then(result => {
         switch (result.type) {
           case 'pin_setup_required':
@@ -118,12 +150,45 @@ export default function LoginScreen() {
   }, [phase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleIdentifierChange = (v: string) => {
+    setIdentifierError(null)
     if (v === '' || v === '@') { setIdentifier(v); return }
     const bare = v.startsWith('@') ? v.slice(1) : v
     if (/^\d/.test(bare)) {
-      setIdentifier(maskCPF(bare))
+      const digits = bare.replace(/\D/g, '')
+      setIdentifier(digits.length <= 11 ? maskCPF(digits) : maskCNPJDigits(digits.slice(0, 14)))
     } else {
       setIdentifier('@' + bare.toLowerCase().replace(/[^a-z0-9_]/g, ''))
+    }
+  }
+
+  // Continuar na fase 'id': cpf segue direto pro PIN (fluxo de sempre); cnpj
+  // ou @handle primeiro consultam auth-company-lookup pra saber se é uma
+  // empresa (aí abre o seletor de operador) ou uma pessoa (handle comum,
+  // segue o mesmo fluxo de sempre).
+  const handleContinue = async () => {
+    if (!isValid || lookupLoading) return
+    if (identifierKind === 'cpf') {
+      setPhase('pin')
+      return
+    }
+    setIdentifierError(null)
+    setLookupLoading(true)
+    try {
+      const result = await authService.lookupCompanyIdentifier(identifier)
+      if (result.kind === 'company') {
+        setCompanyContext({ companyId: result.companyId, companyName: result.companyName })
+        setOperators(result.operators)
+        setSelectedOperatorRef(null)
+        setPhase('operator')
+      } else if (identifierKind === 'cnpj') {
+        setIdentifierError(t('auth.login.errorCnpjNotFound'))
+      } else {
+        setPhase('pin')
+      }
+    } catch {
+      setIdentifierError(t('auth.login.errorGeneric'))
+    } finally {
+      setLookupLoading(false)
     }
   }
 
@@ -133,14 +198,27 @@ export default function LoginScreen() {
     setTimeout(() => setPhase('security'), 200)
   }
 
+  // Pós-login: se veio do fluxo "entrar como empresa", cai direto naquela
+  // empresa (a pessoa escolheu explicitamente) — não passa por
+  // resolveInitialRoute, que prioriza a carteira pessoal quando ela existe.
+  const navigateAfterLogin = async () => {
+    if (companyContext) {
+      await useActiveContextStore.getState().setContext({
+        type: 'company', companyId: companyContext.companyId, companyName: companyContext.companyName,
+      })
+      router.replace('/(app)/' as never)
+    } else {
+      router.replace((await resolveInitialRoute()) as never)
+    }
+  }
+
   // Envia o hash da opção selecionada (fornecido pelo backend no challenge)
   const submitOptionHash = async (optionHash: string) => {
     if (isLoggingIn) return
     setIsLoggingIn(true)
-    const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
     try {
-      await login(cpfOrHandle, pinHash, optionHash)
-      router.replace((await resolveInitialRoute()) as never)
+      await login(loginIdentity(), pinHash, optionHash)
+      await navigateAfterLogin()
     } catch (e: unknown) {
       setIsLoggingIn(false)
       const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
@@ -191,12 +269,11 @@ export default function LoginScreen() {
     if (answer.trim().length < 2 || isLoggingIn) return
     setIsLoggingIn(true)
     const normalized = normalizeSecurityAnswer(answer)
-    const cpfOrHandle = isHandle ? identifier : identifier.replace(/\D/g, '')
     try {
       const answerHash = await sha256Hex(normalized)
       const legacyHash = legacyDevHash(normalized)
-      await login(cpfOrHandle, pinHash, answerHash, legacyHash)
-      router.replace((await resolveInitialRoute()) as never)
+      await login(loginIdentity(), pinHash, answerHash, legacyHash)
+      await navigateAfterLogin()
     } catch (e: unknown) {
       setIsLoggingIn(false)
       const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
@@ -247,6 +324,8 @@ export default function LoginScreen() {
             value={identifier}
             onChangeText={handleIdentifierChange}
             placeholder={t('auth.login.identifierPlaceholder')}
+            error={identifierError}
+            loading={lookupLoading}
             autoFocus
             autoCapitalize="none"
             autoCorrect={false}
@@ -256,8 +335,8 @@ export default function LoginScreen() {
 
           <PrimaryButton
             label={t('auth.login.continue')}
-            onPress={() => setPhase('pin')}
-            state={isValid ? 'default' : 'disabled'}
+            onPress={handleContinue}
+            state={!isValid ? 'disabled' : lookupLoading ? 'loading' : 'default'}
           />
 
           <TouchableOpacity onPress={() => router.push('/(auth)/cadastro/dados')} style={styles.signupLink}>
@@ -271,18 +350,63 @@ export default function LoginScreen() {
     )
   }
 
+  // ─── Fase: seleção de operador (login "como empresa") ────────────────────
+  if (phase === 'operator' && companyContext != null) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top }]}>
+        <ScrollView
+          contentContainerStyle={[styles.secContent, { paddingBottom: insets.bottom + spacing.xl }]}
+        >
+          <TouchableOpacity style={styles.backBtnAbs} onPress={() => { setCompanyContext(null); setPhase('id') }}>
+            <Text style={styles.backArrow}>‹</Text>
+          </TouchableOpacity>
+
+          <Text style={styles.secEyebrow}>{t('auth.login.operatorEyebrow')}</Text>
+          <Text style={styles.secQuestion}>{t('auth.login.operatorTitle')}</Text>
+          <Text style={styles.secHint}>
+            {t('auth.login.operatorSubtitle', { company: companyContext.companyName })}
+          </Text>
+
+          <View style={styles.optionsList}>
+            {operators.map(op => (
+              <TouchableOpacity
+                key={op.ref}
+                style={styles.operatorItem}
+                activeOpacity={0.65}
+                onPress={() => { setSelectedOperatorRef(op.ref); setPhase('pin') }}
+              >
+                <Text style={styles.operatorName}>{op.masked_name}</Text>
+                <Text style={styles.operatorRole}>
+                  {op.role === 'master' ? t('empresas.roleMaster') : t('empresas.roleOperator')}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+      </View>
+    )
+  }
+
   // ─── Fase: PIN ──────────────────────────────────────────────────────────
   if (phase === 'pin') {
+    const selectedOperator = operators.find(o => o.ref === selectedOperatorRef)
     return (
       <View style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
-        <TouchableOpacity style={styles.backBtnAbs} onPress={() => { setPinMode('secure'); setPhase('id') }}>
+        <TouchableOpacity
+          style={styles.backBtnAbs}
+          onPress={() => { setPinMode('secure'); setPhase(companyContext ? 'operator' : 'id') }}
+        >
           <Text style={styles.backArrow}>‹</Text>
         </TouchableOpacity>
 
         <View style={styles.pinContent}>
           <Text style={styles.pinEyebrow}>{t('auth.login.usealber')}</Text>
           <Text style={styles.pinTitle}>{t('auth.login.pinTitle')}</Text>
-          <Text style={styles.pinIdentifier}>{identifier}</Text>
+          <Text style={styles.pinIdentifier}>
+            {companyContext && selectedOperator
+              ? `${companyContext.companyName} · ${selectedOperator.masked_name}`
+              : identifier}
+          </Text>
 
           <PINInput
             key={`login-pin-${pinErrKey.current}`}
@@ -586,5 +710,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: spacing.sm,
     fontFamily: typography.fontFamily.primary,
+  },
+  // operator phase
+  operatorItem: {
+    paddingVertical: 14,
+    paddingHorizontal: spacing.md,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: spacing.radius.md,
+    gap: 3,
+  },
+  operatorName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.white[100],
+    fontFamily: typography.fontFamily.primary,
+    letterSpacing: 0.5,
+  },
+  operatorRole: {
+    fontSize: 11.5,
+    color: 'rgba(255,255,255,0.45)',
+    fontFamily: typography.fontFamily.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
 })

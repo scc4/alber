@@ -7,15 +7,10 @@ import { handleCors, json } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
 import { sha256hex, tryParsePairsPayload, verifyPinWithPairs, bcryptVerify } from '../_shared/crypto.ts'
 import { isCurrentlyBlocked, recordFailureAndMaybeBlock, PIN_FAILURE_THRESHOLD } from '../_shared/login-lockout.ts'
+import { maskText as maskAnswer } from '../_shared/mask.ts'
+import { isCompanyMember } from '../_shared/operator-login.ts'
 
-// ── Mascaramento e geração de decoys (espelhado de utils/crypto.ts) ──────────
-
-function maskAnswer(answer: string): string {
-  const n = answer.length
-  if (n <= 4)  return answer[0] + '*'.repeat(Math.max(0, n - 2)) + answer[n - 1]
-  if (n <= 8)  return answer.slice(0, 2) + '*'.repeat(n - 4) + answer.slice(n - 2)
-  return answer.slice(0, 3) + '*'.repeat(n - 6) + answer.slice(n - 3)
-}
+// ── Geração de decoys (espelhado de utils/crypto.ts) ─────────────────────────
 
 const DECOY_POOL = [
   'rex', 'nina', 'mel', 'luna', 'bob', 'lola', 'toto', 'bidu', 'fofo', 'pingo',
@@ -48,47 +43,71 @@ export async function handleRequest(req: Request): Promise<Response> {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  let body: { identifier: string; pin_hash: string; exclude_question_id?: string }
+  let body: {
+    identifier?:         string
+    pin_hash:            string
+    exclude_question_id?: string
+    company_id?:         string
+    operator_ref?:       string
+  }
   try {
     body = await req.json()
   } catch {
     return json({ question: '', options: [] })
   }
 
-  const { identifier, pin_hash, exclude_question_id } = body
-  if (!identifier || !pin_hash) return json({ question: '', options: [] })
+  const { identifier, pin_hash, exclude_question_id, company_id, operator_ref } = body
+  if (!pin_hash) return json({ question: '', options: [] })
+  if (!identifier && !(company_id && operator_ref)) return json({ question: '', options: [] })
 
   // ── Localizar usuário ────────────────────────────────────────────────────────
-
-  const cpfClean    = normalizeCpf(identifier)
-  const handleClean = identifier.replace(/^@/, '').toLowerCase()
-  const isHandleId  = !validateCpf(cpfClean) && /^[a-z][a-z0-9_]{2,}$/.test(handleClean)
-
-  if (!validateCpf(cpfClean) && !isHandleId) return json({ question: '', options: [] })
+  // Dois caminhos: identifier (cpf/@handle pessoal, fluxo de sempre) ou
+  // company_id + operator_ref (login "como empresa" — a pessoa já escolheu
+  // qual operador ela é na tela de seleção, ver auth-company-lookup).
 
   let userId: string | null = null
   let authId: string | null = null
   let loginBlockedUntil: string | null = null
 
-  if (isHandleId) {
+  if (company_id && operator_ref) {
+    if (!(await isCompanyMember(supabaseAdmin, company_id, operator_ref))) {
+      return json({ question: '', options: [] })
+    }
     const { data } = await supabaseAdmin
       .from('users')
       .select('id, auth_id, login_blocked_until')
-      .eq('handle', handleClean)
+      .eq('id', operator_ref)
       .maybeSingle()
     userId = data?.id ?? null
     authId = data?.auth_id ?? null
     loginBlockedUntil = data?.login_blocked_until ?? null
   } else {
-    const cpfHash = await sha256hex(cpfClean)
-    const { data } = await supabaseAdmin
-      .from('users')
-      .select('id, auth_id, login_blocked_until')
-      .eq('cpf', cpfHash)
-      .maybeSingle()
-    userId = data?.id ?? null
-    authId = data?.auth_id ?? null
-    loginBlockedUntil = data?.login_blocked_until ?? null
+    const cpfClean    = normalizeCpf(identifier!)
+    const handleClean = identifier!.replace(/^@/, '').toLowerCase()
+    const isHandleId  = !validateCpf(cpfClean) && /^[a-z][a-z0-9_]{2,}$/.test(handleClean)
+
+    if (!validateCpf(cpfClean) && !isHandleId) return json({ question: '', options: [] })
+
+    if (isHandleId) {
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select('id, auth_id, login_blocked_until')
+        .eq('handle', handleClean)
+        .maybeSingle()
+      userId = data?.id ?? null
+      authId = data?.auth_id ?? null
+      loginBlockedUntil = data?.login_blocked_until ?? null
+    } else {
+      const cpfHash = await sha256hex(cpfClean)
+      const { data } = await supabaseAdmin
+        .from('users')
+        .select('id, auth_id, login_blocked_until')
+        .eq('cpf', cpfHash)
+        .maybeSingle()
+      userId = data?.id ?? null
+      authId = data?.auth_id ?? null
+      loginBlockedUntil = data?.login_blocked_until ?? null
+    }
   }
 
   if (!userId || !authId) return json({ question: '', options: [] })

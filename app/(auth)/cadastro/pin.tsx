@@ -9,9 +9,20 @@ import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { OnboardShell } from '../../../components/core/OnboardShell'
 import { PINInput } from '../../../components/financial/PINInput'
-import { updateDraft } from '../../../store/signup-draft'
+import { getDraft, updateDraft } from '../../../store/signup-draft'
 
 type Phase = 'create' | 'confirm'
+
+// Item 38 — a data de nascimento é um dos primeiros palpites em qualquer
+// tentativa de adivinhação de PIN. Deriva as combinações de 6 dígitos mais
+// óbvias (DDMMAA, MMDDAA, AAMMDD) a partir da data já salva no draft
+// (Etapa 1) e bloqueia junto com as sequências óbvias do PINInput.
+function birthDerivedPins(birthDMY: string | undefined): string[] {
+  const [d, m, y] = (birthDMY ?? '').split('/')
+  if (!d || !m || !y || y.length !== 4) return []
+  const yy = y.slice(2)
+  return [`${d}${m}${yy}`, `${m}${d}${yy}`, `${yy}${m}${d}`]
+}
 
 export default function PinScreen() {
   const { t } = useTranslation()
@@ -58,6 +69,7 @@ export default function PinScreen() {
   }
 
   const isCreate = phase === 'create'
+  const forbidden = birthDerivedPins(getDraft().birth)
 
   return (
     <OnboardShell
@@ -73,6 +85,7 @@ export default function PinScreen() {
           mode="setup"
           onComplete={isCreate ? handleCreate : handleConfirm}
           checkObvious={isCreate}
+          forbidden={forbidden}
           onObvious={handleObvious}
           error={error}
         />

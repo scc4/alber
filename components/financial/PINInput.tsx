@@ -76,6 +76,8 @@ export interface PINInputProps {
   /** Rejeita sequências óbvias (usar na criação de PIN) */
   checkObvious?: boolean
   onObvious?:    () => void
+  /** PINs extras de 6 dígitos a rejeitar junto com OBVIOUS (ex.: combinações da data de nascimento) — só considerado quando checkObvious=true */
+  forbidden?:    string[]
   /** Mensagem de erro externo — dispara shake */
   error?:        string | null
   disabled?:     boolean
@@ -90,6 +92,7 @@ export function PINInput({
   mode          = 'secure',
   checkObvious  = false,
   onObvious,
+  forbidden     = [],
   error,
   disabled      = false,
   legacyCompat  = false,
@@ -153,7 +156,7 @@ export function PINInput({
 
       if (next.length === 6) {
         const seq = next.join('')
-        if (checkObvious && OBVIOUS.has(seq)) {
+        if (checkObvious && (OBVIOUS.has(seq) || forbidden.includes(seq))) {
           onObvious?.()
           setTimeout(() => { setDigits([]); setSetupKeys(generateShuffledDigits()) }, 350)
           return
@@ -167,7 +170,7 @@ export function PINInput({
         })
       }
     },
-    [digits, disabled, checkObvious, onObvious, onComplete],
+    [digits, disabled, checkObvious, forbidden, onObvious, onComplete],
   )
 
   const backspace = useCallback(() => {

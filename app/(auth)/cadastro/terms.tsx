@@ -6,10 +6,11 @@
 // fica num checkbox à parte, nunca junto do aceite obrigatório.
 
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { Alert, Animated, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
+import { LegalDocModal } from '../../../components/shared/LegalDocModal'
 import { getDraft, clearDraft } from '../../../store/signup-draft'
 import { useAuthStore } from '../../../store/auth.store'
 import * as authService from '../../../services/auth.service'
@@ -68,13 +69,27 @@ function CreatingScreen({ step }: { step: number }) {
 // ── Checkbox de consentimento ───────────────────────────────────────────────
 
 function Check({ on, onPress, children }: { on: boolean; onPress: () => void; children: React.ReactNode }) {
+  // Checkbox e parágrafo têm áreas de toque próprias (em vez de um único
+  // TouchableOpacity para a linha inteira) para que o link sublinhado
+  // aninhado no texto consiga receber o toque — um TouchableOpacity pai
+  // envolvendo um Text com onPress aninhado captura o gesto antes do link
+  // conseguir abrir o modal (ver design/auth.jsx:600, que precisa de
+  // e.stopPropagation() no protótipo web pelo mesmo motivo).
   return (
-    <TouchableOpacity style={styles.checkRow} onPress={onPress} activeOpacity={0.75}>
-      <View style={[styles.checkbox, on && styles.checkboxChecked]}>
-        {on && <Text style={styles.checkmark}>✓</Text>}
-      </View>
-      <Text style={styles.checkText}>{children}</Text>
-    </TouchableOpacity>
+    <View style={styles.checkRow}>
+      <TouchableOpacity
+        onPress={onPress}
+        activeOpacity={0.75}
+        hitSlop={{ top: 10, bottom: 10, left: 10, right: 6 }}
+      >
+        <View style={[styles.checkbox, on && styles.checkboxChecked]}>
+          {on && <Text style={styles.checkmark}>✓</Text>}
+        </View>
+      </TouchableOpacity>
+      <Text style={styles.checkText} onPress={onPress} suppressHighlighting>
+        {children}
+      </Text>
+    </View>
   )
 }
 
@@ -326,11 +341,11 @@ export default function TermsScreen() {
 
         <Check on={t1} onPress={() => setT1(v => !v)}>
           {t('auth.onboarding.terms.uso', { link_uso: '' })}
-          <Text style={styles.link} onPress={() => setModal('uso')}>{t('auth.onboarding.terms.termsOfUse')}</Text>
+          <Text style={styles.link} onPress={() => setModal('uso')} suppressHighlighting>{t('auth.onboarding.terms.termsOfUse')}</Text>
         </Check>
         <Check on={t2} onPress={() => setT2(v => !v)}>
           {t('auth.onboarding.terms.privacy', { link_priv: '' })}
-          <Text style={styles.link} onPress={() => setModal('priv')}>{t('auth.onboarding.terms.privacyPolicy')}</Text>
+          <Text style={styles.link} onPress={() => setModal('priv')} suppressHighlighting>{t('auth.onboarding.terms.privacyPolicy')}</Text>
         </Check>
         <Check on={t3} onPress={() => setT3(v => !v)}>
           {t('auth.onboarding.terms.majority')}
@@ -354,23 +369,12 @@ export default function TermsScreen() {
         />
       </ScrollView>
 
-      <Modal visible={!!modal} transparent animationType="slide" onRequestClose={() => setModal(null)}>
-        <View style={styles.modalOverlay}>
-          <TouchableOpacity style={styles.modalDismiss} onPress={() => setModal(null)} activeOpacity={1} />
-          <View style={styles.modalSheet}>
-            <View style={styles.modalHandle} />
-            <View style={styles.modalHeaderRow}>
-              <Text style={styles.modalTitle}>{modalTitle}</Text>
-              <TouchableOpacity onPress={() => setModal(null)}>
-                <Text style={styles.modalCloseLink}>{t('auth.onboarding.terms.close')}</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalScroll} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
-              <Text style={styles.modalBody}>{modalBody}</Text>
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      <LegalDocModal
+        visible={!!modal}
+        title={modalTitle}
+        body={modalBody}
+        onClose={() => setModal(null)}
+      />
     </View>
   )
 }
@@ -470,55 +474,6 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255,255,255,0.12)',
   },
   spacer: { minHeight: spacing.xl },
-  // Modal
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.7)',
-  },
-  modalDismiss: { flex: 1 },
-  modalSheet: {
-    backgroundColor: colors.black[90],
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: spacing.lg,
-    paddingBottom: spacing.xl + 8,
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-    maxHeight: '85%',
-  },
-  modalHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignSelf: 'center',
-    marginBottom: spacing.lg,
-  },
-  modalHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: spacing.lg,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.white[100],
-    fontFamily: typography.fontFamily.primary,
-  },
-  modalCloseLink: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.6)',
-    fontFamily: typography.fontFamily.primary,
-  },
-  modalScroll: { flex: 1 },
-  modalBody: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.7)',
-    lineHeight: 21,
-    fontFamily: typography.fontFamily.primary,
-  },
 })
 
 const creating = StyleSheet.create({

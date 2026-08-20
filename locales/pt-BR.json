@@ -983,14 +983,20 @@
       "cnpjPlaceholder": "00.000.000/0000-00",
       "cnpjHint": "Precisa ser exatamente o CNPJ já cadastrado desta empresa",
       "cnpjMismatch": "Esse CNPJ não corresponde ao cadastrado para esta empresa.",
-      "randomHint": "Gera uma chave aleatória nova, própria da subconta da empresa no Asaas.",
+      "randomHint": "No seu banco, gere uma chave aleatória da mesma empresa e cadastre aqui — será usada para devolver recursos para sua conta.",
+      "randomKeyLabel": "Chave aleatória (EVP)",
+      "randomKeyPlaceholder": "Cole aqui a chave gerada no banco da empresa",
+      "randomKeyInvalid": "Essa chave não parece uma chave aleatória (EVP) válida.",
       "pinSubtitle": "Confirme seu PIN para continuar.",
       "securityEyebrow": "Confirmação de segurança",
       "submitCta": "Salvar chave Pix",
       "errorTitle": "Erro ao salvar chave Pix",
       "errorGeneric": "Não foi possível salvar a chave Pix. Tente novamente.",
       "successTitle": "Chave Pix configurada!",
-      "doneCta": "Concluir"
+      "doneCta": "Concluir",
+      "configuredTitle": "Chave Pix de saque já configurada",
+      "configuredInfoCnpj": "A chave de saque desta empresa é o próprio CNPJ ({{cnpj}}). Ela é definida automaticamente no cadastro e não pode ser alterada por aqui.",
+      "configuredInfoRandom": "A chave de saque desta empresa é uma chave aleatória (EVP), configurada anteriormente. Não pode ser alterada por aqui."
     },
     "operadores": {
       "title": "Operadores",
@@ -1152,6 +1158,7 @@
       "pixKeyType": "Tipo de chave",
       "pixKeyValue": "Chave",
       "pixKeyPlaceholder": "Digite sua chave Pix",
+      "pixRandomPlaceholder": "Cole aqui a chave aleatória gerada no seu banco",
       "securityHint": "Digite a resposta de uma de suas perguntas de segurança.",
       "smsError": "Código inválido ou expirado.",
       "pinCurrentError": "PIN atual incorreto."

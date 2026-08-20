@@ -20,6 +20,7 @@ import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
 import { validateCPF } from '../../../utils/cpf'
+import { isValidEvpKey } from '../../../utils/pix'
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
@@ -82,10 +83,11 @@ function PinStep({ eyebrow, title, mode = 'secure', error, onComplete, checkObvi
 
 interface PixInputStepProps {
   error?:    string | null
+  types:     { type: PixKeyType; label: string }[]
   onConfirm: (pixKey: string, pixKeyType: PixKeyType) => void
 }
 
-const PIX_TYPES: { type: PixKeyType; label: string }[] = [
+const ALL_PIX_TYPES: { type: PixKeyType; label: string }[] = [
   { type: 'cpf',    label: 'CPF' },
   { type: 'email',  label: 'E-mail' },
   { type: 'phone',  label: 'Telefone' },
@@ -97,10 +99,10 @@ const PIX_TYPES: { type: PixKeyType; label: string }[] = [
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const PHONE_RE = /^\+?[\d\s()-]{10,15}$/
 
-function PixInputStep({ error, onConfirm }: PixInputStepProps) {
+function PixInputStep({ error, types, onConfirm }: PixInputStepProps) {
   const { t }                    = useTranslation()
   const [pixKey, setPixKey]      = useState('')
-  const [pixType, setPixType]    = useState<PixKeyType>('cpf')
+  const [pixType, setPixType]    = useState<PixKeyType>(types[0]?.type ?? 'random')
 
   const canSubmit = (() => {
     const trimmed = pixKey.trim()
@@ -108,7 +110,7 @@ function PixInputStep({ error, onConfirm }: PixInputStepProps) {
       case 'cpf':    return validateCPF(pixKey) && pixKey.replace(/\D/g, '').length === 11
       case 'email':  return EMAIL_RE.test(trimmed)
       case 'phone':  return PHONE_RE.test(trimmed)
-      case 'random': return trimmed.length > 10
+      case 'random': return isValidEvpKey(trimmed)
     }
   })()
 
@@ -140,7 +142,7 @@ function PixInputStep({ error, onConfirm }: PixInputStepProps) {
 
         <Text style={styles.fieldLabel}>{t('perfil.seguranca.pixKeyType')}</Text>
         <View style={styles.pixTypeRow}>
-          {PIX_TYPES.map(({ type, label }) => (
+          {types.map(({ type, label }) => (
             <TouchableOpacity
               key={type}
               style={[styles.pixTypeBtn, pixType === type && styles.pixTypeBtnActive]}
@@ -159,7 +161,7 @@ function PixInputStep({ error, onConfirm }: PixInputStepProps) {
           style={styles.securityInput}
           value={pixKey}
           onChangeText={handleKeyChange}
-          placeholder={t('perfil.seguranca.pixKeyPlaceholder')}
+          placeholder={pixType === 'random' ? t('perfil.seguranca.pixRandomPlaceholder') : t('perfil.seguranca.pixKeyPlaceholder')}
           placeholderTextColor="rgba(255,255,255,0.25)"
           autoCapitalize="none"
           autoCorrect={false}
@@ -256,12 +258,13 @@ function SuccessStep({ message, onBack }: SuccessStepProps) {
 // ── Main view ─────────────────────────────────────────────────────────────────
 
 interface MainViewProps {
-  pixKey: string
-  onStartPin: () => void
-  onStartPix: () => void
+  pixKey:      string
+  canChangePix: boolean
+  onStartPin:  () => void
+  onStartPix:  () => void
 }
 
-function MainView({ pixKey, onStartPin, onStartPix }: MainViewProps) {
+function MainView({ pixKey, canChangePix, onStartPin, onStartPix }: MainViewProps) {
   const { t } = useTranslation()
 
   return (
@@ -300,9 +303,11 @@ function MainView({ pixKey, onStartPin, onStartPix }: MainViewProps) {
           <Text style={styles.pixLabel}>{t('perfil.seguranca.pixCurrent')}</Text>
           <Text style={styles.pixValue}>{pixKey}</Text>
         </View>
-        <TouchableOpacity style={[styles.outlineBtn, { marginTop: spacing.md }]} onPress={onStartPix} activeOpacity={0.75}>
-          <Text style={styles.outlineBtnText}>{t('perfil.seguranca.pixChange')}</Text>
-        </TouchableOpacity>
+        {canChangePix && (
+          <TouchableOpacity style={[styles.outlineBtn, { marginTop: spacing.md }]} onPress={onStartPix} activeOpacity={0.75}>
+            <Text style={styles.outlineBtnText}>{t('perfil.seguranca.pixChange')}</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </ScrollView>
   )
@@ -318,6 +323,8 @@ export default function SegurancaScreen() {
 
   const [mode, setMode]               = useState<Mode>('main')
   const [currentPixKey, setCurrentPixKey] = useState(user?.pixKey ?? '')
+  const [currentPixKeyType, setCurrentPixKeyType] = useState<PixKeyType | null>(null)
+  const [hasPixKey, setHasPixKey]         = useState(false)
 
   // PIN flow state
   const [currentPinHash, setCurrentPinHash]     = useState('')
@@ -343,7 +350,11 @@ export default function SegurancaScreen() {
     if (!token) return
     fetch(`${BFF}/user-profile`, { headers: { Authorization: `Bearer ${token}`, apikey: ANON_KEY } })
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.pix_key_masked) setCurrentPixKey(d.pix_key_masked) })
+      .then(d => {
+        if (d?.pix_key_masked) setCurrentPixKey(d.pix_key_masked)
+        setHasPixKey(!!d?.has_pix_key)
+        setCurrentPixKeyType(d?.has_pix_key ? (d?.pix_key_type ?? null) : null)
+      })
       .catch(() => {})
   }, [token])
 
@@ -525,6 +536,7 @@ export default function SegurancaScreen() {
       {mode === 'main' && (
         <MainView
           pixKey={currentPixKey}
+          canChangePix={!(hasPixKey && currentPixKeyType === 'cpf')}
           onStartPin={() => setMode('pin_current')}
           onStartPix={() => setMode('pix_input')}
         />
@@ -594,7 +606,11 @@ export default function SegurancaScreen() {
       )}
 
       {mode === 'pix_input' && (
-        <PixInputStep error={pixInputError} onConfirm={handlePixInput} />
+        <PixInputStep
+          error={pixInputError}
+          types={hasPixKey ? ALL_PIX_TYPES.filter(pt => pt.type !== 'cpf') : ALL_PIX_TYPES}
+          onConfirm={handlePixInput}
+        />
       )}
 
       {mode === 'pix_pin' && (

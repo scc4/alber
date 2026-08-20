@@ -39,14 +39,14 @@ Deno.serve(async (req: Request) => {
 
   const { data: ownedCompanies } = await supabaseAdmin
     .from('companies')
-    .select('id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked')
+    .select('id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked, pix_key_type')
     .eq('owner_id', user.id)
 
   // ── Empresas onde é operador ativo ────────────────────────────────────────────
 
   const { data: operatorRows } = await supabaseAdmin
     .from('company_operators')
-    .select('permissions, companies:company_id (id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked)')
+    .select('permissions, companies:company_id (id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked, pix_key_type)')
     .eq('user_id', user.id)
     .eq('status', 'active')
 
@@ -60,13 +60,14 @@ Deno.serve(async (req: Request) => {
       kyc_status:     c.kyc_status,
       onboarding_url: c.onboarding_url,
       cnpj_masked:    c.cnpj_masked,
+      pix_key_type:   c.pix_key_type,
       role:           'master' as const,
       permissions:    null,
     })),
     ...(operatorRows ?? [])
       .filter(r => r.companies)
       .map(r => {
-        const c = r.companies as unknown as { id: string; handle: string; company_name: string; trading_name: string | null; account_status: string; kyc_status: string; onboarding_url: string | null; cnpj_masked: string | null }
+        const c = r.companies as unknown as { id: string; handle: string; company_name: string; trading_name: string | null; account_status: string; kyc_status: string; onboarding_url: string | null; cnpj_masked: string | null; pix_key_type: string | null }
         return {
           id:             c.id,
           handle:         c.handle,
@@ -76,6 +77,7 @@ Deno.serve(async (req: Request) => {
           kyc_status:     c.kyc_status,
           onboarding_url: c.onboarding_url,
           cnpj_masked:    c.cnpj_masked,
+          pix_key_type:   c.pix_key_type,
           role:           'operator' as const,
           permissions:    r.permissions,
         }

@@ -247,3 +247,65 @@ Deno.test('fluxo completo com sucesso: salva chave CNPJ e grava audit_logs compa
   assertEquals(companyUpdated, true)
   assertEquals(auditEvent, 'company_pix_key_changed')
 })
+
+Deno.test('tipo random com chave em formato inválido → 422 PIX_KEY_INVALID', async () => {
+  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
+  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+
+  const routes: MockRoute[] = [
+    { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
+    { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
+    { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company()] },
+    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
+  ]
+
+  const res  = await withMock(routes, () => handleRequest(makeReq({ type: 'random', pix_key: 'nao-e-uma-evp' })))
+  const data = await res.json()
+  assertEquals(res.status, 422)
+  assertEquals(data.code, 'PIX_KEY_INVALID')
+})
+
+Deno.test('tipo random com chave EVP válida → salva sem chamar Asaas e grava audit_logs company_pix_key_changed', async () => {
+  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
+  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const pastedEvp = '123e4567-e89b-12d3-a456-426614174000'
+  let auditEvent: string | null = null
+  let companyUpdated = false
+
+  const routes: MockRoute[] = [
+    { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
+    { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
+    { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company()] },
+    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
+  ]
+
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (url.includes('/rest/v1/companies') && method === 'PATCH') {
+      companyUpdated = true
+      return new Response(JSON.stringify([]), { status: 200 })
+    }
+    if (url.includes('/rest/v1/audit_logs') && method === 'POST') {
+      auditEvent = JSON.parse(init!.body as string).event_type
+      return new Response(JSON.stringify({}), { status: 201 })
+    }
+    return mockFetch(routes)(input, init)
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ type: 'random', pix_key: pastedEvp }))
+  } finally {
+    globalThis.fetch = orig
+  }
+
+  const data = await res.json()
+  assertEquals(res.status, 200)
+  assertEquals(data.pix_key_type, 'random')
+  assertEquals(companyUpdated, true)
+  assertEquals(auditEvent, 'company_pix_key_changed')
+})

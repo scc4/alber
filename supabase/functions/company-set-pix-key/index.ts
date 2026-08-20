@@ -5,23 +5,25 @@
 // enquanto companies.pix_key for nulo). Dois tipos, iguais ao mencionado
 // no plano: CNPJ (mesmo padrão do tipo 'cpf' pessoal — não precisa de
 // nenhuma chamada à Asaas, só reconfirma que o CNPJ digitado bate com o
-// hash já cadastrado da empresa) ou aleatória/EVP (gera e registra uma
-// chave nova na subconta da empresa via Asaas, igual financial-create-pix-key).
+// hash já cadastrado da empresa) ou aleatória/EVP (chave que a empresa já
+// gerou no banco real dela, fora da Alber — só valida o formato e guarda
+// criptografada, também sem chamada à Asaas).
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import {
-  aesDecrypt, aesEncrypt, sha256hex,
+  aesEncrypt, sha256hex,
   bcryptVerify, tryParsePairsPayload, verifyPinWithPairs,
 } from '../_shared/crypto.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
-import { createPixAddressKey } from '../_shared/asaas.ts'
+import { isValidEvpKey } from '../_shared/pix-key.ts'
 import { logError } from '../_shared/error-log.ts'
 
 interface SetPixKeyRequest {
   company_id:            string
   type:                  'cnpj' | 'random'
   cnpj?:                 string // obrigatório quando type === 'cnpj'
+  pix_key?:              string // obrigatório quando type === 'random' — EVP já existente, gerada no banco real da empresa
   pin_hash:              string
   security_answer_hash:  string
 }
@@ -82,7 +84,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   const { data: company } = await supabaseAdmin
     .from('companies')
-    .select('id, owner_id, cnpj, pix_key, asaas_api_key_enc')
+    .select('id, owner_id, cnpj, pix_key')
     .eq('id', body.company_id)
     .maybeSingle()
 
@@ -159,34 +161,27 @@ export async function handleRequest(req: Request): Promise<Response> {
     return json({ pix_key_masked: `${cnpjClean.slice(0, 8)}***`, pix_key_type: 'cnpj' })
   }
 
-  // ── Tipo aleatória (EVP) — gera e registra na subconta da empresa ───────────
+  // ── Tipo aleatória (EVP) — chave já existente, gerada no banco real da
+  // empresa (fora da Alber/Asaas) e colada aqui pelo master. Não gera nada
+  // na subconta Asaas — só valida o formato e guarda criptografada.
 
-  if (!company.asaas_api_key_enc) {
-    return err('ACCOUNT_NOT_CONFIGURED', 'Subconta financeira da empresa não configurada', 422)
+  const key = (body.pix_key ?? '').trim()
+  if (!isValidEvpKey(key)) return err('PIX_KEY_INVALID', 'Chave Pix aleatória inválida', 422)
+
+  const encrypted = await aesEncrypt(key, pixKeySecret)
+  const { error: updateErr } = await supabaseAdmin
+    .from('companies')
+    .update({ pix_key: encrypted, pix_key_type: 'random' })
+    .eq('id', company.id)
+
+  if (updateErr) {
+    await logError(supabaseAdmin, 'company-set-pix-key', updateErr, { company_id: company.id })
+    return err('DB_ERROR', 'Erro ao salvar chave Pix', 500)
   }
 
-  try {
-    const subApiKey = await aesDecrypt(company.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
-    const { key }   = await createPixAddressKey('EVP', subApiKey)
-    const encrypted = await aesEncrypt(key, pixKeySecret)
+  await logAudit(supabaseAdmin, caller.id, 'company_pix_key_changed', { company_id: company.id, pix_key_type: 'random' })
 
-    const { error: updateErr } = await supabaseAdmin
-      .from('companies')
-      .update({ pix_key: encrypted, pix_key_type: 'random' })
-      .eq('id', company.id)
-
-    if (updateErr) {
-      await logError(supabaseAdmin, 'company-set-pix-key', updateErr, { company_id: company.id })
-      return err('DB_ERROR', 'Erro ao salvar chave Pix', 500)
-    }
-
-    await logAudit(supabaseAdmin, caller.id, 'company_pix_key_changed', { company_id: company.id, pix_key_type: 'random' })
-
-    return json({ pix_key_masked: `${key.slice(0, 8)}...`, pix_key_type: 'random' })
-  } catch (e) {
-    await logError(supabaseAdmin, 'company-set-pix-key', e, { company_id: company.id })
-    return err('PIX_KEY_CREATION_FAILED', 'Não foi possível criar a chave Pix', 500)
-  }
+  return json({ pix_key_masked: `${key.slice(0, 8)}...`, pix_key_type: 'random' })
 }
 
 Deno.serve(handleRequest)

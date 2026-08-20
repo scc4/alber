@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { bcryptVerify, aesEncrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { isValidEvpKey } from '../_shared/pix-key.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -14,7 +15,7 @@ function isValidPixKey(key: string, type: PixKeyType): boolean {
     case 'cpf':    return /^\d{11}$/.test(key.replace(/\D/g, ''))
     case 'email':  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(key)
     case 'phone':  return /^\+?[\d\s()-]{10,15}$/.test(key)
-    case 'random': return key.length > 10
+    case 'random': return isValidEvpKey(key)
     default:       return false
   }
 }

@@ -58,6 +58,7 @@ export interface CompanySummary {
   kyc_status:     string
   onboarding_url: string | null
   cnpj_masked:    string | null
+  pix_key_type:   'cnpj' | 'random' | null
   role:           'master' | 'operator'
   permissions:    CompanyPermissions | null
 }
@@ -145,14 +146,28 @@ export async function setCompanyPixKey(
   pinHash: string,
   securityAnswerHash: string,
   cnpj?: string,
+  pixKey?: string,
 ): Promise<{ pix_key_masked: string; pix_key_type: string }> {
   return post('company-set-pix-key', {
     company_id: companyId,
     type,
     cnpj,
+    pix_key: pixKey,
     pin_hash: pinHash,
     security_answer_hash: securityAnswerHash,
   }, token)
+}
+
+// Empresas cadastradas antes de companies.cnpj_masked existir não têm essa
+// coluna preenchida (só o hash é guardado) — a tela de Dados Cadastrais pede
+// pro master/operador confirmar o CNPJ uma vez; se bater com o hash salvo,
+// o backend calcula e persiste a máscara.
+export async function confirmCompanyCnpj(
+  token: string,
+  companyId: string,
+  cnpj: string,
+): Promise<{ cnpj_masked: string }> {
+  return post('company-confirm-cnpj', { company_id: companyId, cnpj }, token)
 }
 
 // Melhoria 1 — abre uma empresa numa conta pessoal já existente (usuário

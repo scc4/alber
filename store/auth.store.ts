@@ -22,7 +22,7 @@ export interface AuthUser {
   name:         string
   handle:       string
   email:        string
-  cpfMasked:    string  // '***.xxx-xx' — preenchido via endpoint de perfil (futuro)
+  cpfMasked:    string  // '***.***.*XX-XX' — preenchido via endpoint de perfil (user-profile)
   pixKey:       string  // mascarado — preenchido via endpoint de perfil (futuro)
   pixKeyType:   'cpf' | 'phone' | 'email' | 'random'
   hasPixKey?:   boolean // undefined quando ainda não carregado do perfil (trata como true)
@@ -86,7 +86,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           name:       profile.name,
           handle:     profile.handle,
           email:      '',
-          cpfMasked:  '',
+          cpfMasked:  profile.cpf_masked ?? '',
           pixKey:     profile.pix_key_masked ?? '',
           pixKeyType: (profile.pix_key_type ?? 'cpf') as AuthUser['pixKeyType'],
           hasPersonalWallet: profile.has_personal_wallet,
@@ -141,6 +141,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (!profile) return
       const enriched: AuthUser = {
         ...user,
+        cpfMasked:  profile.cpf_masked ?? '',
         pixKey:     profile.pix_key_masked ?? '',
         pixKeyType: (profile.pix_key_type ?? 'cpf') as AuthUser['pixKeyType'],
         hasPixKey:  profile.has_pix_key ?? true,

@@ -13,14 +13,31 @@ import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../../store/auth.store'
 import { useActiveContextStore } from '../../../store/active-context.store'
 import { useCompanyStore } from '../../../store/company.store'
+import { Field } from '../../../components/core/Field'
+import { PrimaryButton } from '../../../components/core/PrimaryButton'
+import { AlertCard } from '../../../components/core/AlertCard'
+import * as authService from '../../../services/auth.service'
+import * as companyService from '../../../services/company.service'
+import { validateCPF } from '../../../utils/cpf'
+import { validateCNPJ, normalizeCNPJ } from '../../../utils/cnpj'
+import { maskCNPJ } from '../../../utils/format'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
+
+function maskCPF(v: string) {
+  v = v.replace(/\D/g, '').slice(0, 11)
+  if (v.length > 9) return `${v.slice(0,3)}.${v.slice(3,6)}.${v.slice(6,9)}-${v.slice(9)}`
+  if (v.length > 6) return `${v.slice(0,3)}.${v.slice(3,6)}.${v.slice(6)}`
+  if (v.length > 3) return `${v.slice(0,3)}.${v.slice(3)}`
+  return v
+}
 
 const BFF      = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? '').replace(/\/$/, '') + '/functions/v1'
 const ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? ''
 
 interface ProfileData {
+  cpf_masked:     string | null
   email_masked:   string
   phone_masked:   string
   birth_masked:   string
@@ -45,8 +62,9 @@ function DataRow({ label, value }: DataRowProps) {
 
 export default function DadosScreen() {
   const { t }  = useTranslation()
-  const user   = useAuthStore(s => s.user)
-  const token  = useAuthStore(s => s.token)
+  const user    = useAuthStore(s => s.user)
+  const token   = useAuthStore(s => s.token)
+  const setUser = useAuthStore(s => s.setUser)
 
   const activeContext = useActiveContextStore(s => s.context)
   const isCompany       = activeContext.type === 'company'
@@ -57,6 +75,14 @@ export default function DadosScreen() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(false)
   const [data, setData]         = useState<ProfileData | null>(null)
+
+  const [cpfConfirmValue, setCpfConfirmValue]         = useState('')
+  const [cpfConfirmError, setCpfConfirmError]         = useState<string | null>(null)
+  const [cpfConfirmSubmitting, setCpfConfirmSubmitting] = useState(false)
+
+  const [cnpjConfirmValue, setCnpjConfirmValue]         = useState('')
+  const [cnpjConfirmError, setCnpjConfirmError]         = useState<string | null>(null)
+  const [cnpjConfirmSubmitting, setCnpjConfirmSubmitting] = useState(false)
 
   const load = async () => {
     if (isCompany) {
@@ -89,6 +115,48 @@ export default function DadosScreen() {
   }
 
   useEffect(() => { load() }, [token, isCompany]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Contas cadastradas antes de cpf_masked/cnpj_masked existirem não têm
+  // esse campo salvo — só o hash é guardado, então pedimos pro próprio
+  // usuário confirmar o CPF/CNPJ uma vez pra calcular e persistir a máscara.
+  const handleConfirmCpf = async () => {
+    if (!token || !validateCPF(cpfConfirmValue) || cpfConfirmSubmitting) return
+    setCpfConfirmSubmitting(true)
+    setCpfConfirmError(null)
+    try {
+      const res = await authService.confirmCpf(cpfConfirmValue.replace(/\D/g, ''), token)
+      setData(prev => (prev ? { ...prev, cpf_masked: res.cpf_masked } : prev))
+      if (user) setUser({ ...user, cpfMasked: res.cpf_masked })
+    } catch (e) {
+      const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
+      setCpfConfirmError(
+        code === 'CPF_MISMATCH'  ? t('perfil.dados.confirmCpf.errorMismatch')
+        : code === 'RATE_LIMITED' ? t('perfil.dados.confirmCpf.errorRateLimited')
+        : t('perfil.dados.confirmCpf.errorGeneric'),
+      )
+    } finally {
+      setCpfConfirmSubmitting(false)
+    }
+  }
+
+  const handleConfirmCnpj = async () => {
+    if (!token || !company || !validateCNPJ(cnpjConfirmValue) || cnpjConfirmSubmitting) return
+    setCnpjConfirmSubmitting(true)
+    setCnpjConfirmError(null)
+    try {
+      await companyService.confirmCompanyCnpj(token, company.id, normalizeCNPJ(cnpjConfirmValue))
+      await fetchCompanies()
+    } catch (e) {
+      const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
+      setCnpjConfirmError(
+        code === 'CNPJ_MISMATCH' ? t('empresas.dados.confirmCnpj.errorMismatch')
+        : code === 'RATE_LIMITED' ? t('empresas.dados.confirmCnpj.errorRateLimited')
+        : t('empresas.dados.confirmCnpj.errorGeneric'),
+      )
+    } finally {
+      setCnpjConfirmSubmitting(false)
+    }
+  }
 
   if (!isCompany && !user) return null
 
@@ -127,7 +195,26 @@ export default function DadosScreen() {
         >
           <DataRow label={t('empresas.dados.razaoSocial')}  value={company.company_name} />
           <DataRow label={t('empresas.dados.nomeFantasia')} value={company.trading_name || '—'} />
-          <DataRow label={t('empresas.dados.cnpj')}         value={company.cnpj_masked ?? t('empresas.dados.cnpjPlaceholder')} />
+          {company.cnpj_masked ? (
+            <DataRow label={t('empresas.dados.cnpj')} value={company.cnpj_masked} />
+          ) : (
+            <View style={styles.confirmBlock}>
+              <AlertCard tone="info" text={t('empresas.dados.confirmCnpj.subtitle')} />
+              <Field
+                label={t('empresas.dados.confirmCnpj.title')}
+                value={cnpjConfirmValue}
+                onChangeText={v => { setCnpjConfirmValue(maskCNPJ(v)); setCnpjConfirmError(null) }}
+                placeholder={t('empresas.dados.confirmCnpj.placeholder')}
+                autoCapitalize="characters"
+                error={cnpjConfirmError}
+              />
+              <PrimaryButton
+                label={t('empresas.dados.confirmCnpj.cta')}
+                onPress={handleConfirmCnpj}
+                state={!validateCNPJ(cnpjConfirmValue) ? 'disabled' : cnpjConfirmSubmitting ? 'loading' : 'default'}
+              />
+            </View>
+          )}
           <DataRow label={t('empresas.dados.handle')}       value={`@${company.handle}`} />
 
           <Text style={styles.readOnly}>{t('perfil.dados.readOnly')}</Text>
@@ -141,7 +228,26 @@ export default function DadosScreen() {
           showsVerticalScrollIndicator={false}
         >
           <DataRow label={t('perfil.dados.name')}    value={user.name} />
-          <DataRow label={t('perfil.dados.cpf')}     value={user.cpfMasked || '***.***.***-**'} />
+          {data?.cpf_masked ? (
+            <DataRow label={t('perfil.dados.cpf')} value={data.cpf_masked} />
+          ) : (
+            <View style={styles.confirmBlock}>
+              <AlertCard tone="info" text={t('perfil.dados.confirmCpf.subtitle')} />
+              <Field
+                label={t('perfil.dados.confirmCpf.title')}
+                value={cpfConfirmValue}
+                onChangeText={v => { setCpfConfirmValue(maskCPF(v)); setCpfConfirmError(null) }}
+                placeholder={t('perfil.dados.confirmCpf.placeholder')}
+                keyboardType="numeric"
+                error={cpfConfirmError}
+              />
+              <PrimaryButton
+                label={t('perfil.dados.confirmCpf.cta')}
+                onPress={handleConfirmCpf}
+                state={!validateCPF(cpfConfirmValue) ? 'disabled' : cpfConfirmSubmitting ? 'loading' : 'default'}
+              />
+            </View>
+          )}
           <DataRow label={t('perfil.dados.birth')}   value={data?.birth_masked ?? '—'} />
           <DataRow label={t('perfil.dados.email')}   value={data?.email_masked ?? '—'} />
           <DataRow label={t('perfil.dados.phone')}   value={data?.phone_masked ?? '—'} />
@@ -222,6 +328,12 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 0.5,
     borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  confirmBlock: {
+    paddingVertical: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    gap: spacing.md,
   },
   rowLabel: {
     ...typography.eyebrow,

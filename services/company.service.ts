@@ -58,7 +58,6 @@ export interface CompanySummary {
   kyc_status:     string
   onboarding_url: string | null
   cnpj_masked:    string | null
-  pix_key_type:   'cnpj' | 'random' | null
   role:           'master' | 'operator'
   permissions:    CompanyPermissions | null
 }
@@ -146,13 +145,11 @@ export async function setCompanyPixKey(
   pinHash: string,
   securityAnswerHash: string,
   cnpj?: string,
-  pixKey?: string,
 ): Promise<{ pix_key_masked: string; pix_key_type: string }> {
   return post('company-set-pix-key', {
     company_id: companyId,
     type,
     cnpj,
-    pix_key: pixKey,
     pin_hash: pinHash,
     security_answer_hash: securityAnswerHash,
   }, token)

@@ -281,6 +281,7 @@ export interface UserProfileResponse {
   kyc_status:     string
   account_status: string
   member_since:   string
+  cpf_masked:     string
   email_masked:   string
   pix_key_masked: string
   pix_key_type:   string
@@ -298,6 +299,14 @@ export async function fetchUserProfile(token: string): Promise<UserProfileRespon
     if (!res.ok) return null
     return (await res.json()) as UserProfileResponse
   } catch { return null }
+}
+
+// Contas cadastradas antes de users.cpf_masked existir não têm essa coluna
+// preenchida (só o hash é guardado) — a tela de Dados Cadastrais pede pro
+// usuário confirmar o CPF uma vez; se bater com o hash salvo, o backend
+// calcula e persiste a máscara.
+export async function confirmCpf(cpf: string, token: string): Promise<{ cpf_masked: string }> {
+  return post('perfil-confirm-cpf', { cpf }, token)
 }
 
 // Item 19 — liga/desliga o consentimento de marketing a qualquer momento,

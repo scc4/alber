@@ -4,7 +4,7 @@
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
+import { validateCpf, normalizeCpf, maskCpfForDisplay } from '../_shared/cpf.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from '../_shared/asaas.ts'
@@ -240,6 +240,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   const handleNorm  = handle.toLowerCase().replace(/^@/, '')
   const cpfHash     = await sha256hex(cpfClean)
+  const cpfMasked   = maskCpfForDisplay(cpfClean)
   const encSecret   = Deno.env.get('ASAAS_API_KEY')!  // Asaas parent API key — também usada p/ criptografar asaas_api_key_enc
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')! // mesmo secret usado por todo o resto do sistema p/ pix_key
 
@@ -516,6 +517,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       name,
       email,
       cpf:               cpfHash,
+      cpf_masked:        cpfMasked,
       phone:             phone.replace(/\D/g, ''),
       birth_date,
       handle:            handleNorm,

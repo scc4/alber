@@ -6,6 +6,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt } from '../_shared/crypto.ts'
+import { maskCpfForDisplay } from '../_shared/cpf.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -35,7 +36,7 @@ Deno.serve(async (req: Request) => {
   const { data: user, error: userErr } = await supabaseAdmin
     .from('users')
     .select(`
-      id, name, handle, email, phone, birth_date, pix_key, pix_key_type,
+      id, name, handle, email, phone, birth_date, cpf_masked, pix_key, pix_key_type,
       kyc_status, account_status, created_at, asaas_account_id, marketing_opt_in,
       notif_tx_receive, notif_tx_send, notif_tx_carregar, notif_tx_descarregar,
       notif_split_participant, notif_split_expired, notif_split_closed,
@@ -66,6 +67,7 @@ Deno.serve(async (req: Request) => {
     kyc_status:     user.kyc_status,
     account_status: user.account_status,
     member_since:   formatMemberSince(user.created_at),
+    cpf_masked:     user.cpf_masked ?? '***.***.***-**',
     email_masked:   maskEmail(user.email ?? ''),
     phone_masked:   maskPhone(user.phone ?? ''),
     birth_masked:   maskBirth(user.birth_date ?? ''),
@@ -129,11 +131,7 @@ function maskBirth(dateStr: string): string {
 function maskPixKey(key: string, type: string): string {
   switch (type) {
     case 'email':  return maskEmail(key)
-    case 'cpf': {
-      const d = key.replace(/\D/g, '')
-      if (d.length < 11) return '***.***.***-**'
-      return `***.***.${d.slice(6, 9)}-${d.slice(9)}`
-    }
+    case 'cpf':    return maskCpfForDisplay(key)
     case 'phone':  return maskPhone(key)
     default:       return `${key.slice(0, 8)}...`
   }

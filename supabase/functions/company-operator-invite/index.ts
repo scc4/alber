@@ -127,11 +127,13 @@ Deno.serve(async (req: Request) => {
     'invite',
   ).catch(() => {})
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    invitee.id,
-    event_type: 'company_operator_invited',
-    metadata:   { company_id: company.id, invited_by: caller.id },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    invitee.id,
+      event_type: 'company_operator_invited',
+      metadata:   { company_id: company.id, invited_by: caller.id },
+    })
+  } catch { /* não-crítico */ }
 
   return json({ company_id: company.id, invited_handle: invitee.handle })
 })

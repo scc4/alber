@@ -99,11 +99,13 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao remover operador', 500)
   }
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    body.operator_user_id,
-    event_type: 'company_operator_removed',
-    metadata:   { company_id: body.company_id, removed_by: caller.id },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    body.operator_user_id,
+      event_type: 'company_operator_removed',
+      metadata:   { company_id: body.company_id, removed_by: caller.id },
+    })
+  } catch { /* não-crítico */ }
 
   return json({ company_id: body.company_id, operator_user_id: body.operator_user_id, status: 'banned' })
 })

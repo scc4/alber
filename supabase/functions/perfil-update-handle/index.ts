@@ -77,9 +77,11 @@ Deno.serve(async (req: Request) => {
     pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
   }
   if (!pinOk) {
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: user.id, event_type: 'handle_change_pin_failed', metadata: {},
-    }).catch(() => {})
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: user.id, event_type: 'handle_change_pin_failed', metadata: {},
+      })
+    } catch { /* não-crítico */ }
     return err('INVALID_CREDENTIALS', 'PIN incorreto', 401)
   }
 
@@ -101,9 +103,11 @@ Deno.serve(async (req: Request) => {
     }
   }
   if (!securityOk) {
-    await supabaseAdmin.from('audit_logs').insert({
-      user_id: user.id, event_type: 'handle_change_security_failed', metadata: {},
-    }).catch(() => {})
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: user.id, event_type: 'handle_change_security_failed', metadata: {},
+      })
+    } catch { /* não-crítico */ }
     return err('INVALID_CREDENTIALS', 'Resposta de segurança incorreta', 401)
   }
 
@@ -134,11 +138,13 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao atualizar handle', 500)
   }
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    user.id,
-    event_type: 'handle_changed',
-    metadata:   { old_handle: user.handle, new_handle: newHandleWithAt },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    user.id,
+      event_type: 'handle_changed',
+      metadata:   { old_handle: user.handle, new_handle: newHandleWithAt },
+    })
+  } catch { /* não-crítico */ }
 
   return json({ success: true, handle: newHandleWithAt })
 })

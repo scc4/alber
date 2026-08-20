@@ -69,7 +69,7 @@ export default function OperadoresScreen() {
       await Share.share({ message: url })
     } catch (e) {
       const isBff = e instanceof BffError
-      Alert.alert(t('empresas.operadores.inviteErrorTitle'), isBff ? e.message : t('empresas.operadores.inviteErrorGeneric'))
+      Alert.alert(t('empresas.operadores.inviteLinkErrorTitle'), isBff ? e.message : t('empresas.operadores.inviteLinkErrorGeneric'))
     } finally {
       setCreatingLink(false)
     }
@@ -112,6 +112,8 @@ export default function OperadoresScreen() {
       <Header variant="title" title={t('empresas.operadores.title')} onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.explainer}>{t('empresas.operadores.explainer')}</Text>
+
         <View style={styles.inviteRow}>
           <TextInput
             style={styles.inviteInput}
@@ -189,6 +191,13 @@ export default function OperadoresScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.black[100] },
   content: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl, gap: spacing.md },
+  explainer: {
+    color: 'rgba(255,255,255,0.55)',
+    fontFamily: typography.fontFamily.primary,
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: spacing.sm,
+  },
   inviteRow: { gap: spacing.sm, marginBottom: spacing.md },
   inviteInput: {
     borderBottomWidth: 0.5,

@@ -994,11 +994,14 @@
     },
     "operadores": {
       "title": "Operadores",
+      "explainer": "Operadores são pessoas convidadas para operar a conta desta empresa. Não é um cargo fixo: você escolhe, uma por uma, quais funcionalidades cada pessoa pode usar (ver saldo, carregar, transferir etc.) e pode ligar, desligar ou remover o acesso a qualquer momento.",
       "invitePlaceholder": "@handle do operador",
       "inviteCta": "Convidar",
       "inviteErrorTitle": "Erro ao convidar",
       "inviteErrorGeneric": "Não foi possível convidar este usuário. Tente novamente.",
       "inviteByLinkCta": "Convidar por link (para quem nunca usou a Alber)",
+      "inviteLinkErrorTitle": "Erro ao gerar link",
+      "inviteLinkErrorGeneric": "Não foi possível gerar o link de convite. Tente novamente.",
       "creatingLink": "Gerando link…",
       "empty": "Nenhum operador cadastrado ainda.",
       "status": {
@@ -1030,7 +1033,7 @@
       "razaoSocial": "Razão social",
       "nomeFantasia": "Nome fantasia",
       "cnpj": "CNPJ",
-      "cnpjPlaceholder": "CNPJ ***",
+      "cnpjPlaceholder": "**.***.***/****-**",
       "handle": "@handle"
     }
   },

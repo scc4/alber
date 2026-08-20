@@ -101,11 +101,13 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao atualizar permissões', 500)
   }
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    caller.id,
-    event_type: 'company_operator_permissions_updated',
-    metadata:   { company_id: body.company_id, operator_user_id: body.operator_user_id, permissions: sanitized },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    caller.id,
+      event_type: 'company_operator_permissions_updated',
+      metadata:   { company_id: body.company_id, operator_user_id: body.operator_user_id, permissions: sanitized },
+    })
+  } catch { /* não-crítico */ }
 
   return json({ company_id: body.company_id, operator_user_id: body.operator_user_id, permissions: mergedPermissions })
 })

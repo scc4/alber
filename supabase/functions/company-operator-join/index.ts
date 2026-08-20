@@ -79,11 +79,13 @@ Deno.serve(async (req: Request) => {
     return err('DB_ERROR', 'Erro ao aceitar convite', 500)
   }
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    user.id,
-    event_type: 'company_operator_joined',
-    metadata:   { company_id: body.company_id },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    user.id,
+      event_type: 'company_operator_joined',
+      metadata:   { company_id: body.company_id },
+    })
+  } catch { /* não-crítico */ }
 
   return json({ status: 'active', company_id: body.company_id })
 })

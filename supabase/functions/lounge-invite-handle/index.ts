@@ -144,11 +144,13 @@ Deno.serve(async (req: Request) => {
     'invite',
   ).catch(() => {})
 
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    invitee.id,
-    event_type: 'lounge_invited',
-    metadata:   { space_id: space.id, invited_by: caller.id },
-  }).catch(() => {})
+  try {
+    await supabaseAdmin.from('audit_logs').insert({
+      user_id:    invitee.id,
+      event_type: 'lounge_invited',
+      metadata:   { space_id: space.id, invited_by: caller.id },
+    })
+  } catch { /* não-crítico */ }
 
   return json({ space_id: space.id, invited_handle: invitee.handle })
 })

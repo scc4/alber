@@ -57,6 +57,7 @@ export interface CompanySummary {
   account_status: string
   kyc_status:     string
   onboarding_url: string | null
+  cnpj_masked:    string | null
   role:           'master' | 'operator'
   permissions:    CompanyPermissions | null
 }
@@ -175,6 +176,9 @@ export interface CreateCompanyPayload {
     state?:       string
   }
   pix_key_type?: 'cnpj' | 'random'
+  // Aceite de Termos de Uso, Política de Privacidade e Transparência
+  // Financeira (item 47 do QA) — obrigatório, exigido pelo backend.
+  terms_accepted: boolean
 }
 
 export interface CreateCompanyResponse {

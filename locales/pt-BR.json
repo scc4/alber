@@ -38,18 +38,20 @@
       },
       "dadosEmpresa": {
         "title": "Dados da empresa",
-        "subtitle": "Essas informações são usadas para abrir a conta financeira da sua empresa.",
+        "subtitle": "Essas informações são usadas para abrir a conta financeira da sua empresa. Veja o detalhe completo na nossa {{link}}.",
+        "addressHint": "Precisamos desse endereço para confirmar a identidade da empresa e cumprir exigências legais de abertura de conta.",
         "companyName": "Razão social",
         "companyNamePlaceholder": "Nome registrado na Receita Federal",
         "tradingName": "Nome fantasia",
         "tradingNamePlaceholder": "Opcional",
         "handle": "@handle da empresa",
         "handlePlaceholder": "minhaempresa",
-        "handleHint": "Como sua empresa será encontrada para receber transferências. 3-20 caracteres, letras/números/underscore.",
+        "handleHint": "Como sua empresa será encontrada para receber transferências. Caracteres permitidos: letras, números e underscore. Mínimo de 3 e máximo de 20 caracteres.",
         "handleError": "@handle inválido",
         "cnpj": "CNPJ",
         "cnpjPlaceholder": "00.000.000/0000-00",
         "cnpjError": "CNPJ inválido",
+        "cnpjDuplicateInline": "Este CNPJ já possui uma conta Alber.",
         "companyType": "Tipo de empresa",
         "typeMei": "MEI",
         "typeLimited": "Limitada (LTDA)",
@@ -57,7 +59,7 @@
         "typeAssociation": "Associação",
         "incomeValue": "Faturamento mensal",
         "incomeValuePlaceholder": "R$ 0,00",
-        "incomeValueHint": "Exigido para abertura da conta financeira",
+        "incomeValueHint": "Usado para definir limites iniciais da conta e cumprir exigências de compliance financeiro.",
         "addressSection": "Endereço da empresa"
       },
       "empresaPix": {
@@ -66,6 +68,7 @@
         "typeCnpj": "CNPJ",
         "typeRandom": "Aleatória",
         "randomHint": "Gerada automaticamente na subconta da empresa.",
+        "sameOwnershipHint": "A chave Pix precisa ser da mesma titularidade da empresa.",
         "errorTitle": "Erro ao criar empresa",
         "errorGeneric": "Não foi possível criar a empresa. Tente novamente.",
         "cnpjDuplicate": "Este CNPJ já possui uma conta.",
@@ -953,6 +956,7 @@
       "carregarCta": "Carregar",
       "extratoCta": "Ver extrato",
       "operadoresCta": "Operadores",
+      "dadosCta": "Dados cadastrais",
       "pixKeyCta": "Chave Pix de saque",
       "permissionRequired": "Sem permissão para esta ação",
       "gerenciarCta": "Gerenciar",
@@ -1023,6 +1027,17 @@
       "receber": "Receber",
       "pagar": "Pagar",
       "gerenciar_operadores": "Gerenciar operadores"
+    },
+    "dados": {
+      "title": "Dados cadastrais",
+      "razaoSocial": "Razão social",
+      "nomeFantasia": "Nome fantasia",
+      "cnpj": "CNPJ",
+      "handle": "@handle",
+      "cnpjPlaceholder": "CNPJ ***"
+    },
+    "perfil": {
+      "sectionGestao": "Gestão"
     }
   },
   "notificacoes": {

@@ -11,7 +11,7 @@
 // simples e suficiente pro volume esperado de aberturas de conta PJ no MVP.
 
 import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { validateCnpj, normalizeCnpj } from './cnpj.ts'
+import { validateCnpj, normalizeCnpj, maskCnpjForDisplay } from './cnpj.ts'
 import { sha256hex, aesEncrypt } from './crypto.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from './asaas.ts'
 import { logError } from './error-log.ts'
@@ -39,6 +39,12 @@ export interface CreateCompanyInput {
   // a empresa é criada sem chave configurada, igual ao comportamento de
   // sempre (o master configura depois via company-set-pix-key).
   pix_key_type?: 'cnpj' | 'random'
+  // Aceite de Termos/Privacidade/Transparência Financeira (item 47 do QA).
+  // Opcional aqui pois no fluxo bundlado (auth-register) o aceite já é
+  // validado no nível do request inteiro (terms_accepted da conta pessoal) —
+  // quem exige e valida este campo é company-create/index.ts, único caminho
+  // que cria uma empresa sem passar por nenhum outro aceite antes.
+  terms_accepted?: boolean
 }
 
 // Mesmo formato do handle pessoal (ver app/(auth)/cadastro/handle.tsx):
@@ -109,7 +115,8 @@ export async function createCompanyForOwner(
     return { ok: false, code: 'CNPJ_INVALID', message: 'CNPJ inválido', status: 422 }
   }
 
-  const cnpjHash = await sha256hex(cnpjClean)
+  const cnpjHash   = await sha256hex(cnpjClean)
+  const cnpjMasked = maskCnpjForDisplay(cnpjClean)
 
   const { data: owner } = await supabaseAdmin
     .from('users')
@@ -261,6 +268,7 @@ export async function createCompanyForOwner(
       pix_key:           withdrawalKeyEnc,
       pix_key_type:      withdrawalKeyType,
       cnpj:              cnpjHash,
+      cnpj_masked:       cnpjMasked,
       handle:            handleNorm,
       company_name:      input.company_name.trim(),
       trading_name:      input.trading_name?.trim() ?? null,

@@ -5,20 +5,24 @@
 // já que este passo também é usado por quem já tem conta e nunca preencheu
 // um endereço pessoal nesta sessão (verificar-cpf.tsx, Melhoria 1).
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { OnboardShell } from '../../../components/core/OnboardShell'
 import { Field } from '../../../components/core/Field'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
+import { LegalDocModal } from '../../../components/shared/LegalDocModal'
 import { getDraft, updateDraft } from '../../../store/signup-draft'
 import { validateCNPJ, normalizeCNPJ } from '../../../utils/cnpj'
 import { maskCNPJ } from '../../../utils/format'
 import { maskBRL, parseBRL } from '../../../utils/currency'
+import * as authService from '../../../services/auth.service'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
+
+type CnpjStatus = 'idle' | 'checking' | 'duplicate'
 
 type CompanyType = 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION'
 
@@ -68,12 +72,37 @@ export default function DadosEmpresaScreen() {
   const [cnpj, setCnpj]                   = useState(draft.cnpj ?? '')
   const [companyType, setCompanyType]     = useState<CompanyType | null>(draft.companyType ?? null)
   const [incomeValue, setIncomeValue]     = useState(draft.companyIncomeValue ?? '')
+  const [privacyOpen, setPrivacyOpen]     = useState(false)
 
   const [touched, setTouch] = useState<Record<string, boolean>>({})
   const touch = (field: string) => setTouch(t2 => ({ ...t2, [field]: true }))
 
   const cnpjNormalized = normalizeCNPJ(cnpj)
   const cnpjValid  = validateCNPJ(cnpj)
+
+  // Duplicidade de CNPJ (item 46 do QA) — checa em tempo real assim que o
+  // CNPJ fica válido, mesmo padrão de duplicidade de CPF em cadastro/dados.tsx.
+  const [cnpjStatus, setCnpjStatus] = useState<CnpjStatus>('idle')
+  const cnpjCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    if (cnpjCheckTimer.current) clearTimeout(cnpjCheckTimer.current)
+    if (!cnpjValid) {
+      setCnpjStatus('idle')
+      return
+    }
+    setCnpjStatus('checking')
+    cnpjCheckTimer.current = setTimeout(async () => {
+      try {
+        const exists = await authService.checkCnpjExists(cnpjNormalized)
+        setCnpjStatus(exists ? 'duplicate' : 'idle')
+      } catch {
+        setCnpjStatus('idle')
+      }
+    }, 500)
+    return () => { if (cnpjCheckTimer.current) clearTimeout(cnpjCheckTimer.current) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cnpjNormalized, cnpjValid])
 
   useEffect(() => {
     const digits = cep.replace(/\D/g, '')
@@ -135,6 +164,7 @@ export default function DadosEmpresaScreen() {
     companyName.trim().length > 1 &&
     companyHandleValid &&
     cnpjValid &&
+    cnpjStatus === 'idle' &&
     companyType !== null &&
     parseBRL(incomeValue) > 0
 
@@ -159,10 +189,10 @@ export default function DadosEmpresaScreen() {
   }
 
   return (
+    <>
     <OnboardShell
       step={1}
       title={t('auth.onboarding.dadosEmpresa.title')}
-      subtitle={t('auth.onboarding.dadosEmpresa.subtitle')}
       onBack={() => router.back()}
       footer={
         <PrimaryButton
@@ -172,7 +202,17 @@ export default function DadosEmpresaScreen() {
         />
       }
     >
+      {/* Subtítulo com link para a Política de Privacidade (item 50, mesmo
+          padrão do item 24 na PF em cadastro/dados.tsx) */}
+      <Text style={styles.subtitle}>
+        {t('auth.onboarding.dadosEmpresa.subtitle', { link: '' })}
+        <Text style={styles.subtitleLink} onPress={() => setPrivacyOpen(true)} suppressHighlighting>
+          {t('auth.onboarding.terms.privacyPolicy')}
+        </Text>
+      </Text>
+
       <Text style={styles.sectionTitle}>{t('auth.onboarding.dadosEmpresa.addressSection')}</Text>
+      <Text style={styles.sectionHint}>{t('auth.onboarding.dadosEmpresa.addressHint')}</Text>
 
       <Field
         label={t('auth.onboarding.endereco.cep')}
@@ -286,8 +326,16 @@ export default function DadosEmpresaScreen() {
         placeholder={t('auth.onboarding.dadosEmpresa.cnpjPlaceholder')}
         autoCapitalize="characters"
         onBlur={() => touch('cnpj')}
+        loading={cnpjStatus === 'checking'}
         error={touched.cnpj ? errors.cnpj : null}
       />
+      {touched.cnpj && cnpjStatus === 'duplicate' && (
+        <View style={styles.duplicateBox}>
+          <Text style={styles.duplicateBoxText}>
+            {t('auth.onboarding.dadosEmpresa.cnpjDuplicateInline')}
+          </Text>
+        </View>
+      )}
 
       <Text style={styles.label}>{t('auth.onboarding.dadosEmpresa.companyType')}</Text>
       <View style={styles.typeGrid}>
@@ -314,6 +362,13 @@ export default function DadosEmpresaScreen() {
         hint={t('auth.onboarding.dadosEmpresa.incomeValueHint')}
       />
     </OnboardShell>
+    <LegalDocModal
+      visible={privacyOpen}
+      title={t('auth.onboarding.terms.privacyPolicy')}
+      body={t('auth.onboarding.terms.privacyPolicyBody')}
+      onClose={() => setPrivacyOpen(false)}
+    />
+    </>
   )
 }
 
@@ -329,6 +384,41 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     fontFamily: typography.fontFamily.primary,
     marginBottom: spacing.sm,
+  },
+  subtitle: {
+    fontSize: 13.5,
+    color: 'rgba(255,255,255,0.55)',
+    lineHeight: 19,
+    fontFamily: typography.fontFamily.primary,
+    marginBottom: spacing.lg,
+  },
+  subtitleLink: {
+    color: colors.white[100],
+    textDecorationLine: 'underline',
+  },
+  sectionHint: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.45)',
+    lineHeight: 17,
+    fontFamily: typography.fontFamily.primary,
+    marginTop: -6,
+    marginBottom: spacing.md,
+  },
+  duplicateBox: {
+    marginTop: -10,
+    marginBottom: 18,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(245,158,11,0.07)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(245,158,11,0.22)',
+    borderRadius: spacing.radius.md,
+  },
+  duplicateBoxText: {
+    fontSize: 12,
+    color: colors.warning[500],
+    lineHeight: 17,
+    fontFamily: typography.fontFamily.primary,
   },
   sectionTitle: {
     fontSize: 13,

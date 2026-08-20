@@ -72,6 +72,14 @@ export async function handleRequest(req: Request): Promise<Response> {
   try { body = await req.json() } catch { return err('INVALID_BODY', 'JSON inválido', 400) }
   if (!body.company) return err('MISSING_FIELDS', 'company é obrigatório', 400)
 
+  // Item 47 do QA — este é o único caminho que cria uma empresa sem passar
+  // por nenhuma outra tela de aceite (Melhoria 1: conta pessoal já existe,
+  // então cadastro/terms.tsx nunca é alcançado). Ver app/(auth)/cadastro/
+  // empresa-pix.tsx, que agora exige o aceite nesta mesma tela.
+  if (!body.company.terms_accepted) {
+    return err('TERMS_NOT_ACCEPTED', 'Termos de uso não aceitos', 400)
+  }
+
   const result = await createCompanyForOwner(supabaseAdmin, caller.id, body.company)
 
   if (!result.ok) {

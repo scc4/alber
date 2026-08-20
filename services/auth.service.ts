@@ -191,6 +191,16 @@ export async function checkCpfExists(cpf: string): Promise<boolean> {
   return res.exists
 }
 
+// ── Checagem de CNPJ já cadastrado (item 46 do QA de cadastro PJ) ────────────
+// Mesmo raciocínio de checkCpfExists, aplicado à etapa "Dados da empresa" —
+// avisa em tempo real em vez de deixar a pessoa percorrer o cadastro inteiro
+// só pra ser barrada no fim por CNPJ_DUPLICATE.
+
+export async function checkCnpjExists(cnpj: string): Promise<boolean> {
+  const res = await post<{ exists: boolean }>('auth-check-cnpj', { cnpj })
+  return res.exists
+}
+
 // ── Login "como empresa" — primeiro passo (CNPJ ou @handle de empresa) ──────
 // Chamado a partir da tela de login quando o identificador digitado não é um
 // CPF: descobre se é uma empresa e, se for, traz master + operadores ativos

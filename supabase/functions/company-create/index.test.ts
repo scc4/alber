@@ -45,6 +45,7 @@ const VALID_COMPANY = {
   company_type: 'LIMITED',
   income_value: 5000,
   address: { street: 'Rua X', number: '100', neighborhood: 'Centro', zip_code: '01000000' },
+  terms_accepted: true,
 }
 
 function makeReq(company: Record<string, unknown> = VALID_COMPANY, token = 'valid-tok'): Request {
@@ -92,6 +93,14 @@ Deno.test('sem company no body → 400 MISSING_FIELDS', async () => {
       method: 'POST', headers: { Authorization: 'Bearer tok' }, body: '{}',
     })))
   assertEquals(res.status, 400)
+})
+
+Deno.test('sem terms_accepted → 400 TERMS_NOT_ACCEPTED', async () => {
+  const res  = await withMock(baseHandler(), () =>
+    handleRequest(makeReq({ ...VALID_COMPANY, terms_accepted: false })))
+  const data = await res.json()
+  assertEquals(res.status, 400)
+  assertEquals(data.code, 'TERMS_NOT_ACCEPTED')
 })
 
 Deno.test('CNPJ já cadastrado por outra empresa → 409 CNPJ_DUPLICATE', async () => {

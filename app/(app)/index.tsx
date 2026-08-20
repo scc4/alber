@@ -20,13 +20,11 @@ import { BalanceBlock } from '../../components/financial/BalanceBlock'
 import { ActionRow, ReceberIcon, CarregarIcon, TransferirIcon, SplitIcon } from '../../components/financial/ActionRow'
 import { Eyebrow } from '../../components/shared/Eyebrow'
 import { HomeBanner, BannerData } from '../../components/shared/HomeBanner'
-import { AccountSwitcherSheet } from '../../components/core/AccountSwitcherSheet'
 import { useAuthStore } from '../../store/auth.store'
 import { useBalanceStore } from '../../store/balance.store'
 import { useLoungeStore } from '../../store/lounge.store'
 import { useNotificationsStore } from '../../store/notifications.store'
 import { useActiveContextStore } from '../../store/active-context.store'
-import { useAccountSwitcher } from '../../hooks/useAccountSwitcher'
 import { CompanyHomeScreen } from './_company-home'
 import { spaceSkins } from '../../tokens/colors'
 import { colors } from '../../tokens/colors'
@@ -110,7 +108,6 @@ function resolveBanner(
 function PersonalHomeScreen() {
   const { t } = useTranslation()
   const { user, kycStatus, accountStatus, token } = useAuthStore()
-  const switcher = useAccountSwitcher()
   const {
     balance,
     stale,
@@ -231,16 +228,6 @@ function PersonalHomeScreen() {
           onLogoPress={() => router.replace('/(app)/')}
           onBell={() => router.push('/(app)/notificacoes' as never)}
           onAvatarPress={() => router.push('/(app)/perfil' as never)}
-          onSwitcherPress={switcher.canSwitch ? switcher.open : undefined}
-        />
-
-        <AccountSwitcherSheet
-          visible={switcher.visible}
-          onClose={switcher.close}
-          hasPersonalWallet={switcher.hasPersonalWallet}
-          companies={switcher.companies}
-          current={switcher.context}
-          onSelect={switcher.select}
         />
 
         {/* Banner contextual por prioridade (máx 1 por vez) */}

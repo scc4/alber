@@ -23,8 +23,6 @@ interface HomeHeaderProps {
   onAvatarPress?: () => void
   /** Sobrepõe a linha de saudação (ex: nome da empresa no contexto ativo) */
   greetingOverride?: string
-  /** Presente quando há mais de um contexto (pessoal/empresas) para trocar */
-  onSwitcherPress?: () => void
 }
 
 interface TitleHeaderProps {
@@ -72,7 +70,7 @@ export function Header(props: HeaderProps) {
         )}
         <Pressable
           style={styles.greetingBlock}
-          onPress={props.onSwitcherPress ?? props.onAvatarPress}
+          onPress={props.onAvatarPress}
           accessibilityRole="button"
           accessibilityLabel={props.userName}
           hitSlop={8}
@@ -80,7 +78,6 @@ export function Header(props: HeaderProps) {
           <Text style={styles.greetingLine}>{props.greetingOverride ?? greeting}</Text>
           <View style={styles.userNameRow}>
             <Text style={styles.userName}>{props.userName}</Text>
-            {props.onSwitcherPress != null && <Text style={styles.switcherChevron}>▾</Text>}
           </View>
         </Pressable>
         <Pressable
@@ -284,11 +281,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.34,
     marginTop: 1,
     fontFamily: typography.fontFamily.primary,
-  },
-  switcherChevron: {
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.45)',
-    marginTop: 2,
   },
   bellButton: {
     width: 36,

@@ -13,10 +13,8 @@ import { Header } from '../../components/core/Header'
 import { BalanceBlock } from '../../components/financial/BalanceBlock'
 import { ActionRow, ReceberIcon, CarregarIcon, TransferirIcon } from '../../components/financial/ActionRow'
 import { HomeBanner, BannerData } from '../../components/shared/HomeBanner'
-import { AccountSwitcherSheet } from '../../components/core/AccountSwitcherSheet'
 import { useCompanyStore } from '../../store/company.store'
 import { useNotificationsStore } from '../../store/notifications.store'
-import { useAccountSwitcher } from '../../hooks/useAccountSwitcher'
 import { colors } from '../../tokens/colors'
 import { spacing } from '../../tokens/spacing'
 
@@ -54,7 +52,6 @@ function resolveCompanyBanner(
 
 export function CompanyHomeScreen({ companyId, companyName }: CompanyHomeScreenProps) {
   const { t } = useTranslation()
-  const switcher = useAccountSwitcher()
   const unreadCount = useNotificationsStore(s => s.unreadCount)
 
   const companies     = useCompanyStore(s => s.companies)
@@ -90,16 +87,6 @@ export function CompanyHomeScreen({ companyId, companyName }: CompanyHomeScreenP
           onLogoPress={() => router.replace('/(app)/')}
           onBell={() => router.push('/(app)/notificacoes' as never)}
           onAvatarPress={() => router.push('/(app)/perfil' as never)}
-          onSwitcherPress={switcher.canSwitch ? switcher.open : undefined}
-        />
-
-        <AccountSwitcherSheet
-          visible={switcher.visible}
-          onClose={switcher.close}
-          hasPersonalWallet={switcher.hasPersonalWallet}
-          companies={switcher.companies}
-          current={switcher.context}
-          onSelect={switcher.select}
         />
 
         {banner != null && (

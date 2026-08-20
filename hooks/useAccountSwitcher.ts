@@ -31,11 +31,6 @@ export function useAccountSwitcher() {
     router.replace('/(app)/')
   }
 
-  const openManage = () => {
-    setVisible(false)
-    router.push('/(app)/empresas')
-  }
-
   return {
     visible,
     open:  () => setVisible(true),
@@ -45,6 +40,5 @@ export function useAccountSwitcher() {
     companies,
     context,
     select,
-    openManage,
   }
 }

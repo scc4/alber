@@ -18,7 +18,6 @@ interface AccountSwitcherSheetProps {
   companies: CompanySummary[]
   current: ActiveContext
   onSelect: (context: ActiveContext) => void
-  onManageCompanies: () => void
 }
 
 export function AccountSwitcherSheet({
@@ -28,7 +27,6 @@ export function AccountSwitcherSheet({
   companies,
   current,
   onSelect,
-  onManageCompanies,
 }: AccountSwitcherSheetProps) {
   const { t } = useTranslation()
 
@@ -62,10 +60,6 @@ export function AccountSwitcherSheet({
               onPress={() => onSelect({ type: 'company', companyId: c.id, companyName: c.trading_name || c.company_name })}
             />
           ))}
-
-          <TouchableOpacity style={styles.manageBtn} onPress={onManageCompanies} activeOpacity={0.75}>
-            <Text style={styles.manageBtnText}>{t('accountSwitcher.manageCta')}</Text>
-          </TouchableOpacity>
         </View>
       </View>
     </Modal>
@@ -136,18 +130,5 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: colors.white[100],
-  },
-  manageBtn: {
-    marginTop: spacing.lg,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderRadius: spacing.radius.md,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  manageBtnText: {
-    color: colors.white[100],
-    fontFamily: typography.fontFamily.primary,
-    fontWeight: '600',
-    fontSize: 14,
   },
 })

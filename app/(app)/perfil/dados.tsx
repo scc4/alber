@@ -11,6 +11,8 @@ import { SafeAreaView } from 'react-native-safe-area-context'
 import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '../../../store/auth.store'
+import { useActiveContextStore } from '../../../store/active-context.store'
+import { useCompanyStore } from '../../../store/company.store'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
 import { spacing } from '../../../tokens/spacing'
@@ -46,11 +48,29 @@ export default function DadosScreen() {
   const user   = useAuthStore(s => s.user)
   const token  = useAuthStore(s => s.token)
 
+  const activeContext = useActiveContextStore(s => s.context)
+  const isCompany       = activeContext.type === 'company'
+  const companies       = useCompanyStore(s => s.companies)
+  const fetchCompanies  = useCompanyStore(s => s.fetchCompanies)
+  const company = isCompany ? companies.find(c => c.id === activeContext.companyId) : null
+
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState(false)
   const [data, setData]         = useState<ProfileData | null>(null)
 
   const load = async () => {
+    if (isCompany) {
+      setLoading(true)
+      setError(false)
+      try {
+        await fetchCompanies()
+      } catch {
+        setError(true)
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
     if (!token) return
     setLoading(true)
     setError(false)
@@ -68,9 +88,9 @@ export default function DadosScreen() {
     }
   }
 
-  useEffect(() => { load() }, [token])
+  useEffect(() => { load() }, [token, isCompany]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!user) return null
+  if (!isCompany && !user) return null
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
@@ -90,7 +110,7 @@ export default function DadosScreen() {
         </View>
       )}
 
-      {!loading && error && (
+      {!loading && (error || (isCompany && !company)) && (
         <View style={styles.center}>
           <Text style={styles.errorText}>{t('perfil.dados.errorLoad')}</Text>
           <TouchableOpacity style={styles.retryBtn} onPress={load} activeOpacity={0.75}>
@@ -99,7 +119,22 @@ export default function DadosScreen() {
         </View>
       )}
 
-      {!loading && !error && (
+      {!loading && !error && isCompany && company && (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+        >
+          <DataRow label={t('empresas.dados.razaoSocial')}  value={company.company_name} />
+          <DataRow label={t('empresas.dados.nomeFantasia')} value={company.trading_name || '—'} />
+          <DataRow label={t('empresas.dados.cnpj')}         value={company.cnpj_masked ?? t('empresas.dados.cnpjPlaceholder')} />
+          <DataRow label={t('empresas.dados.handle')}       value={`@${company.handle}`} />
+
+          <Text style={styles.readOnly}>{t('perfil.dados.readOnly')}</Text>
+        </ScrollView>
+      )}
+
+      {!loading && !error && !isCompany && user && (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.content}

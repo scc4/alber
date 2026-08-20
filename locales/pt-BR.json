@@ -920,8 +920,7 @@
   },
   "accountSwitcher": {
     "title": "Trocar de conta",
-    "personal": "Pessoal",
-    "manageCta": "Gerenciar empresas"
+    "personal": "Pessoal"
   },
   "convite": {
     "operador": {
@@ -956,7 +955,6 @@
       "carregarCta": "Carregar",
       "extratoCta": "Ver extrato",
       "operadoresCta": "Operadores",
-      "dadosCta": "Dados cadastrais",
       "pixKeyCta": "Chave Pix de saque",
       "permissionRequired": "Sem permissão para esta ação",
       "gerenciarCta": "Gerenciar",
@@ -1029,15 +1027,11 @@
       "gerenciar_operadores": "Gerenciar operadores"
     },
     "dados": {
-      "title": "Dados cadastrais",
       "razaoSocial": "Razão social",
       "nomeFantasia": "Nome fantasia",
       "cnpj": "CNPJ",
-      "handle": "@handle",
-      "cnpjPlaceholder": "CNPJ ***"
-    },
-    "perfil": {
-      "sectionGestao": "Gestão"
+      "cnpjPlaceholder": "CNPJ ***",
+      "handle": "@handle"
     }
   },
   "notificacoes": {
@@ -1090,9 +1084,6 @@
     "suporteEmailLabel": "E-mail",
     "suporteEmail": "contato@asaas.com.br",
     "securityQtd": "4 cadastradas",
-    "sectionEmpresas": "Empresas",
-    "rowEmpresas": "Minhas empresas",
-    "rowEmpresasSublabel": "Contas PJ que você administra ou opera",
     "dados": {
       "title": "Dados cadastrais",
       "name": "Nome completo",

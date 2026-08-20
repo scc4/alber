@@ -100,7 +100,6 @@ export function CompanyHomeScreen({ companyId, companyName }: CompanyHomeScreenP
           companies={switcher.companies}
           current={switcher.context}
           onSelect={switcher.select}
-          onManageCompanies={switcher.openManage}
         />
 
         {banner != null && (

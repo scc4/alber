@@ -241,7 +241,6 @@ function PersonalHomeScreen() {
           companies={switcher.companies}
           current={switcher.context}
           onSelect={switcher.select}
-          onManageCompanies={switcher.openManage}
         />
 
         {/* Banner contextual por prioridade (máx 1 por vez) */}

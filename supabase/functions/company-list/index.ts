@@ -39,14 +39,14 @@ Deno.serve(async (req: Request) => {
 
   const { data: ownedCompanies } = await supabaseAdmin
     .from('companies')
-    .select('id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url')
+    .select('id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked')
     .eq('owner_id', user.id)
 
   // ── Empresas onde é operador ativo ────────────────────────────────────────────
 
   const { data: operatorRows } = await supabaseAdmin
     .from('company_operators')
-    .select('permissions, companies:company_id (id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url)')
+    .select('permissions, companies:company_id (id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked)')
     .eq('user_id', user.id)
     .eq('status', 'active')
 
@@ -59,13 +59,14 @@ Deno.serve(async (req: Request) => {
       account_status: c.account_status,
       kyc_status:     c.kyc_status,
       onboarding_url: c.onboarding_url,
+      cnpj_masked:    c.cnpj_masked,
       role:           'master' as const,
       permissions:    null,
     })),
     ...(operatorRows ?? [])
       .filter(r => r.companies)
       .map(r => {
-        const c = r.companies as unknown as { id: string; handle: string; company_name: string; trading_name: string | null; account_status: string; kyc_status: string; onboarding_url: string | null }
+        const c = r.companies as unknown as { id: string; handle: string; company_name: string; trading_name: string | null; account_status: string; kyc_status: string; onboarding_url: string | null; cnpj_masked: string | null }
         return {
           id:             c.id,
           handle:         c.handle,
@@ -74,6 +75,7 @@ Deno.serve(async (req: Request) => {
           account_status: c.account_status,
           kyc_status:     c.kyc_status,
           onboarding_url: c.onboarding_url,
+          cnpj_masked:    c.cnpj_masked,
           role:           'operator' as const,
           permissions:    r.permissions,
         }

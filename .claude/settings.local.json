@@ -89,7 +89,9 @@
       "Bash(npx jest *)",
       "Bash(npm test *)",
       "Bash(node_modules/.bin/tsc --version)",
-      "Bash(grep -iE \"\\\\.env|secret|credential|\\\\.pem|\\\\.key$\")"
+      "Bash(grep -iE \"\\\\.env|secret|credential|\\\\.pem|\\\\.key$\")",
+      "Bash(grep -v '^_shared$')",
+      "Bash(supabase migration *)"
     ]
   }
 }

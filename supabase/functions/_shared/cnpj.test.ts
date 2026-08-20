@@ -1,7 +1,7 @@
 // Roda com: deno test supabase/functions/_shared/cnpj.test.ts
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
-import { validateCnpj, normalizeCnpj } from './cnpj.ts'
+import { validateCnpj, normalizeCnpj, maskCnpjForDisplay } from './cnpj.ts'
 
 Deno.test('validateCnpj aceita CNPJs válidos conhecidos', () => {
   assertEquals(validateCnpj('11.222.333/0001-81'), true)
@@ -63,4 +63,14 @@ Deno.test('validateCnpj rejeita dígito verificador alfanumérico mesmo com chec
 
 Deno.test('normalizeCnpj maiusculiza letras e remove máscara', () => {
   assertEquals(normalizeCnpj('ab.12c.d34/efgh-83'), 'AB12CD34EFGH83')
+})
+
+Deno.test('maskCnpjForDisplay esconde a raiz, mostra filial e dígitos verificadores', () => {
+  assertEquals(maskCnpjForDisplay('11.222.333/0001-81'), '**.***.***/0001-81')
+  assertEquals(maskCnpjForDisplay('AB12CD34EFGH83'), '**.***.***/EFGH-83')
+})
+
+Deno.test('maskCnpjForDisplay retorna placeholder genérico pra entrada inválida', () => {
+  assertEquals(maskCnpjForDisplay('123'), '**.***.***/****-**')
+  assertEquals(maskCnpjForDisplay(''), '**.***.***/****-**')
 })

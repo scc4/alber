@@ -11,6 +11,17 @@ export function normalizeCnpj(raw: string): string {
   return raw.replace(/[^0-9A-Za-z]/g, '').toUpperCase()
 }
 
+// Versão mascarada pra exibição — esconde as 8 primeiras posições (raiz, que
+// identifica a empresa), mostra filial + dígitos verificadores. Só deve ser
+// chamada com o CNPJ em texto puro antes dele ser hasheado (ver
+// createCompanyForOwner) — o resultado é o que fica persistido, nunca o CNPJ
+// completo.
+export function maskCnpjForDisplay(raw: string): string {
+  const d = normalizeCnpj(raw)
+  if (d.length !== 14) return '**.***.***/****-**'
+  return `**.***.***/${d.slice(8, 12)}-${d.slice(12)}`
+}
+
 function cnpjCharValue(c: string): number {
   return c.charCodeAt(0) - 48
 }

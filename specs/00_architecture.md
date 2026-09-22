@@ -10,13 +10,24 @@
 Alber é um app mobile de carteira digital baseada em Albers (moeda proprietária),
 com foco em operações entre usuários, splits de despesas, espaços sociais (Alber
 Spaces) e controles de governança avançada. O backend financeiro é provido pelo
-Asaas via White Label — invisível ao usuário final.
+Asaas via White Label. A marca Alber conduz toda a experiência de produto, mas o
+Asaas é exposto de forma pontual e obrigatória nas telas financeiras, conforme
+exigência regulatória (ver princípio de transparência BaaS abaixo).
 
 ---
 
 ## 2. Princípios arquiteturais
 
-- **BaaS invisível:** Asaas opera em background. O usuário nunca vê marca Asaas.
+- **BaaS majoritariamente invisível, com transparência obrigatória:** o Asaas
+  opera em background e a marca Alber conduz a jornada — mas por exigência da
+  Resolução Conjunta nº 16/2025 do Banco Central, o cliente final deve ser
+  informado de que os serviços financeiros são prestados pelo Asaas sempre que
+  houver movimentação ou gestão de valores. Isso é feito via selo institucional
+  Asaas (CDN oficial, ver `components/shared/AsaasBadge.tsx`) nas telas de
+  criação de subconta, comprovantes, extratos e fluxos de pagamento externos —
+  nunca com nomenclatura que sugira que a Alber é a instituição financeira.
+  Detalhes de aplicação em `04_api_asaas.md` seção 8 e no Playbook de BaaS Asaas
+  (documento externo, fornecido pelo gerente de contas Asaas).
 - **API-first:** toda regra de negócio vive no backend, nunca no app.
 - **Segurança transversal:** PIN, confirmação de segurança e validações não são
   features isoladas — são camadas que atravessam todos os fluxos sensíveis.

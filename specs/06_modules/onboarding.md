@@ -11,7 +11,14 @@ O onboarding é o único ponto de entrada no Alber. Ao final do fluxo o usuário
 tem conta ativa, subconta Asaas criada em background e está pronto para operar
 — com exceção de Carregar e Descarregar (bloqueados até KYC aprovado).
 
-**Regra central:** o usuário nunca vê a marca Asaas.
+**Regra central:** a marca Alber conduz toda a jornada — a Alber não se
+apresenta como instituição financeira/de pagamento. Nas telas onde a subconta
+é de fato criada (`cadastro/terms.tsx` e `cadastro/empresa-pix.tsx`, fluxo de
+conta já existente), o selo institucional Asaas é **obrigatório** junto ao CTA
+de criação, por exigência da Resolução Conjunta nº 16/2025 do BACEN (ver
+Playbook de BaaS Asaas e `04_api_asaas.md` seção 8). O selo usa
+`components/shared/AsaasBadge.tsx`, servido pela URL homologada do CDN do
+Asaas — nunca hospedado localmente, para herdar atualizações de marca.
 
 ---
 
@@ -139,7 +146,7 @@ Sessão expirada → Login completo (CPF/@handle + PIN + segurança)
 
 | ID | Critério |
 |---|---|
-| ON-01 | Subconta Asaas criada em background sem expor marca |
+| ON-01 | Subconta Asaas criada em background; selo institucional Asaas exibido junto ao CTA na tela de criação (PF e PJ), conforme Playbook de BaaS |
 | ON-02 | CPF duplicado bloqueia e sugere recuperação |
 | ON-03 | @handle verificado em tempo real com sugestões |
 | ON-04 | PIN não aceita sequências óbvias, exige confirmação |

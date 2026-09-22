@@ -1,7 +1,14 @@
-// Compliance: Playbook BaaS Asaas — exibição obrigatória em todas as telas financeiras
-// Abre https://asaas.com via Linking quando clicado
+// Compliance: Playbook BaaS Asaas — exibição obrigatória em todas as telas
+// financeiras e, especialmente, nas telas de criação de subconta.
+// Abre https://asaas.com via Linking quando clicado.
+//
+// O selo é servido pelo CDN oficial do Asaas como .svg — o componente <Image>
+// do React Native NÃO renderiza SVG remoto (só rasterizado), por isso o selo
+// usa <SvgUri> do react-native-svg, que baixa e desenha o XML do selo.
+// Proporção do arquivo oficial (viewBox 188x69) preservada nos tamanhos abaixo.
 
-import { Image, Linking, Pressable, StyleSheet } from 'react-native'
+import { Linking, Pressable } from 'react-native'
+import { SvgUri } from 'react-native-svg'
 import { useTranslation } from 'react-i18next'
 
 const SELO_URI =
@@ -16,8 +23,8 @@ export function AsaasBadge({ size = 'default' }: AsaasBadgeProps) {
   const { t } = useTranslation()
   const isSmall = size === 'small'
 
-  const imgWidth  = isSmall ? 90  : 120
-  const imgHeight = isSmall ? 27  : 36
+  const imgWidth  = isSmall ? 90  : 130
+  const imgHeight = isSmall ? 33  : 48
 
   return (
     <Pressable
@@ -26,14 +33,11 @@ export function AsaasBadge({ size = 'default' }: AsaasBadgeProps) {
       accessibilityLabel={t('shared.asaasBadge')}
       hitSlop={8}
     >
-      <Image
-        source={{ uri: SELO_URI }}
-        style={{ width: imgWidth, height: imgHeight }}
-        resizeMode="contain"
-        accessibilityLabel={t('shared.asaasBadge')}
+      <SvgUri
+        uri={SELO_URI}
+        width={imgWidth}
+        height={imgHeight}
       />
     </Pressable>
   )
 }
-
-const styles = StyleSheet.create({})

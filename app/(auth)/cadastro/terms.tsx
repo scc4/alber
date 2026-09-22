@@ -11,6 +11,7 @@ import { router } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { LegalDocModal } from '../../../components/shared/LegalDocModal'
+import { AsaasBadge } from '../../../components/shared/AsaasBadge'
 import { getDraft, clearDraft } from '../../../store/signup-draft'
 import { useAuthStore } from '../../../store/auth.store'
 import * as authService from '../../../services/auth.service'
@@ -362,6 +363,13 @@ export default function TermsScreen() {
         </Check>
 
         <View style={styles.spacer} />
+
+        {/* Selo institucional Asaas — Playbook BaaS: obrigatório na tela de
+            criação de subconta, próximo ao CTA de criação. */}
+        <View style={styles.asaasBadgeRow}>
+          <AsaasBadge />
+        </View>
+
         <PrimaryButton
           label={t('auth.onboarding.terms.create')}
           onPress={handleCreate}
@@ -474,6 +482,10 @@ const styles = StyleSheet.create({
     borderTopColor: 'rgba(255,255,255,0.12)',
   },
   spacer: { minHeight: spacing.xl },
+  asaasBadgeRow: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
 })
 
 const creating = StyleSheet.create({

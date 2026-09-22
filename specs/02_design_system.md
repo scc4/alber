@@ -319,6 +319,25 @@ interface EmptyStateProps {
 
 ---
 
+### 6.15 AsaasBadge
+
+Selo institucional obrigatório em telas financeiras (compliance BaaS — ver
+`04_api_asaas.md` §8.1). Renderiza o SVG homologado direto do CDN do Asaas via
+`SvgUri` (react-native-svg) — nunca `Image` (não renderiza SVG remoto) nem
+cópia local do arquivo. Toque abre `https://asaas.com`.
+
+```typescript
+interface AsaasBadgeProps {
+  size?: 'default' | 'small'  // 130x48 | 90x33 — proporção 188:69 do SVG oficial
+}
+```
+
+**Uso obrigatório:** rodapé das telas de criação de subconta (PF e PJ), junto
+ao CTA de criação. Uso adicional já aplicado em Carregar, Transferir, Receber,
+Atividade e verificação KYC.
+
+---
+
 ## 7. Padrões de iconografia
 
 - Traço fino (stroke), sem preenchimento

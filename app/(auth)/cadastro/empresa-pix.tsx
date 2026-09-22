@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next'
 import { OnboardShell } from '../../../components/core/OnboardShell'
 import { PrimaryButton } from '../../../components/core/PrimaryButton'
 import { LegalDocModal } from '../../../components/shared/LegalDocModal'
+import { AsaasBadge } from '../../../components/shared/AsaasBadge'
 import { getDraft, updateDraft, clearDraft } from '../../../store/signup-draft'
 import { useAuthStore } from '../../../store/auth.store'
 import * as companyService from '../../../services/company.service'
@@ -168,11 +169,18 @@ export default function EmpresaPixScreen() {
       subtitle={t('auth.onboarding.empresaPix.subtitle')}
       onBack={() => router.back()}
       footer={
-        <PrimaryButton
-          label={t('auth.onboarding.continue')}
-          onPress={handleSubmit}
-          state={consentReady ? 'default' : 'disabled'}
-        />
+        <>
+          {/* Selo institucional Asaas — Playbook BaaS: obrigatório na tela
+              de criação de subconta (PJ), próximo ao CTA de criação. */}
+          <View style={styles.asaasBadgeRow}>
+            <AsaasBadge />
+          </View>
+          <PrimaryButton
+            label={t('auth.onboarding.continue')}
+            onPress={handleSubmit}
+            state={consentReady ? 'default' : 'disabled'}
+          />
+        </>
       }
     >
       <View style={styles.typeGrid}>
@@ -264,6 +272,10 @@ export default function EmpresaPixScreen() {
 }
 
 const styles = StyleSheet.create({
+  asaasBadgeRow: {
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
   typeGrid: {
     flexDirection: 'row',
     gap: 8,

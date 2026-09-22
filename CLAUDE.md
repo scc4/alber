@@ -3,7 +3,11 @@
 ## O que é este projeto
 App mobile de carteira digital baseada em Albers (moeda proprietária).
 Stack: React Native + Expo (managed workflow) + Supabase + Asaas (BaaS).
-O usuário nunca vê a marca Asaas — tudo opera sob marca Alber.
+A experiência roda sob marca Alber — a Alber nunca se apresenta como
+instituição financeira/de pagamento. Ainda assim, por exigência regulatória
+(Resolução Conjunta nº 16/2025 do BACEN), o selo institucional Asaas é
+obrigatório nas telas de criação de subconta e demais fluxos financeiros —
+ver /specs/04_api_asaas.md §8.1 e components/shared/AsaasBadge.tsx.
 
 ## Design de referência
 Os arquivos de design estão em /design/.

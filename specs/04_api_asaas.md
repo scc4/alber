@@ -178,6 +178,28 @@ const transaction_id = crypto.randomUUID()
 | Produção requer habilitação manual | ⚠️ Solicitar antes do go-live |
 | Playbook de adequação de branding | ⚠️ Via gerente de contas |
 
+### 8.1 Selo institucional Asaas — obrigatório
+
+Por exigência da Resolução Conjunta nº 16/2025 do Banco Central, o cliente
+final deve saber que os serviços financeiros são prestados pelo Asaas sempre
+que houver movimentação ou gestão de valores — mesmo operando 100% White
+Label sob a marca Alber. Isso **não contradiz** o princípio de "BaaS
+invisível" (`00_architecture.md` §2): a Alber conduz a jornada, mas o selo é
+o mecanismo de transparência regulatória exigido pelo Asaas.
+
+- **Onde é obrigatório:** telas de criação de subconta (`cadastro/terms.tsx`
+  para PF/bundlado, `cadastro/empresa-pix.tsx` para PJ conta-já-existente),
+  comprovantes/extratos, e-mails transacionais e fluxos externos de
+  pagamento (link de cobrança, checkout).
+- **Componente:** `components/shared/AsaasBadge.tsx` — usa `SvgUri` (não
+  `Image`, que não renderiza SVG remoto) apontando para a URL homologada do
+  CDN (`baas.asaas.com/selos/...`), com `id` fornecido pelo Asaas.
+  **Nunca** hospedar o SVG localmente: o CDN centraliza atualizações de
+  marca do Asaas sem precisar de novo deploy do app.
+- **Vedado:** usar termos como "Banco", "Pay", "Instituição de Pagamento"
+  para a Alber, ou dar a entender que a Alber é a responsável pela operação
+  financeira.
+
 ---
 
 ## 9. Pendências críticas — confirmar com Asaas

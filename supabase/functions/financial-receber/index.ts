@@ -241,7 +241,7 @@ Deno.serve(async (req: Request) => {
     .eq('type', 'receber')
     .maybeSingle()
 
-  const receberRate  = Number(rateRow?.rate ?? 0.02)                          // fallback 2%
+  const receberRate  = Number(rateRow?.rate ?? 0.01)                          // fallback 1% (seed da migration 007)
   const fee          = parseFloat((amount_albers * receberRate).toFixed(2))
   const payerDebit   = parseFloat((amount_albers + fee).toFixed(2))
 

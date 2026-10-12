@@ -215,10 +215,10 @@ Deno.serve(async (req: Request) => {
   // Buscar taxa de evento configurada no painel admin (spec AS-11)
   const { data: rateRow } = await supabaseAdmin
     .from('rates')
-    .select('percentage')
+    .select('rate')
     .eq('type', 'event')
     .maybeSingle()
-  const feeRate   = rateRow?.percentage ?? 0
+  const feeRate   = Number(rateRow?.rate ?? 0)
   const feeAmount = parseFloat((priceBrl * feeRate).toFixed(2))
 
   // Verificar PIN

@@ -17,6 +17,7 @@ import { useAuthStore } from '../../../store/auth.store'
 import * as authService from '../../../services/auth.service'
 import { normalizeCNPJ } from '../../../utils/cnpj'
 import { parseBRL } from '../../../utils/currency'
+import { buildConsentProof } from '../../../utils/legal'
 import { resolveInitialRoute } from '../../../hooks/useInitialRoute'
 import { colors } from '../../../tokens/colors'
 import { typography } from '../../../tokens/typography'
@@ -174,6 +175,12 @@ export default function TermsScreen() {
         create_personal_wallet: !noPersonalWallet,
         ...(d.inviteToken && { invite_token: d.inviteToken }),
         terms_accepted: true,
+        consents: await Promise.all([
+          buildConsentProof('terms_of_use',   t('auth.onboarding.terms.termsOfUseBody')),
+          buildConsentProof('privacy_policy', t('auth.onboarding.terms.privacyPolicyBody')),
+          // Maioridade é uma frase sem data própria: herda a versão dos Termos.
+          buildConsentProof('majority', t('auth.onboarding.terms.majority'), t('auth.onboarding.terms.termsOfUseBody')),
+        ]),
         marketing_opt_in: marketingOptIn,
         ...(d.accountType === 'business' && {
           company: {

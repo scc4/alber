@@ -81,6 +81,8 @@ export interface RegisterInput {
   pix_key?:           string
   pix_key_type?:      'cpf' | 'phone' | 'email' | 'random'
   terms_accepted:     boolean
+  // Prova de aceite por documento (versão + SHA-256 do texto exibido) — cl. 8.2.4
+  consents?:          { type: string; version: string; text_hash: string }[]
   // Consentimento opcional e separado do aceite obrigatório de Termos/Privacidade
   // (item 19 da revisão de QA) — nunca pré-marcado, só true por ação explícita.
   marketing_opt_in?:  boolean

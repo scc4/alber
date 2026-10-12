@@ -760,3 +760,49 @@ Deno.test('cadastro de empresa com pix_key_type "cnpj" → companies insert grav
   assertEquals(companyInsertBodies[0]?.pix_key_type, 'cnpj')
   assertEquals(typeof companyInsertBodies[0]?.pix_key, 'string')
 })
+
+// ── buildConsentRows (contrato BaaS Asaas cl. 8.2.4) ─────────────────────────
+
+import { buildConsentRows } from './index.ts'
+
+const HASH = 'a'.repeat(64)
+
+Deno.test('buildConsentRows: grava versão e hash enviados pelo app para os 3 aceites obrigatórios', () => {
+  const rows = buildConsentRows('u1', [
+    { type: 'terms_of_use',   version: '2026-07-30', text_hash: HASH },
+    { type: 'privacy_policy', version: '2026-07-30', text_hash: HASH },
+    { type: 'majority',       version: '2026-07-30', text_hash: HASH },
+  ], '1.2.3.4', 'ua-test')
+
+  assertEquals(rows.map(r => r.consent_type), ['terms_of_use', 'privacy_policy', 'majority'])
+  for (const r of rows) {
+    assertEquals(r.document_version, '2026-07-30')
+    assertEquals(r.document_hash, HASH)
+    assertEquals(r.ip_address, '1.2.3.4')
+    assertEquals(r.user_agent, 'ua-test')
+    assertEquals(r.user_id, 'u1')
+  }
+})
+
+Deno.test("buildConsentRows: app antigo (sem consents) ainda gera 3 linhas 'legacy-client' sem hash", () => {
+  const rows = buildConsentRows('u1', undefined, null, null)
+  assertEquals(rows.length, 3)
+  for (const r of rows) {
+    assertEquals(r.document_version, 'legacy-client')
+    assertEquals(r.document_hash, null)
+    assertEquals(r.ip_address, null)
+  }
+})
+
+Deno.test('buildConsentRows: hash inválido ou tipo faltando cai em legacy-client só para aquele tipo', () => {
+  const rows = buildConsentRows('u1', [
+    { type: 'terms_of_use',   version: '2026-07-30', text_hash: 'not-a-sha256' },
+    { type: 'privacy_policy', version: '2026-07-30', text_hash: HASH },
+  ], null, null)
+
+  const byType = Object.fromEntries(rows.map(r => [r.consent_type, r]))
+  assertEquals(byType.terms_of_use.document_version, 'legacy-client')
+  assertEquals(byType.terms_of_use.document_hash, null)
+  assertEquals(byType.privacy_policy.document_hash, HASH)
+  assertEquals(byType.majority.document_version, 'legacy-client')
+})

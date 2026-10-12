@@ -35,6 +35,10 @@ interface RegisterRequest {
   pix_key?: string
   pix_key_type?: 'cpf' | 'phone' | 'email' | 'random'
   terms_accepted: boolean
+  // Prova de aceite (contrato BaaS Asaas cl. 8.2.4): versão + hash SHA-256 do
+  // texto exibido a cada documento aceito. Ausente em apps antigos — nesse caso
+  // o servidor ainda grava o aceite, marcado 'legacy-client' (migration 049).
+  consents?: { type: string; version: string; text_hash: string }[]
   // Consentimento opcional e separado do aceite obrigatório de Termos/Privacidade
   // (item 19 da revisão de QA) — nunca pré-marcado, só true por ação explícita.
   marketing_opt_in?: boolean
@@ -58,6 +62,38 @@ interface PendingRow {
   asaas_api_key_enc: string
   asaas_wallet_id: string
   attempts: number
+}
+
+// ── Helper: linhas de user_consents (contrato BaaS Asaas cl. 8.2.4) ───────────
+// Os 3 aceites obrigatórios do cadastro sempre geram uma linha. Se o app enviou
+// versão + hash válidos para o tipo, eles são gravados; senão (app antigo ou
+// payload inválido) grava 'legacy-client' sem hash — o aceite em si, com data e
+// IP, nunca fica sem registro.
+
+const REQUIRED_CONSENT_TYPES = ['terms_of_use', 'privacy_policy', 'majority'] as const
+const SHA256_HEX = /^[a-f0-9]{64}$/
+
+export function buildConsentRows(
+  userId: string,
+  consents: RegisterRequest['consents'],
+  ip: string | null,
+  userAgent: string | null,
+) {
+  return REQUIRED_CONSENT_TYPES.map(type => {
+    const c = Array.isArray(consents) ? consents.find(x => x?.type === type) : undefined
+    const valid =
+      !!c &&
+      typeof c.version === 'string' && c.version.length > 0 && c.version.length <= 32 &&
+      typeof c.text_hash === 'string' && SHA256_HEX.test(c.text_hash)
+    return {
+      user_id:          userId,
+      consent_type:     type,
+      document_version: valid ? c!.version : 'legacy-client',
+      document_hash:    valid ? c!.text_hash : null,
+      ip_address:       ip,
+      user_agent:       userAgent ? userAgent.slice(0, 255) : null,
+    }
+  })
 }
 
 // ── Helper: salvar/atualizar pending_registration ─────────────────────────────
@@ -627,6 +663,21 @@ export async function handleRequest(req: Request): Promise<Response> {
     })
   } catch (e) {
     console.error('[auth-register] updateUserById failed (non-critical):', e)
+  }
+
+  // Prova de aceite (cl. 8.2.4). Não derruba o cadastro já concluído no Asaas,
+  // mas falha aqui é lacuna de conformidade — por isso vai para error_logs.
+  try {
+    const { error: consentError } = await supabaseAdmin
+      .from('user_consents')
+      .insert(buildConsentRows(userId, body.consents, clientIp === 'unknown' ? null : clientIp, req.headers.get('user-agent')))
+    if (consentError) {
+      console.error('[auth-register] user_consents insert failed:', consentError)
+      await logError(supabaseAdmin, 'auth-register', consentError, { user_id: userId, context: 'user_consents' })
+    }
+  } catch (e) {
+    console.error('[auth-register] user_consents insert failed:', e)
+    await logError(supabaseAdmin, 'auth-register', e, { user_id: userId, context: 'user_consents' })
   }
 
   // Log de auditoria (não crítico)

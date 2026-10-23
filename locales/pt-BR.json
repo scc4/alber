@@ -1282,6 +1282,36 @@
   "shared": {
     "asaasBadge": "Serviços financeiros Asaas"
   },
+  "food": {
+    "common": {
+      "albers": "Albers",
+      "retry": "Tentar de novo"
+    },
+    "menuItem": {
+      "unavailable": "Indisponível hoje"
+    },
+    "orderLine": {
+      "decrease": "Diminuir quantidade de {{name}}",
+      "increase": "Aumentar quantidade de {{name}}"
+    },
+    "billTotal": {
+      "title": "Total da comanda",
+      "error": "Não foi possível calcular a conta. Tente de novo."
+    },
+    "split": {
+      "paid": "Pagou",
+      "pending": "Pendente"
+    },
+    "payment": {
+      "title": "Pagar com Albers",
+      "balanceNow": "Saldo atual",
+      "balanceAfter": "Saldo depois",
+      "insufficient": "Saldo insuficiente",
+      "topUp": "Carregar Albers",
+      "pay": "Pagar {{value}}",
+      "cancel": "Cancelar"
+    }
+  },
   "common": {
     "genericError": "Ocorreu um erro. Tente novamente.",
     "verifying": "Verificando…"

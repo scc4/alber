@@ -9,6 +9,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { isValidHandleFormat } from '../_shared/company.ts'
+import { isReservedByOther } from '../_shared/handle-reservation.ts'
 
 interface CheckHandleRequest {
   handle: string
@@ -52,12 +53,14 @@ export async function handleRequest(req: Request): Promise<Response> {
     ip_address: clientIp,
   })
 
-  const [{ data: handleUser }, { data: handleCompany }] = await Promise.all([
-    supabaseAdmin.from('users').select('id').eq('handle', handle).maybeSingle(),
+  // O @ de usuário já foi gravado com e sem "@" (perfil-update-handle grava com): olha as duas formas.
+  const [{ data: handleUser }, { data: handleCompany }, reserved] = await Promise.all([
+    supabaseAdmin.from('users').select('id').in('handle', [handle, '@' + handle]).limit(1).maybeSingle(),
     supabaseAdmin.from('companies').select('id').eq('handle', handle).is('deleted_at', null).maybeSingle(),
+    isReservedByOther(supabaseAdmin, handle), // reservado pelo Alber Food para outra conta
   ])
 
-  return json({ available: !handleUser && !handleCompany })
+  return json({ available: !handleUser && !handleCompany && !reserved })
 }
 
 if (import.meta.main) {

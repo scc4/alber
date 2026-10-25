@@ -10,6 +10,7 @@
 // subconta existente" (mesmo catch de duplicata que auth-register usa) — mais
 // simples e suficiente pro volume esperado de aberturas de conta PJ no MVP.
 
+import { isReservedByOther } from './handle-reservation.ts'
 import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { validateCnpj, normalizeCnpj, maskCnpjForDisplay } from './cnpj.ts'
 import { sha256hex, aesEncrypt } from './crypto.ts'
@@ -106,7 +107,7 @@ export async function createCompanyForOwner(
     supabaseAdmin.from('users').select('id').eq('handle', handleNorm).maybeSingle(),
     supabaseAdmin.from('companies').select('id').eq('handle', handleNorm).is('deleted_at', null).maybeSingle(),
   ])
-  if (handleUser || handleCompany) {
+  if (handleUser || handleCompany || (await isReservedByOther(supabaseAdmin, handleNorm))) {
     return { ok: false, code: 'COMPANY_HANDLE_TAKEN', message: '@handle da empresa já está em uso', status: 409 }
   }
 

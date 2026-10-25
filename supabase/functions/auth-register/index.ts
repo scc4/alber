@@ -10,6 +10,7 @@ import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { createCompanyForOwner, CreateCompanyInput, isValidHandleFormat } from '../_shared/company.ts'
+import { consumeReservation, isReservedByOther } from '../_shared/handle-reservation.ts'
 import { consumeCompanyInvite } from '../_shared/company-invite.ts'
 
 interface AddressDTO {
@@ -42,6 +43,8 @@ interface RegisterRequest {
   // Consentimento opcional e separado do aceite obrigatório de Termos/Privacidade
   // (item 19 da revisão de QA) — nunca pré-marcado, só true por ação explícita.
   marketing_opt_in?: boolean
+  // Conta do Alber Food dona da reserva deste @ (migration 050): só ela pode cadastrar o @ reservado.
+  reserved_for?: string
   // Presente quando o cadastro escolheu "Empresa" no seletor de tipo de conta —
   // o usuário acima vira o master da empresa (plano CNPJ velvet-puzzling-sedgewick).
   company?: CreateCompanyInput
@@ -228,7 +231,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       supabaseAdmin.from('users').select('id').eq('handle', companyHandleNorm).maybeSingle(),
       supabaseAdmin.from('companies').select('id').eq('handle', companyHandleNorm).is('deleted_at', null).maybeSingle(),
     ])
-    if (handleUser || handleCompany) {
+    if (handleUser || handleCompany || (await isReservedByOther(supabaseAdmin, companyHandleNorm))) {
       return err('COMPANY_HANDLE_TAKEN', '@handle da empresa já está em uso', 409)
     }
   }
@@ -275,6 +278,8 @@ export async function handleRequest(req: Request): Promise<Response> {
   })
 
   const handleNorm  = handle.toLowerCase().replace(/^@/, '')
+  const reservedFor = typeof body.reserved_for === 'string' && body.reserved_for ? body.reserved_for : null
+  if (await isReservedByOther(supabaseAdmin, handleNorm, reservedFor)) return err('HANDLE_TAKEN', 'Handle já em uso', 409)
   const cpfHash     = await sha256hex(cpfClean)
   const cpfMasked   = maskCpfForDisplay(cpfClean)
   const encSecret   = Deno.env.get('ASAAS_API_KEY')!  // Asaas parent API key — também usada p/ criptografar asaas_api_key_enc
@@ -587,6 +592,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   const userId = newUser.id
+  if (reservedFor) await consumeReservation(supabaseAdmin, handleNorm) // a reserva virou o @ do usuário
 
   // ── ETAPA 4.5: Criar empresa (quando o cadastro escolheu "Empresa") ──────────
   // Falha aqui NÃO derruba o cadastro pessoal já criado — a subconta PJ pode

@@ -105,3 +105,27 @@ Deno.test('empresa apagada não conta (consulta filtra deleted_at)', async () =>
     globalThis.fetch = orig
   }
 })
+
+Deno.test('@ reservado pelo Alber Food → { available: false }', async () => {
+  const res = await withMock(
+    [RATE_OK, AUDIT_INSERT, USERS([]), COMPANIES([]), { pattern: '/rest/v1/handle_reservations', method: 'GET', status: 200, body: [{ owner_ref: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }] }],
+    () => handleRequest(makeReq('chocolateria')),
+  )
+  assertEquals((await res.json()).available, false)
+})
+
+Deno.test('consulta o @ de usuário nas duas formas gravadas (com e sem "@")', async () => {
+  let usersUrl = ''
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    if (url.includes('/rest/v1/users')) usersUrl = decodeURIComponent(url)
+    return mockFetch([RATE_OK, AUDIT_INSERT, USERS([]), COMPANIES([])])(input, init)
+  }) as typeof fetch
+  try {
+    await handleRequest(makeReq('fernando'))
+    assertEquals(usersUrl.includes('fernando') && usersUrl.includes('@fernando'), true)
+  } finally {
+    globalThis.fetch = orig
+  }
+})

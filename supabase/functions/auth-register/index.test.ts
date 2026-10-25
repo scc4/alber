@@ -197,6 +197,45 @@ Deno.test('CPF duplicado → 409', async () => {
 
 // ── Tests — bug do login pós-cadastro (item 1-3 e 4a do plano) ────────────────
 
+Deno.test('@ reservado pelo Alber Food para OUTRA conta → 409 HANDLE_TAKEN, sem criar nada', async () => {
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/handle_reservations', method: 'GET', status: 200, body: [{ owner_ref: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }] },
+    ...BASE_ROUTES,
+  ]
+  const res = await withMock(routes, [], () => handleRequest(makeReq({ reserved_for: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' })))
+  assertEquals(res.status, 409)
+  assertEquals((await res.json()).error, 'HANDLE_TAKEN')
+  // e sem dizer para quem é a reserva também não passa
+  const res2 = await withMock(routes, [], () => handleRequest(makeReq()))
+  assertEquals(res2.status, 409)
+})
+
+Deno.test('@ reservado para a PRÓPRIA conta (reserved_for) cadastra e consome a reserva', async () => {
+  const OWNER = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const deletes: string[] = []
+  const orig = globalThis.fetch
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/handle_reservations', method: 'GET', status: 200, body: [{ owner_ref: OWNER }] },
+    { pattern: '/rest/v1/handle_reservations', method: 'DELETE', status: 200, body: [] },
+    ...BASE_ROUTES,
+    { pattern: '/rest/v1/users', method: 'POST', status: 201, body: NEW_DB_USER },
+    { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK },
+  ]
+  const res = await withMock(routes, [], async () => {
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+      if ((init?.method ?? 'GET').toUpperCase() === 'DELETE' && url.includes('handle_reservations')) deletes.push(url)
+      return inner(input, init)
+    }) as typeof fetch
+    try { return await handleRequest(makeReq({ reserved_for: OWNER })) } finally { globalThis.fetch = inner }
+  })
+  assertEquals(res.status, 201)
+  assertEquals(deletes.length, 1)
+  assertEquals(deletes[0].includes('handle=eq.fulano'), true)
+  void orig
+})
+
 Deno.test('cadastro completo — login na 1ª tentativa → token presente, sem login_required', async () => {
   const routes = [
     ...BASE_ROUTES,

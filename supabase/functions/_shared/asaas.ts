@@ -323,3 +323,69 @@ export async function refundPayment(
   })
   if (!res.ok) throw new Error(`ASAAS_REFUND_FAILED: ${JSON.stringify(res.data)}`)
 }
+
+// ── Cobranças de take away do Alber Food (conta pai + split) ───────────────────
+// A cobrança é criada na conta PAI, com o split para a carteira da empresa do restaurante: o Asaas liquida direto na
+// carteira e o que sobra (taxa Alber + gateway) fica na conta pai. O cliente do restaurante é anônimo: o customer só
+// leva nome e telefone. Quem chama é o Alber Food, por funções de serviço (takeaway-payment-*).
+
+export async function createTakeawayCustomer(
+  name: string,
+  mobilePhone: string | null,
+  parentApiKey: string,
+): Promise<string> {
+  const res = await asaasRequest('POST', '/customers', parentApiKey, {
+    name,
+    ...(mobilePhone ? { mobilePhone } : {}),
+    notificationDisabled: true, // o aviso ao cliente é do Alber Food, não do Asaas
+  })
+  if (!res.ok) throw new AsaasError('ASAAS_CUSTOMER_CREATE_FAILED', res.data as Record<string, unknown>)
+  return (res.data as { id: string }).id
+}
+
+export interface CreateTakeawayPaymentInput {
+  customer: string
+  billingType: 'PIX' | 'CREDIT_CARD'
+  value: number            // em reais (2 casas)
+  dueDate: string          // YYYY-MM-DD
+  description: string
+  externalReference: string
+  split: { walletId: string; fixedValue: number }[]
+}
+
+export async function createTakeawayPayment(
+  input: CreateTakeawayPaymentInput,
+  parentApiKey: string,
+): Promise<{ id: string; invoiceUrl: string | null }> {
+  const res = await asaasRequest('POST', '/payments', parentApiKey, input)
+  if (!res.ok) throw new AsaasError('ASAAS_PAYMENT_CREATE_FAILED', res.data as Record<string, unknown>)
+  const d = res.data as { id: string; invoiceUrl?: string }
+  return { id: d.id, invoiceUrl: d.invoiceUrl ?? null }
+}
+
+/** Cobrança já criada para esta referência (a chamada pode ser repetida depois de um timeout). */
+export async function findPaymentByReference(
+  externalReference: string,
+  parentApiKey: string,
+): Promise<{ id: string; status: string; invoiceUrl: string | null } | null> {
+  const res = await asaasRequest('GET', `/payments?externalReference=${encodeURIComponent(externalReference)}&limit=1`, parentApiKey)
+  if (!res.ok) return null
+  const first = (res.data as { data?: { id: string; status: string; invoiceUrl?: string }[] }).data?.[0]
+  return first ? { id: first.id, status: first.status, invoiceUrl: first.invoiceUrl ?? null } : null
+}
+
+export async function getPaymentWithRefunds(
+  paymentId: string,
+  parentApiKey: string,
+): Promise<{ status: string; externalReference: string | null; refunds: { description?: string; value?: number }[] }> {
+  const res = await asaasRequest('GET', `/payments/${paymentId}`, parentApiKey)
+  if (!res.ok) throw new AsaasError('ASAAS_PAYMENT_GET_FAILED', res.data as Record<string, unknown>)
+  const d = res.data as { status: string; externalReference?: string; refunds?: { description?: string; value?: number }[] }
+  return { status: d.status, externalReference: d.externalReference ?? null, refunds: d.refunds ?? [] }
+}
+
+/** Cancela uma cobrança que ninguém pagou (Pix vencido). */
+export async function cancelPayment(paymentId: string, parentApiKey: string): Promise<void> {
+  const res = await asaasRequest('DELETE', `/payments/${paymentId}`, parentApiKey)
+  if (!res.ok) throw new AsaasError('ASAAS_PAYMENT_CANCEL_FAILED', res.data as Record<string, unknown>)
+}

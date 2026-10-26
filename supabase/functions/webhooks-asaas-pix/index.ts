@@ -8,6 +8,7 @@ import { normalizeCpf } from '../_shared/cpf.ts'
 import { refundPayment } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
+import { forwardToFood, isFoodReference, type AsaasPaymentEvent } from '../_shared/food-webhook.ts'
 
 const HANDLED_EVENTS  = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
 const TRANSFER_EVENTS = new Set(['TRANSFER_DONE', 'TRANSFER_FAILED'])
@@ -65,6 +66,12 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   const { event, transfer } = payload
+
+  // ── Cobrança de pedido do Alber Food (referência 'food_...'): não é transação do Alber ─────────────────────────
+  // Segue, assinado, para o Alber Food. Nada abaixo mexe em transactions.
+  if (isFoodReference(payload.payment?.externalReference)) {
+    return await forwardToFood(payload as unknown as AsaasPaymentEvent)
+  }
 
   // ── TRANSFER_DONE / TRANSFER_FAILED — conclusão do Descarregar ───────────────
   // Descarregar fica 'processing' até este webhook confirmar (ou falhar) o Pix

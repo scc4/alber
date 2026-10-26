@@ -19,11 +19,16 @@ import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
 import { createPixAddressKey } from '../_shared/asaas.ts'
+import { applyCompanyKyc } from '../_shared/company-kyc.ts'
 
 // Asaas envia o authToken configurado no header 'asaas-access-token' (mesmo padrão do pix webhook)
+// Eventos reais do Asaas: a aprovação final é ACCOUNT_STATUS_GENERAL_APPROVAL_* (docs.asaas.com/docs/account-status-events),
+// com o estado em accountStatus.general. Os três nomes antigos ficam por compatibilidade (nunca confirmados na doc).
 const HANDLED_EVENTS = new Set([
+  'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
+  'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED',
   'ACCOUNT_STATUS_CHANGED',
-  'ACCOUNT_APPROVED',    // nomes alternativos — confirmar com Asaas (spec §9)
+  'ACCOUNT_APPROVED',
   'ACCOUNT_REJECTED',
 ])
 
@@ -66,8 +71,10 @@ export async function handleRequest(req: Request): Promise<Response> {
     event:   string
     account?: {
       id:     string    // asaas_account_id da subconta
-      status: string    // APPROVED | REJECTED | RESTRICTED | PENDING
+      status?: string   // formato antigo: APPROVED | REJECTED | RESTRICTED | PENDING
     }
+    // Formato atual: estado de cada etapa; `general` é a aprovação final
+    accountStatus?: { general?: string }
     // Alguns eventos podem usar campos alternativos — tratados abaixo
     id?:     string
     status?: string
@@ -93,7 +100,9 @@ export async function handleRequest(req: Request): Promise<Response> {
   // ── Extrair account ID e status (normalizar variações de payload) ─────────────
 
   const asaasAccountId = payload.account?.id ?? payload.id
-  const rawStatus      = payload.account?.status ?? payload.status ?? ''
+  // Formato atual: accountStatus.general; se faltar, o próprio nome do evento diz o resultado (..._APPROVED / ..._REJECTED).
+  const fromEvent      = event.startsWith('ACCOUNT_STATUS_GENERAL_APPROVAL_') ? event.slice('ACCOUNT_STATUS_GENERAL_APPROVAL_'.length) : ''
+  const rawStatus      = payload.accountStatus?.general ?? payload.account?.status ?? payload.status ?? fromEvent
 
   if (!asaasAccountId) {
     console.warn('[kyc-webhook] account.id ausente no payload')
@@ -235,92 +244,8 @@ async function handleCompanyKyc(
     return new Response('OK', { status: 200 })
   }
 
-  if (companyData.kyc_status === newKycStatus) {
-    console.log(`[kyc-webhook] empresa ${companyData.id} já está em kyc_status="${newKycStatus}" — ignorando`)
-    return new Response('OK', { status: 200 })
-  }
-
-  const now = new Date().toISOString()
-  const updatePayload: Record<string, unknown> = { kyc_status: newKycStatus, updated_at: now }
-  if (newKycStatus === 'approved') {
-    updatePayload.onboarding_completed_at = now
-  } else {
-    // Libera CNPJ/handle na hora — decisão de produto: nenhuma revisão manual
-    // intermediária, o Asaas já fez a checagem real de documentos.
-    updatePayload.deleted_at = now
-  }
-
-  const { error: updateErr } = await supabaseAdmin
-    .from('companies')
-    .update(updatePayload)
-    .eq('id', companyData.id)
-
-  if (updateErr) {
-    console.error('[kyc-webhook] falha ao atualizar kyc_status da empresa:', updateErr)
-    await logError(supabaseAdmin, 'webhooks-asaas-kyc', updateErr, {
-      event, asaas_account_id: asaasAccountId, new_kyc_status: newKycStatus, company_id: companyData.id,
-    })
-    return new Response('Internal Server Error', { status: 500 })
-  }
-
-  console.log(`[kyc-webhook] empresa ${companyData.id} → kyc_status="${newKycStatus}"`)
-
-  // ── Criar chave Pix de RECEBIMENTO (EVP) se ainda não tiver ──────────────────
-
-  if (newKycStatus === 'approved' && !companyData.asaas_deposit_key && companyData.asaas_api_key_enc) {
-    try {
-      const subApiKey    = await aesDecrypt(companyData.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
-      const { key }      = await createPixAddressKey('EVP', subApiKey)
-      const encryptedKey = await aesEncrypt(key, Deno.env.get('ENCRYPTION_KEY')!)
-      await supabaseAdmin
-        .from('companies')
-        .update({ asaas_deposit_key: encryptedKey })
-        .eq('id', companyData.id)
-      console.log(`[kyc-webhook] chave Pix de recebimento (EVP) criada para empresa ${companyData.id}`)
-    } catch (pixErr) {
-      console.error('[kyc-webhook] falha ao criar chave Pix de recebimento da empresa (não bloqueante):', pixErr)
-      await logError(supabaseAdmin, 'webhooks-asaas-kyc', pixErr, {
-        context: 'create_deposit_key', company_id: companyData.id, asaas_account_id: asaasAccountId,
-      })
-    }
-  }
-
-  // ── Push notification ao master ──────────────────────────────────────────────
-
-  if (newKycStatus === 'approved') {
-    await sendPush(
-      companyData.owner_id,
-      'Empresa verificada!',
-      'A verificação da sua empresa foi concluída. Já pode usar o Alber.',
-      { route: `/(app)/empresas/${companyData.id}` },
-      undefined,
-      'conta_kyc',
-    )
-  } else {
-    await sendPush(
-      companyData.owner_id,
-      'Verificação da empresa não aprovada',
-      'A verificação de identidade da empresa não foi concluída. Acesse o app para mais informações.',
-      { route: `/(app)/empresas/${companyData.id}` },
-      undefined,
-      'conta_kyc',
-    )
-  }
-
-  // ── Audit log ────────────────────────────────────────────────────────────────
-
-  await supabaseAdmin.from('audit_logs').insert({
-    user_id:    companyData.owner_id,
-    event_type: `company_kyc_status_${newKycStatus}`,
-    metadata: {
-      company_id:       companyData.id,
-      asaas_account_id: asaasAccountId,
-      asaas_event:      event,
-      asaas_status:     rawStatus,
-      previous_status:  companyData.kyc_status,
-    },
-  })
-
+  const r = await applyCompanyKyc(supabaseAdmin, companyData, newKycStatus, { via: 'webhook', asaasAccountId, event, rawStatus })
+  if (r === 'error') return new Response('Internal Server Error', { status: 500 })
   return new Response('OK', { status: 200 })
 }
 

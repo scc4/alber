@@ -5,13 +5,14 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
+import { pollCompanyKyc } from '../_shared/company-kyc.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
   Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
 )
 
-Deno.serve(async (req: Request) => {
+export async function handleRequest(req: Request): Promise<Response> {
   const corsRes = handleCors(req)
   if (corsRes) return corsRes
   if (req.method !== 'GET') return err('METHOD_NOT_ALLOWED', 'Use GET', 405)
@@ -34,6 +35,20 @@ Deno.serve(async (req: Request) => {
     .maybeSingle()
 
   if (!user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
+
+  // ── Situação do KYC: empresas pendentes do master são conferidas no Asaas ─────
+  // O webhook pode não chegar (e no sandbox a aprovação é automática); sem isto, quem só olha a lista
+  // (Alber Food, app) ficaria com a empresa "pendente" para sempre. Só aprova; falha não derruba a lista.
+  const { data: pendingOwned } = await supabaseAdmin
+    .from('companies')
+    .select('id')
+    .eq('owner_id', user.id)
+    .in('kyc_status', ['pending', 'submitted'])
+    .is('deleted_at', null)
+  if (pendingOwned && pendingOwned.length > 0) {
+    const sync = Promise.all(pendingOwned.slice(0, 5).map((c: { id: string }) => pollCompanyKyc(supabaseAdmin, c.id)))
+    await Promise.race([sync, new Promise((resolve) => setTimeout(resolve, 8000))])
+  }
 
   // ── Empresas onde é master ────────────────────────────────────────────────────
 
@@ -85,4 +100,8 @@ Deno.serve(async (req: Request) => {
   ]
 
   return json({ companies: result })
-})
+}
+
+if (import.meta.main) {
+  Deno.serve(handleRequest)
+}

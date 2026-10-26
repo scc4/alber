@@ -107,9 +107,10 @@ export async function createAsaasAccount(
         enabled:     true,
         interrupted: false,
         authToken:   input.webhookSecret,
+        // A aprovação final é a família ACCOUNT_STATUS_GENERAL_APPROVAL_* (docs.asaas.com/docs/account-status-events).
         events: [
-          'ACCOUNT_STATUS_DOCUMENT_APPROVED',
-          'ACCOUNT_STATUS_COMMERCIAL_INFO_APPROVED',
+          'ACCOUNT_STATUS_GENERAL_APPROVAL_APPROVED',
+          'ACCOUNT_STATUS_GENERAL_APPROVAL_REJECTED',
         ],
       },
       {
@@ -388,4 +389,16 @@ export async function getPaymentWithRefunds(
 export async function cancelPayment(paymentId: string, parentApiKey: string): Promise<void> {
   const res = await asaasRequest('DELETE', `/payments/${paymentId}`, parentApiKey)
   if (!res.ok) throw new AsaasError('ASAAS_PAYMENT_CANCEL_FAILED', res.data as Record<string, unknown>)
+}
+
+// ── Situação cadastral da conta (KYC) ─────────────────────────────────────────
+// GET /myAccount/status devolve commercialInfo, bankAccountInfo, documentation e general
+// (PENDING | AWAITING_APPROVAL | APPROVED | REJECTED). `general` é a aprovação final.
+// A documentação recomenda os webhooks, mas a consulta cobre o webhook perdido e o sandbox.
+
+export async function getAccountGeneralStatus(apiKey: string): Promise<string | null> {
+  const res = await asaasRequest('GET', '/myAccount/status', apiKey)
+  if (!res.ok) return null
+  const general = (res.data as { general?: unknown }).general
+  return typeof general === 'string' ? general : null
 }

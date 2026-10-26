@@ -16,13 +16,24 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0
 }
 
+/**
+ * Segredo gravado a partir de um arquivo .env no Windows costuma vir com quebra de linha, espaço ou aspas junto.
+ * Tirar isso dos dois lados não enfraquece nada: o token continua tendo de ter 32 caracteres ou mais e bater exatamente.
+ */
+const QUOTED = /^(["'])(.*)\1$/
+function clean(value: string): string {
+  const v = value.trim()
+  const m = QUOTED.exec(v)
+  return (m ? (m[2] ?? '') : v).trim()
+}
+
 export async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== 'POST') return new Response('Method Not Allowed', { status: 405 })
 
   // Sem o token configurado a função recusa tudo (nunca fica aberta por esquecimento).
-  const expected = Deno.env.get('FOOD_ASAAS_WEBHOOK_TOKEN')
-  if (!expected || expected.length < 32) return new Response('Service Unavailable', { status: 503 })
-  const received = req.headers.get('asaas-access-token') ?? ''
+  const expected = clean(Deno.env.get('FOOD_ASAAS_WEBHOOK_TOKEN') ?? '')
+  if (expected.length < 32) return new Response('Service Unavailable', { status: 503 })
+  const received = clean(req.headers.get('asaas-access-token') ?? '')
   if (!received || !safeEqual(received, expected)) return new Response('Unauthorized', { status: 401 })
 
   let payload: AsaasPaymentEvent

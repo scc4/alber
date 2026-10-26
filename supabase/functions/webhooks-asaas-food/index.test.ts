@@ -93,3 +93,17 @@ Deno.test('corpo inválido: 400; falha do Alber Food: 502 (o Asaas reenvia); rec
   assertEquals((await run(req(evt()), 'throw')).res.status, 502)
   assertEquals((await run(req(evt()), 401)).res.status, 200)
 })
+
+Deno.test('segredo gravado com quebra de linha, espaço ou aspas (arquivo .env no Windows) ainda confere', async () => {
+  const CR = String.fromCharCode(13)
+  const LF = String.fromCharCode(10)
+  try {
+    for (const stored of [TOKEN + CR, ' ' + TOKEN + ' ', '"' + TOKEN + '"', TOKEN + CR + LF]) {
+      Deno.env.set('FOOD_ASAAS_WEBHOOK_TOKEN', stored)
+      assertEquals((await run(req(evt(), TOKEN))).res.status, 200, JSON.stringify(stored))
+      assertEquals((await run(req(evt(), TOKEN + 'x'))).res.status, 401)
+    }
+  } finally {
+    Deno.env.set('FOOD_ASAAS_WEBHOOK_TOKEN', TOKEN)
+  }
+})

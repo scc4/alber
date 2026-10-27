@@ -142,6 +142,13 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('ACCOUNT_DELETED', 'Esta conta foi excluída', 401)
   }
 
+  // ── Bloqueio administrativo (Alber Admin: account_status = 'blocked') ───────
+  // Contenção reversível feita pelo suporte. Resposta própria, sem revelar o motivo, antes de qualquer checagem de PIN.
+  if (user.account_status === 'blocked') {
+    console.error('[auth-login] FAIL:account_suspended user=', user.id)
+    return err('ACCOUNT_SUSPENDED', 'Conta indisponível no momento. Fale com o suporte.', 403)
+  }
+
   // ── Bloqueio temporário por tentativas excessivas (spec 05_security §2) ─────
   // 3 PINs errados ou 2 respostas de segurança erradas (contadas em
   // auth-question e aqui) bloqueiam o login por LOGIN_BLOCK_MINUTES.

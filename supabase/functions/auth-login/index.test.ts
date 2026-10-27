@@ -118,6 +118,30 @@ Deno.test('conta excluída (deleted_at preenchido) → 401 ACCOUNT_DELETED, nunc
   assertEquals(adminUsersCalled, false) // não deveria nem tentar verificar o PIN
 })
 
+Deno.test('conta bloqueada pelo admin (account_status blocked) → 403 ACCOUNT_SUSPENDED, nunca chega a checar PIN', async () => {
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow({ account_status: 'blocked' }) },
+  ]
+  let adminUsersCalled = false
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    if (url.includes('/auth/v1/admin/users/')) adminUsersCalled = true
+    return mockFetch(routes)(input, init)
+  }) as typeof fetch
+
+  let res: Response
+  try {
+    res = await handleRequest(makeReq())
+  } finally {
+    globalThis.fetch = orig
+  }
+  const data = await res.json()
+  assertEquals(res.status, 403)
+  assertEquals(data.code, 'ACCOUNT_SUSPENDED')
+  assertEquals(adminUsersCalled, false)
+})
+
 Deno.test('conta ativa (sem bloqueio) — passa dos gates, segue para checar PIN', async () => {
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },

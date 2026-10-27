@@ -258,6 +258,9 @@ export default function LoginScreen() {
       } else if (code === 'ACCOUNT_DELETED') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorAccountDeleted'))
         setPhase('id')
+      } else if (code === 'ACCOUNT_SUSPENDED') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorAccountSuspended'))
+        setPhase('id')
       } else {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))
       }
@@ -288,6 +291,9 @@ export default function LoginScreen() {
         setPhase('id')
       } else if (code === 'ACCOUNT_DELETED') {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorAccountDeleted'))
+        setPhase('id')
+      } else if (code === 'ACCOUNT_SUSPENDED') {
+        Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorAccountSuspended'))
         setPhase('id')
       } else {
         Alert.alert(t('auth.login.errorTitle'), t('auth.login.errorGeneric'))

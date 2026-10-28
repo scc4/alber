@@ -1,12 +1,13 @@
 // Repasse dos eventos de pagamento de pedidos do Alber Food. O Asaas avisa o Alber (webhooks-asaas-pix); quando a
 // referência começa com 'food_' o evento NÃO é do Alber: segue para o Alber Food, assinado.
 //   POST FOOD_WEBHOOK_URL   x-alber-timestamp: <segundos>   x-alber-signature: hex(HMAC-SHA256(segredo, "<ts>.<corpo>"))
-// Corpo: { id, event, payment_id, external_reference, amount_cents, gateway_cost_cents } (valores em centavos).
+// Corpo: { id, event, payment_id, external_reference, amount_cents, gateway_cost_cents, estimated_credit_date, credit_date }
+// (valores em centavos; datas AAAA-MM-DD ou null).
 
 export interface AsaasPaymentEvent {
   id?: string
   event: string
-  payment?: { id: string; value?: number; netValue?: number; externalReference?: string }
+  payment?: { id: string; value?: number; netValue?: number; externalReference?: string; estimatedCreditDate?: string; creditDate?: string }
 }
 
 export const isFoodReference = (ref: string | undefined): boolean => typeof ref === 'string' && ref.startsWith('food_')
@@ -24,6 +25,7 @@ export function foodEventBody(e: AsaasPaymentEvent): string {
   const cents = (v: number | undefined) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) : null)
   const value = cents(p.value)
   const net = cents(p.netValue)
+  const day = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null)
   return JSON.stringify({
     id: e.id ?? `${e.event}:${p.id}`,
     event: e.event,
@@ -31,6 +33,8 @@ export function foodEventBody(e: AsaasPaymentEvent): string {
     external_reference: p.externalReference,
     amount_cents: value,
     gateway_cost_cents: value !== null && net !== null && value >= net ? value - net : null,
+    estimated_credit_date: day(p.estimatedCreditDate),
+    credit_date: day(p.creditDate),
   })
 }
 

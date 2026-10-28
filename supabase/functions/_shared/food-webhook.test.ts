@@ -14,7 +14,7 @@ Deno.test('só referências food_ são do Alber Food', () => {
 })
 
 Deno.test('o corpo vai em centavos inteiros, com o custo real do Asaas', () => {
-  assertEquals(JSON.parse(foodEventBody(evt)), { id: 'evt_1', event: 'PAYMENT_CONFIRMED', payment_id: 'pay_1', external_reference: REF, amount_cents: 8600, gateway_cost_cents: 349 })
+  assertEquals(JSON.parse(foodEventBody(evt)), { id: 'evt_1', event: 'PAYMENT_CONFIRMED', payment_id: 'pay_1', external_reference: REF, amount_cents: 8600, gateway_cost_cents: 349, estimated_credit_date: null, credit_date: null })
   // Sem id no evento, o id é derivado (estável: a reentrega cai na mesma chave).
   assertEquals(JSON.parse(foodEventBody({ event: 'PAYMENT_RECEIVED', payment: { id: 'pay_1', value: 5, externalReference: REF } })).id, 'PAYMENT_RECEIVED:pay_1')
   assertEquals(JSON.parse(foodEventBody({ event: 'X', payment: { id: 'p', externalReference: REF } })).amount_cents, null)
@@ -57,4 +57,11 @@ Deno.test('sem a configuração do repasse, responde 503 e não chama ninguém',
   const r = await withFetch(200, () => forwardToFood(evt))
   assertEquals(r.result.status, 503)
   assertEquals(r.sent, null)
+})
+
+Deno.test('foodEventBody repassa as datas de compensação só no formato AAAA-MM-DD', () => {
+  const body = (extra: Record<string, unknown>) => JSON.parse(foodEventBody({ event: 'PAYMENT_CONFIRMED', payment: { id: 'pay_1', value: 10, externalReference: REF, ...extra } }))
+  assertEquals(body({ estimatedCreditDate: '2026-11-03', creditDate: '2026-11-02' }).estimated_credit_date, '2026-11-03')
+  assertEquals(body({ estimatedCreditDate: '2026-11-03', creditDate: '2026-11-02' }).credit_date, '2026-11-02')
+  assertEquals(body({ estimatedCreditDate: '03/11/2026; DROP' }).estimated_credit_date, null)
 })

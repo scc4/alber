@@ -402,3 +402,50 @@ export async function getAccountGeneralStatus(apiKey: string): Promise<string | 
   const general = (res.data as { general?: unknown }).general
   return typeof general === 'string' ? general : null
 }
+
+// ── Conta pai: saldo, a receber e extrato (somente leitura, para o Alber Admin) ───────────────────────────────
+
+const toCents = (reais: unknown): number => (typeof reais === 'number' && Number.isFinite(reais) ? Math.round(reais * 100) : 0)
+
+export async function getParentBalanceCents(parentApiKey: string): Promise<number> {
+  const res = await asaasRequest('GET', '/finance/balance', parentApiKey)
+  const balance = (res.data as { balance?: unknown }).balance
+  if (!res.ok || typeof balance !== 'number') throw new AsaasError('ASAAS_BALANCE_FAILED', res.data as Record<string, unknown>)
+  return toCents(balance)
+}
+
+/** Cobranças ainda a receber (PENDING). Não é essencial: se o Asaas recusar, devolve null e o saldo segue. */
+export async function getPendingStatistics(parentApiKey: string): Promise<{ quantity: number; value_cents: number; net_cents: number } | null> {
+  const res = await asaasRequest('GET', '/finance/payment/statistics?status=PENDING', parentApiKey)
+  if (!res.ok) return null
+  const d = res.data as { quantity?: unknown; value?: unknown; netValue?: unknown }
+  return { quantity: typeof d.quantity === 'number' ? d.quantity : 0, value_cents: toCents(d.value), net_cents: toCents(d.netValue) }
+}
+
+export interface ParentMovement {
+  id: string
+  type: string
+  value_cents: number
+  balance_cents: number | null
+  date: string | null
+  linked: boolean
+}
+
+/**
+ * Extrato recente. Só id, tipo, valor, saldo e data saem daqui: a `description` do Asaas costuma trazer o nome do cliente
+ * e nunca é repassada. `linked` diz só que o lançamento tem uma cobrança, transferência ou conta de origem.
+ */
+export async function listParentMovements(parentApiKey: string, limit = 30): Promise<ParentMovement[]> {
+  const res = await asaasRequest('GET', `/financialTransactions?offset=0&limit=${Math.min(Math.max(limit, 1), 50)}`, parentApiKey)
+  if (!res.ok) throw new AsaasError('ASAAS_STATEMENT_FAILED', res.data as Record<string, unknown>)
+  const data = (res.data as { data?: unknown }).data
+  const list = Array.isArray(data) ? (data as Record<string, unknown>[]) : []
+  return list.slice(0, 50).map((e) => ({
+    id: String(e.id ?? '').slice(0, 64),
+    type: String(e.type ?? 'UNKNOWN').slice(0, 40),
+    value_cents: toCents(e.value),
+    balance_cents: typeof e.balance === 'number' ? toCents(e.balance) : null,
+    date: typeof e.date === 'string' ? e.date.slice(0, 10) : null,
+    linked: Boolean(e.paymentId || e.transferId || e.anticipationId || e.billId || e.invoiceId),
+  }))
+}

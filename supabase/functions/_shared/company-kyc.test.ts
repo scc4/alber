@@ -12,7 +12,7 @@ Deno.env.set('ASAAS_ENVIRONMENT', 'sandbox')
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { aesEncrypt } from './crypto.ts'
-import { pollCompanyKyc } from './company-kyc.ts'
+import { applyCompanyKyc, pollCompanyKyc } from './company-kyc.ts'
 // company-list cria o cliente do Supabase ao carregar: só pode ser importado depois das variáveis acima.
 const { handleRequest: companyList } = await import('../company-list/index.ts')
 
@@ -46,6 +46,37 @@ function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
 async function company(over: Record<string, unknown> = {}) {
   return { id: 'c1', owner_id: 'owner-1', kyc_status: 'pending', asaas_account_id: 'asaas-1', asaas_deposit_key: null, asaas_api_key_enc: await aesEncrypt('sub-key', 'test-asaas-parent-key'), ...over }
 }
+/**
+ * Colunas REAIS de public.companies, lidas das migrations (CREATE TABLE + ALTER TABLE ... ADD COLUMN). O mock de fetch aceita qualquer
+ * coluna; foi assim que `onboarding_completed_at` (que só existe em users) passou nos testes e derrubou toda aprovação em produção (PGRST204).
+ */
+async function companyColumns(): Promise<Set<string>> {
+  const dir = new URL('../../migrations/', import.meta.url)
+  const cols = new Set<string>()
+  const reserved = ['constraint', 'primary', 'unique', 'check', 'foreign']
+  for await (const e of Deno.readDir(dir)) {
+    if (!e.name.endsWith('.sql')) continue
+    const sql = await Deno.readTextFile(new URL(e.name, dir))
+    const create = sql.match(/CREATE TABLE\s+(?:IF NOT EXISTS\s+)?public\.companies\s*\(([\s\S]*?)\r?\n\);/i)
+    if (create) {
+      for (const line of create[1].split(/\r?\n/)) {
+        const m = line.match(/^\s{1,4}([a-z_][a-z0-9_]*)\s+[A-Za-z]/)
+        if (m && !reserved.includes(m[1])) cols.add(m[1])
+      }
+    }
+    for (const m of sql.matchAll(/ALTER TABLE\s+(?:IF EXISTS\s+)?(?:public\.)?companies\s+ADD COLUMN\s+(?:IF NOT EXISTS\s+)?([a-z_][a-z0-9_]*)/gi)) cols.add(m[1])
+  }
+  return cols
+}
+const REAL_COLUMNS = await companyColumns()
+Deno.test('leitor de migrations enxerga as colunas de companies (protege o próprio teste)', () => {
+  for (const c of ['id', 'owner_id', 'kyc_status', 'account_status', 'asaas_deposit_key', 'handle', 'deleted_at', 'cnpj_masked', 'updated_at']) assertEquals(REAL_COLUMNS.has(c), true, c)
+  assertEquals(REAL_COLUMNS.has('onboarding_completed_at'), false) // só existe em users
+})
+function assertPatchesUseRealColumns() {
+  for (const b of patches()) for (const k of Object.keys(b)) assertEquals(REAL_COLUMNS.has(k), true, `coluna que não existe em companies: ${k}`)
+}
+
 const admin = () => createClient('http://localhost-test', 'test-srk')
 const patches = () => calls.filter((c) => c.method === 'PATCH' && c.url.includes('/rest/v1/companies')).map((c) => c.body as Record<string, unknown>)
 
@@ -53,9 +84,7 @@ Deno.test('empresa pendente que o Asaas já aprovou: grava approved, cria a chav
   const r = await withMock({ company: await company(), general: 'APPROVED' }, () => pollCompanyKyc(admin(), 'c1'))
   assertEquals(r, 'approved')
   assertEquals(patches().some((b) => b.kyc_status === 'approved'), true)
-  // Só colunas que existem em `companies`: onboarding_completed_at é de `users` e derrubava o UPDATE (PGRST204) em produção.
-  const COMPANY_COLUMNS = new Set(['kyc_status', 'updated_at', 'deleted_at', 'asaas_deposit_key'])
-  for (const b of patches()) for (const k of Object.keys(b)) assertEquals(COMPANY_COLUMNS.has(k), true, `coluna inesperada em companies: ${k}`)
+  assertPatchesUseRealColumns()
   assertEquals(patches().some((b) => 'asaas_deposit_key' in b), true)
   const status = calls.find((c) => c.url.includes('/myAccount/status'))!
   assertEquals(status.headers['access_token'], 'sub-key') // nunca a chave da conta pai
@@ -102,4 +131,14 @@ Deno.test('company-list sem empresa pendente não chama o Asaas; sem token, 401'
   assertEquals((await withMock({ ownedPending: [] }, () => companyList(req))).status, 200)
   assertEquals(calls.some((c) => c.url.includes('/myAccount/status')), false)
   assertEquals((await withMock({}, () => companyList(new Request('http://localhost/x', { method: 'GET' })))).status, 401)
+})
+
+Deno.test('aprovar e rejeitar (webhook e consulta) só gravam colunas que existem em companies', async () => {
+  for (const status of ['approved', 'rejected'] as const) {
+    const row = await company()
+    const r = await withMock({ company: row }, () => applyCompanyKyc(admin(), row, status, { via: 'webhook' }))
+    assertEquals(r, 'updated', status)
+    assertEquals(patches().length > 0, true, status)
+    assertPatchesUseRealColumns()
+  }
 })

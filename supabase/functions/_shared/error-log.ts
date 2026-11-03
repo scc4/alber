@@ -13,7 +13,10 @@ export async function logError(
   extras?: ErrorExtras,
 ): Promise<void> {
   try {
-    const msg  = error instanceof Error ? error.message : String(error)
+    // Erros do PostgREST são objetos simples ({ code, message, details }), não Error: String(obj) viraria "[object Object]".
+    const msg  = error instanceof Error ? error.message
+               : typeof (error as { message?: unknown })?.message === 'string' ? (error as { message: string }).message
+               : String(error)
     const code = (error as Record<string, unknown>)?.code as string | undefined
                  ?? (error instanceof Error ? error.name : 'UNKNOWN')
     await supabase.from('error_logs').insert({

@@ -39,8 +39,8 @@ export async function applyCompanyKyc(
 
   const now = new Date().toISOString()
   const updatePayload: Record<string, unknown> = { kyc_status: newKycStatus, updated_at: now }
-  if (newKycStatus === 'approved') updatePayload.onboarding_completed_at = now
-  else updatePayload.deleted_at = now // libera CNPJ/handle na hora: o Asaas já fez a checagem real de documentos
+  // `companies` não tem onboarding_completed_at (só `users` tem): gravá-lo faz o PostgREST recusar o UPDATE inteiro (PGRST204).
+  if (newKycStatus === 'rejected') updatePayload.deleted_at = now // libera CNPJ/handle na hora: o Asaas já fez a checagem real de documentos
 
   const { error: updateErr } = await supabaseAdmin.from('companies').update(updatePayload).eq('id', company.id)
   if (updateErr) {

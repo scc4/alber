@@ -52,7 +52,10 @@ const patches = () => calls.filter((c) => c.method === 'PATCH' && c.url.includes
 Deno.test('empresa pendente que o Asaas já aprovou: grava approved, cria a chave Pix e consulta com a chave da SUBCONTA', async () => {
   const r = await withMock({ company: await company(), general: 'APPROVED' }, () => pollCompanyKyc(admin(), 'c1'))
   assertEquals(r, 'approved')
-  assertEquals(patches().some((b) => b.kyc_status === 'approved' && typeof b.onboarding_completed_at === 'string'), true)
+  assertEquals(patches().some((b) => b.kyc_status === 'approved'), true)
+  // Só colunas que existem em `companies`: onboarding_completed_at é de `users` e derrubava o UPDATE (PGRST204) em produção.
+  const COMPANY_COLUMNS = new Set(['kyc_status', 'updated_at', 'deleted_at', 'asaas_deposit_key'])
+  for (const b of patches()) for (const k of Object.keys(b)) assertEquals(COMPANY_COLUMNS.has(k), true, `coluna inesperada em companies: ${k}`)
   assertEquals(patches().some((b) => 'asaas_deposit_key' in b), true)
   const status = calls.find((c) => c.url.includes('/myAccount/status'))!
   assertEquals(status.headers['access_token'], 'sub-key') // nunca a chave da conta pai

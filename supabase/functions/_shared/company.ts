@@ -180,6 +180,9 @@ export async function createCompanyForOwner(
   const accountInput = (email: string) => ({
     name:          input.company_name,
     email,
+    // O login do painel do Asaas fica SEMPRE no endereço sintético (que ninguém lê), mesmo com e-mail de contato real: assim ninguém
+    // recupera a senha da subconta e entra no painel do Asaas, fora do PIN, da chave Pix e dos limites do Alber.
+    loginEmail:    companyAsaasEmail,
     cpfCnpj:       cnpjClean,
     companyType:   input.company_type,
     tradingName:   input.trading_name,

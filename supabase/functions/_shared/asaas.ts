@@ -50,6 +50,8 @@ async function asaasRequest(
 export interface CreateAccountInput {
   name: string
   email: string
+  /** E-mail de LOGIN no painel do Asaas. Se omitido, o Asaas usa `email`: quem controla esse e-mail recupera a senha e entra no painel da subconta, fora dos controles do Alber. */
+  loginEmail?: string
   cpfCnpj: string   // CPF ou CNPJ puro (apenas dígitos) — Asaas recebe em texto puro
   birthDate?: string // YYYY-MM-DD — obrigatório quando pessoa física (11 dígitos)
   companyType?: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION' // obrigatório quando pessoa jurídica (14 dígitos)
@@ -86,6 +88,7 @@ export async function createAsaasAccount(
   const res = await asaasRequest('POST', '/accounts', parentApiKey, {
     name:          input.name,
     email:         input.email,
+    ...(input.loginEmail ? { loginEmail: input.loginEmail } : {}),
     cpfCnpj:       input.cpfCnpj,
     ...(isJuridica
       ? { companyType: input.companyType, tradingName: input.tradingName, ...(input.taxRegime ? { taxRegime: input.taxRegime } : {}) }

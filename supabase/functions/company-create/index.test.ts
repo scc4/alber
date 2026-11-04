@@ -223,3 +223,23 @@ Deno.test('e-mail ou regime inválidos → 400 e nada é criado no Asaas', async
     assertEquals(bodies.length, 0)
   }
 })
+
+// O login do painel do Asaas é sempre o endereço sintético: o e-mail real de contato nunca dá acesso ao painel da subconta.
+Deno.test('loginEmail é sempre o sintético, com ou sem e-mail de contato real (e também na segunda tentativa com +cnpj)', async () => {
+  const synthetic = `empresa-${VALID_COMPANY.cnpj}@usealber.com`
+  const sem = accountsRecorder(ok)
+  await withMock(sem.handler, () => handleRequest(makeReq()))
+  assertEquals(sem.bodies[0]?.loginEmail, synthetic)
+
+  const com = accountsRecorder(ok)
+  await withMock(com.handler, () => handleRequest(makeReq({ ...VALID_COMPANY, email: 'dono@loja.com.br' })))
+  assertEquals(com.bodies[0]?.email, 'dono@loja.com.br')
+  assertEquals(com.bodies[0]?.loginEmail, synthetic)
+  assertEquals(com.bodies[0]?.loginEmail !== com.bodies[0]?.email, true)
+
+  const dup = () => new Response(JSON.stringify({ errors: [{ description: 'O email dono@loja.com.br já está em uso por outra conta.' }] }), { status: 400 })
+  const retry = accountsRecorder((n) => (n === 1 ? dup() : ok()))
+  await withMock(retry.handler, () => handleRequest(makeReq({ ...VALID_COMPANY, email: 'dono@loja.com.br' })))
+  assertEquals(retry.bodies.map((b) => b.loginEmail), [synthetic, synthetic])
+  assertEquals(retry.bodies[1]?.email, `dono+${VALID_COMPANY.cnpj}@loja.com.br`)
+})

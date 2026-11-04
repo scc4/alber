@@ -54,6 +54,7 @@ export interface CreateAccountInput {
   birthDate?: string // YYYY-MM-DD — obrigatório quando pessoa física (11 dígitos)
   companyType?: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION' // obrigatório quando pessoa jurídica (14 dígitos)
   tradingName?: string // nome fantasia — só pessoa jurídica, opcional
+  taxRegime?: 'MEI' | 'NATIONAL_SIMPLE' | 'NORMAL_REGIME' | 'UNKNOWN' // regime tributário — só pessoa jurídica, opcional
   phone: string
   mobilePhone: string
   address: string
@@ -87,7 +88,7 @@ export async function createAsaasAccount(
     email:         input.email,
     cpfCnpj:       input.cpfCnpj,
     ...(isJuridica
-      ? { companyType: input.companyType, tradingName: input.tradingName }
+      ? { companyType: input.companyType, tradingName: input.tradingName, ...(input.taxRegime ? { taxRegime: input.taxRegime } : {}) }
       : { birthDate: input.birthDate }),
     phone:         input.phone,
     mobilePhone:   input.mobilePhone,

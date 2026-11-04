@@ -35,6 +35,11 @@ export interface CreateCompanyInput {
   company_type: 'MEI' | 'LIMITED' | 'INDIVIDUAL' | 'ASSOCIATION'
   income_value: number
   address: CompanyAddressInput
+  // E-mail de contato da empresa (o Asaas escreve para ele: pedidos de documento, avisos). Opcional: sem ele vai um endereço sintético
+  // só da empresa. Se o Asaas recusar por já estar em uso em outra subconta, tenta de novo com `+cnpj` antes do @ (continua chegando ao dono).
+  email?: string
+  // Regime tributário da empresa, como o Asaas aceita (taxRegime). Opcional.
+  tax_regime?: 'MEI' | 'NATIONAL_SIMPLE' | 'NORMAL_REGIME' | 'UNKNOWN'
   // Chave Pix de SAQUE da própria empresa (nunca cpf/phone/email — só faz
   // sentido CNPJ ou aleatória para uma pessoa jurídica). Opcional: se ausente,
   // a empresa é criada sem chave configurada, igual ao comportamento de
@@ -72,6 +77,14 @@ export type CreateCompanyOutcome =
     }
 
 const VALID_COMPANY_TYPES = ['MEI', 'LIMITED', 'INDIVIDUAL', 'ASSOCIATION']
+const VALID_TAX_REGIMES = ['MEI', 'NATIONAL_SIMPLE', 'NORMAL_REGIME', 'UNKNOWN']
+const EMAIL_FORMAT = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+/** `dono@gmail.com` -> `dono+65886568000105@gmail.com`: continua chegando ao dono e é único por empresa. */
+export function plusAliasEmail(email: string, cnpj: string): string {
+  const [local, domain] = email.split('@') as [string, string]
+  return `${local.split('+')[0]}+${cnpj.toLowerCase()}@${domain}`
+}
 
 export async function createCompanyForOwner(
   supabaseAdmin: SupabaseClient,
@@ -92,6 +105,14 @@ export async function createCompanyForOwner(
 
   if (input.pix_key_type != null && input.pix_key_type !== 'cnpj' && input.pix_key_type !== 'random') {
     return { ok: false, code: 'INVALID_PIX_KEY_TYPE', message: 'Chave Pix da empresa deve ser cnpj ou random', status: 400 }
+  }
+
+  if (input.tax_regime != null && !VALID_TAX_REGIMES.includes(input.tax_regime)) {
+    return { ok: false, code: 'INVALID_TAX_REGIME', message: 'tax_regime inválido', status: 400 }
+  }
+  const contactEmail = typeof input.email === 'string' ? input.email.trim().toLowerCase() : ''
+  if (input.email != null && (!contactEmail || contactEmail.length > 254 || !EMAIL_FORMAT.test(contactEmail))) {
+    return { ok: false, code: 'EMAIL_INVALID', message: 'E-mail da empresa inválido', status: 400 }
   }
 
   const handleNorm = input.handle.toLowerCase().replace(/^@/, '')
@@ -156,56 +177,68 @@ export async function createCompanyForOwner(
   // pelo campo `email` dos webhooks, ver createAsaasAccount).
   const companyAsaasEmail = `empresa-${cnpjClean}@usealber.com`
 
-  let asaasAccount: { id: string; apiKey: string; walletId: string }
-  try {
-    asaasAccount = await createAsaasAccount(
-      {
-        name:          input.company_name,
-        email:         companyAsaasEmail,
-        cpfCnpj:       cnpjClean,
-        companyType:   input.company_type,
-        tradingName:   input.trading_name,
-        phone:         ownerPhone,
-        mobilePhone:   ownerPhone,
-        address:       input.address.street,
-        addressNumber: input.address.number,
-        complement:    input.address.complement,
-        province:      input.address.neighborhood,
-        postalCode:    input.address.zip_code.replace(/\D/g, ''),
-        incomeValue:   input.income_value,
-        webhookUrl,
-        pixWebhookUrl,
-        webhookSecret: Deno.env.get('ASAAS_WEBHOOK_SECRET')!,
-      },
-      encSecret,
-    )
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    let asaasErrorBody: Record<string, unknown> | null = null
-    let description = ''
+  const accountInput = (email: string) => ({
+    name:          input.company_name,
+    email,
+    cpfCnpj:       cnpjClean,
+    companyType:   input.company_type,
+    tradingName:   input.trading_name,
+    taxRegime:     input.tax_regime,
+    phone:         ownerPhone,
+    mobilePhone:   ownerPhone,
+    address:       input.address.street,
+    addressNumber: input.address.number,
+    complement:    input.address.complement,
+    province:      input.address.neighborhood,
+    postalCode:    input.address.zip_code.replace(/\D/g, ''),
+    incomeValue:   input.income_value,
+    webhookUrl,
+    pixWebhookUrl,
+    webhookSecret: Deno.env.get('ASAAS_WEBHOOK_SECRET')!,
+  })
+
+  // E-mail real da empresa primeiro; se o Asaas disser que já está em uso, o mesmo com +cnpj. Sem e-mail informado, o sintético de sempre.
+  const emailCandidates = contactEmail ? [contactEmail, plusAliasEmail(contactEmail, cnpjClean)] : [companyAsaasEmail]
+
+  let asaasAccount: { id: string; apiKey: string; walletId: string } | undefined
+  for (const [attempt, candidate] of emailCandidates.entries()) {
     try {
-      const jsonStr  = msg.replace(/^ASAAS_ACCOUNT_CREATE_FAILED:\s*/, '')
-      asaasErrorBody = JSON.parse(jsonStr) as Record<string, unknown>
-      const errors   = asaasErrorBody.errors as Array<{ description?: string }> | undefined
-      description    = errors?.[0]?.description ?? ''
-    } catch { /* mensagem não estruturada */ }
+      asaasAccount = await createAsaasAccount(accountInput(candidate), encSecret)
+      break
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      let asaasErrorBody: Record<string, unknown> | null = null
+      let description = ''
+      try {
+        const jsonStr  = msg.replace(/^ASAAS_ACCOUNT_CREATE_FAILED:\s*/, '')
+        asaasErrorBody = JSON.parse(jsonStr) as Record<string, unknown>
+        const errors   = asaasErrorBody.errors as Array<{ description?: string }> | undefined
+        description    = errors?.[0]?.description ?? ''
+      } catch { /* mensagem não estruturada */ }
 
-    const lower  = description.toLowerCase()
-    const isDup  = lower.includes('já está em uso') && (lower.includes('cpf') || lower.includes('cnpj'))
+      const lower      = description.toLowerCase()
+      const inUse      = lower.includes('já está em uso')
+      const isEmailDup = inUse && (lower.includes('e-mail') || lower.includes('email'))
+      const isDup      = inUse && (lower.includes('cpf') || lower.includes('cnpj'))
 
-    if (!isDup) {
-      await logError(supabaseAdmin, 'company-create', e, { cnpj: `${cnpjClean.slice(0, 8)}***` }, {
-        asaas_response: asaasErrorBody,
-      })
-      return { ok: false, code: 'ASAAS_ERROR', message: description || 'Erro ao criar subconta financeira', status: 503 }
+      if (isEmailDup && attempt < emailCandidates.length - 1) continue // tenta o e-mail com +cnpj
+
+      if (!isDup) {
+        await logError(supabaseAdmin, 'company-create', e, { cnpj: `${cnpjClean.slice(0, 8)}***` }, {
+          asaas_response: asaasErrorBody,
+        })
+        return { ok: false, code: 'ASAAS_ERROR', message: description || 'Erro ao criar subconta financeira', status: 503 }
+      }
+
+      const existing = await getAsaasAccountByCpf(cnpjClean, encSecret)
+      if (!existing) {
+        return { ok: false, code: 'CNPJ_IN_USE', message: description, status: 409 }
+      }
+      asaasAccount = existing
+      break
     }
-
-    const existing = await getAsaasAccountByCpf(cnpjClean, encSecret)
-    if (!existing) {
-      return { ok: false, code: 'CNPJ_IN_USE', message: description, status: 409 }
-    }
-    asaasAccount = existing
   }
+  if (!asaasAccount) return { ok: false, code: 'ASAAS_ERROR', message: 'Erro ao criar subconta financeira', status: 503 }
 
   const asaasApiKeyEnc = await aesEncrypt(asaasAccount.apiKey, encSecret)
 

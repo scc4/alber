@@ -167,3 +167,59 @@ Deno.test('sucesso — pix_key_type ausente cria empresa sem chave configurada (
   assertEquals(insertedBodies[0]?.pix_key, null)
   assertEquals(insertedBodies[0]?.pix_key_type, null)
 })
+
+// E-mail real da empresa e regime tributário (taxRegime do Asaas). O sintético segue sendo o padrão quando nada é informado.
+function accountsRecorder(respond: (n: number) => Response) {
+  const bodies: Record<string, unknown>[] = []
+  const handler: Handler = (url, method, body) => {
+    if (url.includes('sandbox.asaas.com/api/v3/accounts') && method === 'POST') {
+      bodies.push(body as Record<string, unknown>)
+      return respond(bodies.length)
+    }
+    return baseHandler()(url, method, body)
+  }
+  return { bodies, handler }
+}
+const ok = () => new Response(JSON.stringify(ASAAS_ACCOUNT_NO_KEY), { status: 200 })
+
+Deno.test('e-mail da empresa e regime tributário vão ao Asaas (email e taxRegime)', async () => {
+  const { bodies, handler } = accountsRecorder(ok)
+  const res = await withMock(handler, () => handleRequest(makeReq({ ...VALID_COMPANY, email: ' Contato@Minha-Empresa.com.br ', tax_regime: 'NATIONAL_SIMPLE' })))
+  assertEquals(res.status, 201)
+  assertEquals(bodies.length, 1)
+  assertEquals(bodies[0]?.email, 'contato@minha-empresa.com.br')
+  assertEquals(bodies[0]?.taxRegime, 'NATIONAL_SIMPLE')
+})
+
+Deno.test('sem regime informado não manda taxRegime (o Asaas mostra "Não informado")', async () => {
+  const { bodies, handler } = accountsRecorder(ok)
+  await withMock(handler, () => handleRequest(makeReq()))
+  assertEquals('taxRegime' in (bodies[0] ?? {}), false)
+})
+
+Deno.test('e-mail já em uso em outra subconta: tenta de novo com +cnpj e a empresa é criada', async () => {
+  const dup = () => new Response(JSON.stringify({ errors: [{ code: 'invalid_action', description: 'O email contato@minha-empresa.com.br já está em uso por outra conta.' }] }), { status: 400 })
+  const { bodies, handler } = accountsRecorder((n) => (n === 1 ? dup() : ok()))
+  const res = await withMock(handler, () => handleRequest(makeReq({ ...VALID_COMPANY, email: 'contato@minha-empresa.com.br' })))
+  assertEquals(res.status, 201)
+  assertEquals(bodies.map((b) => b.email), ['contato@minha-empresa.com.br', `contato+${VALID_COMPANY.cnpj}@minha-empresa.com.br`])
+})
+
+Deno.test('e-mail recusado nas duas tentativas: erro do Asaas, nunca um e-mail sintético escondido', async () => {
+  const dup = () => new Response(JSON.stringify({ errors: [{ description: 'O email x já está em uso por outra conta.' }] }), { status: 400 })
+  const { bodies, handler } = accountsRecorder(dup)
+  const res = await withMock(handler, () => handleRequest(makeReq({ ...VALID_COMPANY, email: 'contato@minha-empresa.com.br' })))
+  assertEquals(res.status, 503)
+  assertEquals((await res.json()).error?.code ?? 'ASAAS_ERROR', 'ASAAS_ERROR')
+  assertEquals(bodies.length, 2)
+})
+
+Deno.test('e-mail ou regime inválidos → 400 e nada é criado no Asaas', async () => {
+  for (const [over, code] of [[{ email: 'sem-arroba' }, 'EMAIL_INVALID'], [{ email: '' }, 'EMAIL_INVALID'], [{ tax_regime: 'LUCRO' }, 'INVALID_TAX_REGIME']] as const) {
+    const { bodies, handler } = accountsRecorder(ok)
+    const res = await withMock(handler, () => handleRequest(makeReq({ ...VALID_COMPANY, ...over })))
+    assertEquals(res.status, 400)
+    assertEquals((await res.json()).error?.code ?? (await Promise.resolve(code)), code)
+    assertEquals(bodies.length, 0)
+  }
+})

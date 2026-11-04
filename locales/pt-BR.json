@@ -73,7 +73,13 @@
         "errorGeneric": "Não foi possível criar a empresa. Tente novamente.",
         "cnpjDuplicate": "Este CNPJ já possui uma conta.",
         "cnpjUnderReview": "Este CNPJ já está em processo de verificação por outra conta.",
-        "handleTaken": "Este @handle da empresa já está em uso. Escolha outro."
+        "handleTaken": "Este @handle da empresa já está em uso. Escolha outro.",
+        "cnpjInUse": "Este CNPJ já tem uma conta financeira em uso. Fale com o suporte.",
+        "ownerCpfMismatch": "O CPF informado não confere com o da sua conta Alber. Vamos recomeçar a verificação.",
+        "accountBlocked": "Sua conta está bloqueada e não pode abrir uma empresa. Fale com o suporte.",
+        "personalKycRejected": "A verificação da sua conta pessoal foi recusada e não é possível abrir uma empresa. Fale com o suporte.",
+        "linkPendingTitle": "Empresa criada",
+        "linkPendingBody": "Não conseguimos confirmar automaticamente o seu vínculo com a empresa. A nossa equipe vai conferir. Até lá, os saques da empresa ficam bloqueados."
       },
       "dados": {
         "title": "Dados pessoais",
@@ -967,6 +973,9 @@
       "kycWebViewTitle": "Verificação da empresa",
       "kycPendingBanner": "Verificação da empresa em análise",
       "kycRejectedBanner": "Verificação da empresa não aprovada",
+      "linkPendingBanner": "Estamos conferindo o seu vínculo com a empresa. Os saques ficam bloqueados até terminar.",
+      "linkPendingCta": "Confirmar",
+      "linkRejectedBanner": "A conferência do seu vínculo com a empresa foi recusada. Fale com o suporte.",
       "abandonCta": "Cancelar cadastro",
       "abandonConfirmTitle": "Cancelar cadastro da empresa?",
       "abandonConfirmBody": "Isso libera o CNPJ para um novo cadastro. Essa ação não pode ser desfeita.",
@@ -1050,6 +1059,23 @@
         "errorMismatch": "CNPJ não confere com o cadastrado.",
         "errorGeneric": "Não foi possível confirmar. Tente novamente.",
         "errorRateLimited": "Muitas tentativas. Aguarde alguns minutos."
+      },
+      "vinculo": {
+        "label": "Vínculo do responsável",
+        "statusConfirmed": "Confirmado",
+        "subtitlePending": "Ainda não confirmamos o seu vínculo com a empresa e os saques estão bloqueados. Informe o CNPJ e o seu CPF para conferirmos de novo.",
+        "subtitleLegacy": "Confirme o seu vínculo com a empresa informando o CNPJ e o seu CPF. Conferimos se você consta como administrador no quadro societário. O CPF não é guardado.",
+        "inReview": "Não conseguimos confirmar automaticamente. A nossa equipe vai conferir e os saques seguem bloqueados até lá.",
+        "rejected": "A conferência do seu vínculo com a empresa foi recusada. Fale com o suporte.",
+        "cnpjLabel": "CNPJ da empresa",
+        "cpfLabel": "Seu CPF",
+        "cta": "Conferir vínculo",
+        "errorCnpjMismatch": "Esse CNPJ não é o desta empresa.",
+        "errorCpfMismatch": "O CPF informado não é o da sua conta Alber.",
+        "errorCpfInvalid": "CPF inválido.",
+        "errorRejected": "A conferência desta empresa foi recusada. Fale com o suporte.",
+        "errorRateLimited": "Muitas tentativas. Aguarde alguns minutos.",
+        "errorGeneric": "Não foi possível conferir agora. Tente novamente."
       }
     }
   },

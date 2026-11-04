@@ -102,19 +102,35 @@ export default function EmpresaPixScreen() {
           state:        draft.companyState ?? '',
         },
         pix_key_type: type,
+        owner_cpf:    (draft.cpf ?? '').replace(/\D/g, '') || undefined,
         terms_accepted: true,
       })
 
       clearDraft()
 
-      if (res.company_onboarding_url) {
-        router.replace({
-          pathname: '/(auth)/kyc',
-          params: { urls: JSON.stringify([res.company_onboarding_url]), labels: JSON.stringify(['empresa']) },
-        })
-      } else {
-        router.replace((await resolveInitialRoute()) as never)
+      const goNext = async () => {
+        if (res.company_onboarding_url) {
+          router.replace({
+            pathname: '/(auth)/kyc',
+            params: { urls: JSON.stringify([res.company_onboarding_url]), labels: JSON.stringify(['empresa']) },
+          })
+        } else {
+          router.replace((await resolveInitialRoute()) as never)
+        }
       }
+
+      // Vínculo não confirmado automaticamente: a empresa foi criada, mas fica em revisão da equipe e não saca até lá. Avisa antes de seguir.
+      if (res.owner_link_review === 'pending') {
+        setIsCreating(false)
+        Alert.alert(
+          t('auth.onboarding.empresaPix.linkPendingTitle'),
+          t('auth.onboarding.empresaPix.linkPendingBody'),
+          [{ text: 'OK', onPress: () => { void goNext() } }],
+          { cancelable: false },
+        )
+        return
+      }
+      await goNext()
     } catch (e: unknown) {
       setIsCreating(false)
       const isBff = e instanceof BffError
@@ -138,6 +154,17 @@ export default function EmpresaPixScreen() {
         Alert.alert(title, t('auth.onboarding.empresaPix.handleTaken'), [
           { text: 'OK', onPress: () => router.push('/(auth)/cadastro/dados-empresa') },
         ])
+      } else if (code === 'CNPJ_IN_USE') {
+        Alert.alert(title, t('auth.onboarding.empresaPix.cnpjInUse'))
+      } else if (code === 'OWNER_CPF_MISMATCH' || code === 'CPF_INVALID') {
+        // O CPF vem da autenticação da conta; se o servidor não aceitou, o login está fora de sincronia. Recomeça o fluxo.
+        Alert.alert(title, t('auth.onboarding.empresaPix.ownerCpfMismatch'), [
+          { text: 'OK', onPress: () => router.replace('/(auth)/cadastro/verificar-cpf') },
+        ])
+      } else if (code === 'OWNER_ACCOUNT_BLOCKED') {
+        Alert.alert(title, t('auth.onboarding.empresaPix.accountBlocked'))
+      } else if (code === 'PERSONAL_KYC_REJECTED') {
+        Alert.alert(title, t('auth.onboarding.empresaPix.personalKycRejected'))
       } else {
         Alert.alert(title, isBff && e.message ? e.message : t('auth.onboarding.empresaPix.errorGeneric'))
       }

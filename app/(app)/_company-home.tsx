@@ -25,6 +25,7 @@ interface CompanyHomeScreenProps {
 
 function resolveCompanyBanner(
   kycStatus: string,
+  linkReview: string,
   dismissed: boolean,
   t: (k: string) => string,
 ): BannerData | null {
@@ -37,14 +38,33 @@ function resolveCompanyBanner(
       target: '/(app)/empresas',
     }
   }
-  if (dismissed) return null
-  if (kycStatus === 'pending' || kycStatus === 'submitted') {
+  // Conferência do vínculo do responsável com o CNPJ: recusada ou em revisão bloqueia os saques da empresa, então o aviso não pode ser
+  // dispensado. Empresa anterior à regra (`legacy`) segue funcionando e não mostra aviso.
+  if (linkReview === 'rejected') {
+    return {
+      tone: 'error',
+      text: t('empresas.detalhe.linkRejectedBanner'),
+      cta: t('empresas.detalhe.gerenciarCta'),
+      dismissible: false,
+      target: '/(app)/perfil/dados',
+    }
+  }
+  if (!dismissed && (kycStatus === 'pending' || kycStatus === 'submitted')) {
     return {
       tone: 'warning',
       text: t('empresas.detalhe.kycPendingBanner'),
       cta: t('empresas.detalhe.gerenciarCta'),
       dismissible: true,
       target: '/(app)/empresas',
+    }
+  }
+  if (linkReview === 'pending') {
+    return {
+      tone: 'warning',
+      text: t('empresas.detalhe.linkPendingBanner'),
+      cta: t('empresas.detalhe.linkPendingCta'),
+      dismissible: false,
+      target: '/(app)/perfil/dados',
     }
   }
   return null
@@ -70,7 +90,7 @@ export function CompanyHomeScreen({ companyId, companyName }: CompanyHomeScreenP
 
   useEffect(() => { fetchBalance(companyId) }, [companyId])
 
-  const banner = isMaster ? resolveCompanyBanner(company?.kyc_status ?? '', dismissedBanner, t) : null
+  const banner = isMaster ? resolveCompanyBanner(company?.kyc_status ?? '', company?.owner_link_review ?? '', dismissedBanner, t) : null
 
   const handleAction = (action: 'receber' | 'carregar' | 'transferir') => {
     router.push(`/(app)/${action}` as never)

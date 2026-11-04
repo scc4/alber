@@ -78,7 +78,9 @@ export default function VerificarCpfScreen() {
     setSubmitting(true)
     try {
       await login(cpfDigits, pinHash, answerHash)
-      updateDraft({ existingAccountFlow: true })
+      // O CPF que acabou de autenticar a conta vai junto na abertura da empresa: o servidor confere que é o da conta e compara com o quadro
+      // societário do CNPJ (conferência do vínculo do responsável). Fica só neste rascunho em memória e é limpo ao criar a empresa.
+      updateDraft({ existingAccountFlow: true, cpf })
       router.push('/(auth)/cadastro/dados-empresa')
     } catch (e: unknown) {
       setSubmitting(false)

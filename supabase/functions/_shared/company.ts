@@ -154,11 +154,21 @@ export async function createCompanyForOwner(
 
   const { data: owner } = await supabaseAdmin
     .from('users')
-    .select('id, email, phone, cpf')
+    .select('id, email, phone, cpf, account_status, kyc_status')
     .eq('id', ownerId)
     .maybeSingle()
 
   if (!owner) return { ok: false, code: 'USER_NOT_FOUND', message: 'Usuário não encontrado', status: 404 }
+
+  // Estado da conta do dono (plano de conferência CNPJ x administrador, fase 3): conta bloqueada ou com a verificação pessoal recusada não
+  // abre empresa. Quem acaba de se cadastrar (auth-register) está "pending"/"evaluation", então não é afetado.
+  const ownerState = owner as { account_status?: string | null; kyc_status?: string | null }
+  if (ownerState.account_status === 'blocked') {
+    return { ok: false, code: 'OWNER_ACCOUNT_BLOCKED', message: 'Sua conta está bloqueada e não pode abrir uma empresa. Fale com o suporte.', status: 403 }
+  }
+  if (ownerState.kyc_status === 'rejected') {
+    return { ok: false, code: 'PERSONAL_KYC_REJECTED', message: 'A verificação da sua conta pessoal foi recusada e não é possível abrir uma empresa. Fale com o suporte.', status: 403 }
+  }
 
   // Empresas com deleted_at (rejeitada pelo Asaas ou abandonada pelo próprio
   // master antes da aprovação) não bloqueiam mais — o CNPJ já foi liberado

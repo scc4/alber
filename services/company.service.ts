@@ -49,6 +49,11 @@ export interface CompanyPermissions {
   gerenciar_operadores?: boolean
 }
 
+// Conferência do vínculo do responsável com o CNPJ (plano de conferência CNPJ x administrador). `legacy` = empresa anterior à regra: segue
+// funcionando e está na fila de revisão da equipe. `pending` e `rejected` bloqueiam saques (supabase/functions/_shared/withdraw-guard.ts).
+export type OwnerLinkCheck  = 'unchecked' | 'match' | 'partner' | 'mismatch' | 'inactive' | 'unavailable'
+export type OwnerLinkReview = 'not_needed' | 'pending' | 'approved' | 'rejected' | 'legacy'
+
 export interface CompanySummary {
   id:             string
   handle:         string
@@ -61,6 +66,9 @@ export interface CompanySummary {
   pix_key_type:   'cnpj' | 'random' | null
   role:           'master' | 'operator'
   permissions:    CompanyPermissions | null
+  /** Ausentes em respostas antigas em cache: tratar como "sem aviso". */
+  owner_link_check?:  OwnerLinkCheck
+  owner_link_review?: OwnerLinkReview
 }
 
 export interface CompanyOperatorRow {
@@ -191,6 +199,8 @@ export interface CreateCompanyPayload {
     state?:       string
   }
   pix_key_type?: 'cnpj' | 'random'
+  // CPF do responsável (só dígitos): o servidor confere que é o da conta (hash) e compara com o quadro societário do CNPJ. Não é guardado.
+  owner_cpf?: string
   // Aceite de Termos de Uso, Política de Privacidade e Transparência
   // Financeira (item 47 do QA) — obrigatório, exigido pelo backend.
   terms_accepted: boolean
@@ -201,10 +211,23 @@ export interface CreateCompanyResponse {
   company_account_status: string
   company_kyc_status:     string
   company_onboarding_url: string | null
+  owner_link_check?:      OwnerLinkCheck
+  owner_link_review?:     OwnerLinkReview
 }
 
 export async function createCompany(token: string, company: CreateCompanyPayload): Promise<CreateCompanyResponse> {
   return post('company-create', { company }, token)
+}
+
+// Confere o vínculo do master com uma empresa que já existe (anterior à regra, aberta sem CPF ou ligada por outro canal). O CNPJ vai junto
+// porque o Alber só guarda o hash dele; o CPF tem de ser o da conta. Não é guardado.
+export async function verifyCompanyOwner(
+  token: string,
+  companyId: string,
+  cnpj: string,
+  cpf: string,
+): Promise<{ owner_link_check: OwnerLinkCheck; owner_link_review: OwnerLinkReview; changed: boolean }> {
+  return post('company-owner-verify', { company_id: companyId, cnpj, cpf }, token)
 }
 
 // Cancela o próprio cadastro de empresa antes da aprovação do KYC (plano

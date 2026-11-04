@@ -250,13 +250,13 @@ import { sha256hex } from '../_shared/crypto.ts'
 const OWNER_CPF = '12345678909' // dígitos 4 a 9: 456789
 const qsa = (role: string, mask = '***456789**') => new Response(JSON.stringify({ descricao_situacao_cadastral: 'ATIVA', razao_social: 'MINHA EMPRESA LTDA', qsa: [{ nome_socio: 'FULANO', cnpj_cpf_do_socio: mask, qualificacao_socio: role }] }), { status: 200 })
 
-function linkHandler(opts: { registry?: Response; ownerCpfHash?: string; asaasAccount?: (n: number) => Response; existingAccounts?: unknown } = {}) {
+function linkHandler(opts: { registry?: Response; ownerCpfHash?: string; ownerExtra?: Record<string, unknown>; asaasAccount?: (n: number) => Response; existingAccounts?: unknown } = {}) {
   const inserted: Record<string, unknown>[] = []
   const asaasPosts: number[] = []
   let getByCnpj = 0
   const handler: Handler = (url, method, body) => {
     if (url.includes('brasilapi.com.br')) return opts.registry ?? qsa('Sócio-Administrador')
-    if (url.includes('/rest/v1/users') && url.includes('id=eq.')) return new Response(JSON.stringify({ ...OWNER, cpf: opts.ownerCpfHash }), { status: 200 })
+    if (url.includes('/rest/v1/users') && url.includes('id=eq.')) return new Response(JSON.stringify({ ...OWNER, cpf: opts.ownerCpfHash, ...opts.ownerExtra }), { status: 200 })
     if (url.includes('/rest/v1/companies') && method === 'POST') inserted.push(body as Record<string, unknown>)
     if (url.includes('sandbox.asaas.com/api/v3/accounts') && method === 'POST') {
       asaasPosts.push(1)
@@ -325,6 +325,28 @@ Deno.test('sem CPF (como o app faz hoje): empresa "não conferida" e em revisão
   assertEquals(res.status, 201)
   assertEquals([data.owner_link_check, data.owner_link_review], ['unchecked', 'pending'])
   assertEquals(t.inserted[0]?.owner_link_checked_at, null)
+})
+
+// Fase 3: estado da conta do dono. Conta bloqueada ou com a verificação pessoal recusada não abre empresa (nada é criado no Asaas).
+Deno.test('conta bloqueada ou com KYC pessoal recusado não abre empresa: 403 e nada é criado no Asaas', async () => {
+  const hash = await sha256hex(OWNER_CPF)
+  for (const [ownerExtra, code] of [[{ account_status: 'blocked' }, 'OWNER_ACCOUNT_BLOCKED'], [{ kyc_status: 'rejected' }, 'PERSONAL_KYC_REJECTED']] as const) {
+    const t = linkHandler({ ownerCpfHash: hash, ownerExtra })
+    const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf())))
+    assertEquals(res.status, 403, code)
+    assertEquals((await res.json()).error?.code ?? code, code)
+    assertEquals(t.asaasPosts.length, 0, code)
+    assertEquals(t.inserted.length, 0, code)
+  }
+})
+
+Deno.test('conta em avaliação, com KYC pendente, enviado ou aprovado abre empresa normalmente', async () => {
+  const hash = await sha256hex(OWNER_CPF)
+  for (const ownerExtra of [{ account_status: 'evaluation', kyc_status: 'pending' }, { account_status: 'evaluation', kyc_status: 'submitted' }, { account_status: 'active', kyc_status: 'approved' }]) {
+    const t = linkHandler({ ownerCpfHash: hash, ownerExtra })
+    const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf())))
+    assertEquals(res.status, 201, JSON.stringify(ownerExtra))
+  }
 })
 
 Deno.test('CNPJ já tem subconta no Asaas: só reaproveita com o vínculo conferido (match); senão recusa sem tocar nela', async () => {

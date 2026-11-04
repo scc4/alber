@@ -84,6 +84,14 @@ export default function DadosScreen() {
   const [cnpjConfirmError, setCnpjConfirmError]         = useState<string | null>(null)
   const [cnpjConfirmSubmitting, setCnpjConfirmSubmitting] = useState(false)
 
+  // Conferência do vínculo do responsável com a empresa (CNPJ + CPF). Só o master; empresas `pending` (aberta sem CPF, consulta indisponível,
+  // não confere) e `legacy` (anterior à regra) podem tentar de novo aqui.
+  const [linkCnpj, setLinkCnpj]             = useState('')
+  const [linkCpf, setLinkCpf]               = useState('')
+  const [linkError, setLinkError]           = useState<string | null>(null)
+  const [linkSubmitting, setLinkSubmitting] = useState(false)
+  const [linkInReview, setLinkInReview]     = useState(false)
+
   const load = async () => {
     if (isCompany) {
       setLoading(true)
@@ -158,6 +166,33 @@ export default function DadosScreen() {
     }
   }
 
+  const handleVerifyLink = async () => {
+    if (!token || !company || linkSubmitting || !validateCNPJ(linkCnpj) || !validateCPF(linkCpf)) return
+    setLinkSubmitting(true)
+    setLinkError(null)
+    setLinkInReview(false)
+    try {
+      const res = await companyService.verifyCompanyOwner(token, company.id, normalizeCNPJ(linkCnpj), linkCpf.replace(/\D/g, ''))
+      // Confere: a empresa sai da fila e o bloco some ao recarregar. Não confere: continua em revisão da equipe e o saque segue bloqueado.
+      setLinkInReview(res.owner_link_review === 'pending')
+      setLinkCpf('')
+      await fetchCompanies()
+    } catch (e) {
+      const code = e instanceof authService.BffError ? e.code : 'UNKNOWN'
+      setLinkError(
+        code === 'CNPJ_MISMATCH' ? t('empresas.dados.vinculo.errorCnpjMismatch')
+        : code === 'CNPJ_INVALID' ? t('empresas.dados.vinculo.errorCnpjMismatch')
+        : code === 'OWNER_CPF_MISMATCH' ? t('empresas.dados.vinculo.errorCpfMismatch')
+        : code === 'CPF_INVALID' ? t('empresas.dados.vinculo.errorCpfInvalid')
+        : code === 'OWNER_LINK_REJECTED' ? t('empresas.dados.vinculo.errorRejected')
+        : code === 'RATE_LIMITED' ? t('empresas.dados.vinculo.errorRateLimited')
+        : t('empresas.dados.vinculo.errorGeneric'),
+      )
+    } finally {
+      setLinkSubmitting(false)
+    }
+  }
+
   if (!isCompany && !user) return null
 
   return (
@@ -216,6 +251,45 @@ export default function DadosScreen() {
             </View>
           )}
           <DataRow label={t('empresas.dados.handle')}       value={`@${company.handle}`} />
+
+          {/* Vínculo do responsável com o CNPJ */}
+          {(company.owner_link_review === 'not_needed' || company.owner_link_review === 'approved') && (
+            <DataRow label={t('empresas.dados.vinculo.label')} value={t('empresas.dados.vinculo.statusConfirmed')} />
+          )}
+          {company.owner_link_review === 'rejected' && (
+            <View style={styles.confirmBlock}>
+              <AlertCard tone="error" text={t('empresas.dados.vinculo.rejected')} />
+            </View>
+          )}
+          {company.role === 'master' && (company.owner_link_review === 'pending' || company.owner_link_review === 'legacy') && (
+            <View style={styles.confirmBlock}>
+              <AlertCard
+                tone={company.owner_link_review === 'pending' ? 'warning' : 'info'}
+                text={company.owner_link_review === 'pending' ? t('empresas.dados.vinculo.subtitlePending') : t('empresas.dados.vinculo.subtitleLegacy')}
+              />
+              {linkInReview && <AlertCard tone="warning" text={t('empresas.dados.vinculo.inReview')} />}
+              <Field
+                label={t('empresas.dados.vinculo.cnpjLabel')}
+                value={linkCnpj}
+                onChangeText={v => { setLinkCnpj(maskCNPJ(v)); setLinkError(null) }}
+                placeholder={t('empresas.dados.confirmCnpj.placeholder')}
+                autoCapitalize="characters"
+              />
+              <Field
+                label={t('empresas.dados.vinculo.cpfLabel')}
+                value={linkCpf}
+                onChangeText={v => { setLinkCpf(maskCPF(v)); setLinkError(null) }}
+                placeholder={t('perfil.dados.confirmCpf.placeholder')}
+                keyboardType="numeric"
+                error={linkError}
+              />
+              <PrimaryButton
+                label={t('empresas.dados.vinculo.cta')}
+                onPress={handleVerifyLink}
+                state={!validateCNPJ(linkCnpj) || !validateCPF(linkCpf) ? 'disabled' : linkSubmitting ? 'loading' : 'default'}
+              />
+            </View>
+          )}
 
           <Text style={styles.readOnly}>{t('perfil.dados.readOnly')}</Text>
         </ScrollView>

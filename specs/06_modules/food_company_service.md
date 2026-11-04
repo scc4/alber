@@ -28,7 +28,7 @@ Princípios:
 | Sucesso | `json({...})` com 200 (201 onde indicado) |
 | Erro | `{ error, code, message, ...extra }` (mesmo código em `error` e `code`), via `err(code, message, status, extra)` |
 | Ordem das verificações | chave de serviço → corpo → dono (`owner_ref` igual a `companies.owner_ref`, senão `403 NOT_OWNER`) → (operações assinadas) autorização → reserva → regras de negócio |
-| Empresa | inexistente ou com `deleted_at`: `404 COMPANY_NOT_FOUND`. Empresa aberta pelo app (sem `owner_ref`): `403 NOT_OWNER` |
+| Empresa | inexistente ou com `deleted_at`: `404 COMPANY_NOT_FOUND`. Empresa aberta pelo app (sem `owner_ref`): `403 NOT_OWNER`. **Exceção:** `food-company-abandon` responde `404 COMPANY_NOT_FOUND` também para dono errado e para empresa do app (§4.8) |
 | Ids | `company_id` UUID (`422 INVALID_COMPANY`); `owner_ref` texto de 1 a 128 caracteres ASCII sem espaço (`422 INVALID_OWNER`) |
 
 ## 3. Autorização assinada (`op`)
@@ -56,8 +56,10 @@ Campos que o tipo não prevê, ou desconhecidos, tornam a autorização inválid
 
 ### 3.2 Assinatura
 
+> **ATENÇÃO — o segredo é DECODIFICADO.** `FOOD_OP_SIGNING_KEY` é um segredo em **hexadecimal (64 ou mais caracteres, tamanho par)** ou em **base64**, com **no mínimo 32 bytes** depois de decodificado. A **chave do HMAC-SHA256 são os BYTES decodificados**, e **nunca** a string do segredo (`new TextEncoder().encode(segredo)` está errado). Assinar com a string produz uma assinatura diferente e toda operação assinada volta `403 INVALID_AUTHORIZATION`, sem pista do motivo. Regra de decodificação, igual nos dois lados: se o texto é só hexadecimal, tamanho par e tem 64+ caracteres, é hexadecimal; senão é base64 (padrão ou url-safe). Segredo que não decodifica para 32+ bytes é rejeitado (`503 SERVICE_NOT_CONFIGURED`). O vetor de teste de §3.3 usa a mesma chave de 32 bytes em hexadecimal e em base64 e dá a mesma assinatura: confira o assinador do Alber Food com ele antes de integrar.
+
 - **JSON canônico:** chaves em ordem alfabética (recursivo), sem espaços, valores como `JSON.stringify` escreve; `undefined` some. Dados em UTF-8.
-- **Segredo `FOOD_OP_SIGNING_KEY`:** 32 bytes ou mais, em hexadecimal (64+ caracteres) **ou** base64. A **chave do HMAC são os bytes decodificados**, não o texto do segredo. O Alber Food e o Alber têm de decodificar do mesmo jeito (hex de tamanho par vence base64 quando o texto é só hex).
+- **Segredo `FOOD_OP_SIGNING_KEY`:** ver o aviso acima (decodificado; os bytes são a chave do HMAC).
 - A comparação é em tempo constante (`crypto.subtle.verify`).
 
 ### 3.3 Vetor de teste (confira o assinador do Alber Food com ele; está em `_shared/food-op.test.ts`)
@@ -167,6 +169,17 @@ Entrada: `{ company_id, from_owner_ref, to_owner_ref, new_owner: { cpf, name, ph
 - **Campo aditivo (desvio, §7):** `cnpj` obrigatório (o Alber guarda só o hash; a conferência do quadro societário precisa do CNPJ em claro; conferido contra `companies.cnpj`: `422 CNPJ_MISMATCH`).
 - **Fica como está** (decisão pendente, §11): limites de saque aprovados e pedido de aumento em aberto seguem com a empresa.
 
+### 4.8 `food-company-abandon`
+
+Entrada: `{ company_id, owner_ref }` (sem autorização assinada: não move dinheiro). Saída `200`: `{ company_id, abandoned: true }`.
+
+- O dono desiste do cadastro **antes da aprovação do KYC** (ex.: digitou o CNPJ errado): marca `deleted_at` e `deleted_reason = 'abandoned'`, o que **libera o CNPJ e o @ na hora** (índices parciais da migration 044). Não mexe na subconta do Asaas: ela fica órfã, e abrir o mesmo CNPJ de novo dá `CNPJ_IN_USE` (caso do suporte), como na rejeição de KYC.
+- Regra em `_shared/company-abandon.ts` (`abandonRefusal`, `abandonPatch`), a mesma de `company-abandon` (app): já cancelada → `409 ALREADY_ABANDONED`; KYC aprovado → `422 COMPANY_ALREADY_APPROVED`. KYC `pending`, `submitted` e `rejected` (ainda sem `deleted_at`) podem ser cancelados.
+- Dono: empresa inexistente, **dono diferente** ou empresa do app (sem `owner_ref`) → `404 COMPANY_NOT_FOUND` (não revela que a empresa existe para outro dono). Diferente das demais funções, que dão `403 NOT_OWNER`.
+- A gravação é **condicional** a "ainda sem `deleted_at` e ainda não aprovada": se o Asaas aprovar a empresa entre a leitura e a gravação, nada é apagado e a resposta é `422 COMPANY_ALREADY_APPROVED`. (O `company-abandon` do app não tem essa guarda e **continua como estava**; a janela é pequena, mas fica registrada como melhoria possível.)
+- Auditoria: `audit_logs` `company_abandoned` com `user_id` nulo e `metadata = { company_id, previous_kyc_status, via: 'food', owner_ref }`.
+- Erros: `INVALID_COMPANY`/`INVALID_OWNER` (422), `COMPANY_NOT_FOUND` (404), `ALREADY_ABANDONED` (409), `COMPANY_ALREADY_APPROVED` (422), `DB_ERROR` (503 na leitura, 500 na gravação).
+
 ## 5. Tabela de erros comuns
 
 | Código | HTTP | Quando |
@@ -177,7 +190,9 @@ Entrada: `{ company_id, from_owner_ref, to_owner_ref, new_owner: { cpf, name, ph
 | `UNAUTHORIZED` | 401 | `x-alber-food-key` ausente ou errada |
 | `SERVICE_NOT_CONFIGURED` | 503 | `ALBER_FOOD_SERVICE_KEY` ou `FOOD_OP_SIGNING_KEY` ausente/inválida |
 | `INVALID_COMPANY` / `INVALID_OWNER` | 422 | `company_id` / `owner_ref` fora do formato |
-| `COMPANY_NOT_FOUND` | 404 | empresa inexistente ou removida |
+| `COMPANY_NOT_FOUND` | 404 | empresa inexistente ou removida (em `food-company-abandon`, também dono errado) |
+| `ALREADY_ABANDONED` | 409 | `food-company-abandon` em empresa já cancelada |
+| `COMPANY_ALREADY_APPROVED` | 422 | `food-company-abandon` em empresa com KYC aprovado |
 | `NOT_OWNER` | 403 | `owner_ref` diferente de `companies.owner_ref` |
 | `COMPANY_NOT_APPROVED` | 409 (422 em `limit-request`) | KYC não aprovado, conta bloqueada ou sem chave de subconta |
 | `INVALID_AUTHORIZATION` | 403 | qualquer falha da autorização assinada (§3.4) |
@@ -216,6 +231,7 @@ RLS: as policies de `companies`/`transactions`/`company_operators` comparam `own
 | 6 | `food-company-withdraw` | `status` da resposta é sempre `processing` | o Pix é assíncrono; `completed`/`failed` chegam pelo webhook do Asaas |
 | 7 | estados da empresa | `COMPANY_NOT_APPROVED` (e `PIX_KEY_EXISTS`) só aparecem **depois** da autorização nas operações assinadas | para a repetição de uma operação concluída devolver o original mesmo se a empresa mudou de estado |
 | 8 | `loadOwnedCompany` | na troca de titular também aceita o **novo** dono | idem: a repetição de uma troca já feita chega à idempotência |
+| 9 | `food-company-abandon` | função **nova**, fora da lista original de 8; dono errado dá `404 COMPANY_NOT_FOUND` (não `403 NOT_OWNER`); a gravação é condicional | pedido da sessão de origem (o Food já a chama); evita revelar a empresa a outro dono e nunca apaga uma empresa aprovada no meio da corrida |
 
 ## 8. Pontos que quebram (ou mudam) com `owner_id` nulo
 
@@ -247,7 +263,7 @@ Pré-requisito do plano: backup completo e autorização explícita do usuário 
 1. **Segredos do Alber** (`supabase secrets set`, pelo usuário, sem colar em chat): `FOOD_OP_SIGNING_KEY` (32 bytes, **o mesmo valor** do Food); conferir que existem `ALBER_FOOD_SERVICE_KEY`, `ENCRYPTION_KEY`, `ASAAS_API_KEY` (+ `ALBER_KEYS_ENCRYPTION_KEY`, ver `05_security.md` §7.1), `ASAAS_WEBHOOK_SECRET`, `ASAAS_ENVIRONMENT`.
 2. **Zerar os dados de teste** (plano §5), com a limpeza das subcontas de teste no Asaas antes, se for o caso.
 3. **Migration 058** (`--dry-run` primeiro). Funções antigas continuam funcionando antes e depois (o caminho do app não envia as colunas novas).
-4. **Funções, nesta ordem:** `webhooks-asaas-pix` e `webhooks-asaas-kyc` (tolerância a nulo; seguem `--no-verify-jwt`), `auth-company-lookup`, `company-limit-request`, `company-create`, `auth-register`; depois as 8 novas (`food-company-create`, `-status`, `-balance`, `-set-pix-key`, `-withdraw`, `-limit-request`, `-limit-cancel`, `-owner-transfer`) **sem** `--no-verify-jwt`. As funções de `_shared` são empacotadas com cada função: publicar todas as que importam `company.ts`, `company-kyc.ts`, `cnpj-dispute.ts` e `limit-request.ts`.
+4. **Funções, nesta ordem:** `webhooks-asaas-pix` e `webhooks-asaas-kyc` (tolerância a nulo; seguem `--no-verify-jwt`), `auth-company-lookup`, `company-limit-request`, `company-create`, `auth-register`, `company-abandon`; depois as 9 novas (`food-company-create`, `-status`, `-balance`, `-set-pix-key`, `-withdraw`, `-limit-request`, `-limit-cancel`, `-owner-transfer`, `-abandon`) **sem** `--no-verify-jwt`. As funções de `_shared` são empacotadas com cada função: publicar todas as que importam `company.ts`, `company-kyc.ts`, `cnpj-dispute.ts`, `limit-request.ts` e `company-abandon.ts`.
 5. **Alber Food** (migrations e `food-api`, depois o site) e **Alber Admin** (views e funções), conforme o plano.
 6. **Fumaça** com CNPJs novos (sandbox): abrir empresa, status, chave Pix, saque de R$ 10, extrato, pedido de limite; conferir `food_ops` e `transactions`.
 7. Trocar a chave do Asaas com segurança só depois de `ALBER_KEYS_ENCRYPTION_KEY` definido (nota `05_security.md` §7.1).

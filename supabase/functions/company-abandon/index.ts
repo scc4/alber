@@ -8,6 +8,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
+import { abandonPatch, abandonRefusal } from '../_shared/company-abandon.ts'
 
 interface AbandonRequest {
   company_id: string
@@ -53,14 +54,13 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   if (!company) return err('COMPANY_NOT_FOUND', 'Empresa não encontrada', 404)
   if (company.owner_id !== caller.id) return err('FORBIDDEN', 'Só o master pode cancelar o cadastro da empresa', 403)
-  if (company.deleted_at) return err('ALREADY_ABANDONED', 'Este cadastro já foi cancelado', 409)
-  if (company.kyc_status === 'approved') {
-    return err('COMPANY_ALREADY_APPROVED', 'Uma empresa já verificada não pode ser cancelada por aqui', 422)
-  }
+  // Recusas por estado e o que se grava ficam em _shared/company-abandon.ts (a mesma regra do food-company-abandon, do Alber Food).
+  const refusal = abandonRefusal(company)
+  if (refusal) return err(refusal.code, refusal.message, refusal.status)
 
   const { error: updateErr } = await supabaseAdmin
     .from('companies')
-    .update({ deleted_at: new Date().toISOString(), deleted_reason: 'abandoned' })
+    .update(abandonPatch())
     .eq('id', company.id)
 
   if (updateErr) {

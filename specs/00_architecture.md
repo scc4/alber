@@ -102,7 +102,7 @@ Na fase atual o foco é o **Alber Food** e o **Alber Admin**; o app Alber não s
 - O Alber ganha uma **API de serviço por empresa** (`food-company-*`, chamada só pelo Alber Food com `x-alber-food-key` e autorização assinada por operação), sem depender de `users`. Uma migration pequena torna `companies.owner_id` e `transactions.user_id` opcionais (`owner_ref`/`actor_ref`).
 - O mundo pessoa física e as funções do app (`financial-*`, `company-*` com JWT de usuário, `auth-*`) ficam como estão, **congelados**, até a unificação.
 - Plano completo e fases: `plano-separacao-pf-pj.md` no repositório do Alber Food (`docs/`).
-- **Status (04/11/2026):** a fase 1 (lado Alber) está **implementada na branch `claude/fase1-api-servico-944c65`, sem nada publicado**: migration 058, verificador da autorização assinada e as 8 funções `food-company-*`. Contrato, erros e ordem de publicação: `06_modules/food_company_service.md`. O corte é único e vem depois (backup, zerar dados de teste, migration, funções, Food, Admin).
+- **Status (04/11/2026):** a fase 1 (lado Alber) está **implementada na branch `claude/fase1-api-servico-944c65`, sem nada publicado**: migration 058, verificador da autorização assinada e as 9 funções `food-company-*`. Contrato, erros e ordem de publicação: `06_modules/food_company_service.md`. O corte é único e vem depois (backup, zerar dados de teste, migration, funções, Food, Admin).
 
 ---
 

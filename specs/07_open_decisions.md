@@ -66,6 +66,12 @@ completa em 06_modules/empresa_operadores.md.
 - Handle/razão social da empresa e titularidade do master não são editáveis
   nesta versão.
 Ver 06_modules/empresa_operadores.md §11 para detalhe completo.
+**Direção de 04/11/2026 (planejada, não implementada):** conta pessoa física e
+operador da conta PJ passam a não ter relação. Na fase atual (só Alber Food e
+Alber Admin) o dono do restaurante é uma conta do Alber Food e o Alber atua só
+como backend de dinheiro (00_architecture.md §4.1). Troca de titular entra no
+plano. Este módulo (master e operadores como usuários do Alber) fica congelado
+para o app até a unificação.
 
 ---
 

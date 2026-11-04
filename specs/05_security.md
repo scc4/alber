@@ -121,8 +121,29 @@ Invalidação:
 | Respostas de segurança | bcrypt cost 12 |
 | CPF | Hash SHA-256 no banco |
 | Chave Pix | AES-256 no banco |
-| API key subconta Asaas | AES-256 no banco |
+| API key subconta Asaas | AES-256-GCM no banco, com segredo **próprio** e versionado (7.1) |
 | Token JWT | expo-secure-store |
+
+### 7.1 Cifra das chaves de subconta do Asaas (decisão de 04/11/2026)
+
+**Problema que isto resolve.** Até aqui o segredo de cifra de `users.asaas_api_key_enc` e `companies.asaas_api_key_enc` era o próprio `ASAAS_API_KEY` (a chave-mãe do Asaas). A chave do Asaas só aparece uma vez ao ser gerada e **expira por inatividade** (3 meses desabilitada, 6 meses expirada de vez); trocá-la deixaria todas as chaves de subconta ilegíveis, sem como recuperar.
+
+**Regra.** A chave do Asaas é só credencial. A cifra das chaves de subconta usa segredo próprio, implementado em `supabase/functions/_shared/subaccount-key.ts` (`encryptSubaccountKey` / `decryptSubaccountKey`). **Nenhuma função chama `aesDecrypt`/`aesEncrypt` com `ASAAS_API_KEY` para essas chaves.**
+
+| Item | Valor |
+|---|---|
+| Formato novo | `v2:<id>:<base64(iv[12] + ciphertext)>`, AES-256-GCM, dados autenticados `alber:subaccount-key:v2` |
+| Formato antigo | `base64(iv[12] + ciphertext)`, chave = SHA-256 do `ASAAS_API_KEY`. Continua legível |
+| `ALBER_KEYS_ENCRYPTION_KEY` | 32 bytes (base64 ou hexadecimal de 64). Definida = tudo novo é gravado em v2 |
+| `ALBER_KEYS_ENCRYPTION_KEY_V` | id da versão atual (padrão `1`) |
+| `ALBER_KEYS_ENCRYPTION_KEY_PREV` e `_PREV_V` | versão anterior, só para ler durante uma rotação |
+| `ALBER_KEYS_LEGACY_SECRET` | valor **antigo** do `ASAAS_API_KEY`, para ler linhas no formato antigo depois de trocar o `ASAAS_API_KEY` |
+
+**Ordem de publicação (sem risco).** (1) Publicar as funções: sem o segredo novo nada muda. (2) Definir `ALBER_KEYS_ENCRYPTION_KEY`: linhas novas passam a v2, as antigas continuam legíveis. (3) Se for trocar o `ASAAS_API_KEY` **antes** de recifrar tudo: definir antes `ALBER_KEYS_LEGACY_SECRET` com o valor atual do `ASAAS_API_KEY`. Nunca trocar o `ASAAS_API_KEY` sem um desses dois cuidados.
+
+**Rotação do segredo próprio.** Definir o novo valor com novo id em `ALBER_KEYS_ENCRYPTION_KEY`/`_V`, mover o antigo para `_PREV`/`_PREV_V`, recifrar as linhas (função de manutenção, ainda não existe porque o plano é zerar os dados de teste antes do corte) e só então remover o `_PREV`.
+
+**Expiração das chaves de subconta (pendente).** Subconta sem uso por 6 meses expira de vez no Asaas; a conta-mãe deve tratar o evento `ACCESS_TOKEN_EXPIRED` e gerar nova chave pela API. Ainda não tratado.
 
 **Mascaramento na UI:**
 - CPF: `***.***.*XX-XX`

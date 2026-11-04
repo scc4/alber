@@ -8,7 +8,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { requireFoodKey, UUID } from '../_shared/food-service.ts'
-import { aesDecrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getParentBalanceCents, listParentMovements } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 
@@ -24,8 +24,8 @@ export async function handleRequest(req: Request): Promise<Response> {
   const companyId = typeof body.company_id === 'string' ? body.company_id : ''
   if (!UUID.test(companyId)) return err('INVALID_COMPANY', 'company_id inválido', 422)
 
-  const encSecret = Deno.env.get('ASAAS_API_KEY')
-  if (!encSecret) return err('SERVICE_NOT_CONFIGURED', 'Serviço indisponível', 503)
+  // A chave da subconta e decifrada por _shared/subaccount-key.ts (segredo proprio, ou o ASAAS_API_KEY no formato antigo).
+  if (!Deno.env.get('ALBER_KEYS_ENCRYPTION_KEY') && !Deno.env.get('ASAAS_API_KEY')) return err('SERVICE_NOT_CONFIGURED', 'Serviço indisponível', 503)
   const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
   const { data, error } = await supabaseAdmin.from('companies').select('id, asaas_api_key_enc, kyc_status, deleted_at').eq('id', companyId).maybeSingle()
   if (error) return err('DB_ERROR', 'Erro ao consultar a empresa', 503)
@@ -33,7 +33,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!c || c.deleted_at) return err('COMPANY_NOT_FOUND', 'Empresa não encontrada', 404)
   if (c.kyc_status !== 'approved' || !c.asaas_api_key_enc) return err('COMPANY_NOT_APPROVED', 'Empresa sem conta aprovada', 409)
   try {
-    const key = await aesDecrypt(c.asaas_api_key_enc, encSecret)
+    const key = await decryptSubaccountKey(c.asaas_api_key_enc)
     const balance_cents = await getParentBalanceCents(key)
     const movements = await listParentMovements(key, 40)
     return json({ balance_cents, movements, generated_at: new Date().toISOString() })

@@ -3,7 +3,8 @@
 // aprovação mesmo quando o webhook não chega (ou no sandbox, onde a aprovação é automática).
 
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { aesDecrypt, aesEncrypt } from './crypto.ts'
+import { aesEncrypt } from './crypto.ts'
+import { decryptSubaccountKey } from './subaccount-key.ts'
 import { createPixAddressKey, getAccountDocuments, getAccountGeneralStatus, type KycDocumentGroup } from './asaas.ts'
 import { logError } from './error-log.ts'
 import { sendPush } from './push.ts'
@@ -95,7 +96,7 @@ export async function applyCompanyKyc(
   // Chave Pix de RECEBIMENTO (EVP) da subconta, se ainda não tiver.
   if (newKycStatus === 'approved' && !company.asaas_deposit_key && company.asaas_api_key_enc) {
     try {
-      const subApiKey = await aesDecrypt(company.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+      const subApiKey = await decryptSubaccountKey(company.asaas_api_key_enc)
       const { key } = await createPixAddressKey('EVP', subApiKey)
       const encryptedKey = await aesEncrypt(key, Deno.env.get('ENCRYPTION_KEY')!)
       await supabaseAdmin.from('companies').update({ asaas_deposit_key: encryptedKey }).eq('id', company.id)
@@ -109,7 +110,7 @@ export async function applyCompanyKyc(
   // Retrato final dos documentos para a equipe (melhor esforço; a empresa recusada continua legível no Admin com a exclusão marcada).
   if (company.asaas_api_key_enc) {
     try {
-      await refreshKycEvidence(supabaseAdmin, company.id, await aesDecrypt(company.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!), { force: true })
+      await refreshKycEvidence(supabaseAdmin, company.id, await decryptSubaccountKey(company.asaas_api_key_enc), { force: true })
     } catch { /* chave que não decifra: segue sem o retrato */ }
   }
 
@@ -143,7 +144,7 @@ export async function pollCompanyKyc(supabaseAdmin: SupabaseClient, companyId: s
     const c = data as (CompanyKycRow & { asaas_account_id: string | null; kyc_evidence_at: string | null }) | null
     if (!c || (c.kyc_status !== 'pending' && c.kyc_status !== 'submitted') || !c.asaas_api_key_enc) return null
 
-    const subApiKey = await aesDecrypt(c.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+    const subApiKey = await decryptSubaccountKey(c.asaas_api_key_enc)
     await refreshKycEvidence(supabaseAdmin, c.id, subApiKey, { lastAt: c.kyc_evidence_at })
     const general = await getAccountGeneralStatus(subApiKey)
     if (general !== 'APPROVED') return c.kyc_status

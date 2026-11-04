@@ -3,7 +3,8 @@
 // Spec: /specs/04_api_asaas.md §4.6 (refund on CPF mismatch)
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sha256hex, aesDecrypt } from '../_shared/crypto.ts'
+import { sha256hex } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { refundPayment } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -195,8 +196,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       console.warn('Webhook: CPF/CNPJ divergente para tx', tx.id)
 
       try {
-        const encSecret = Deno.env.get('ASAAS_API_KEY')!
-        const subApiKey = await aesDecrypt(ownerData.asaas_api_key_enc, encSecret)
+        const subApiKey = await decryptSubaccountKey(ownerData.asaas_api_key_enc)
         await refundPayment(payment.id, payment.value, 'CPF/CNPJ do pagador divergente', subApiKey)
       } catch (e) {
         console.error('Webhook: falha ao solicitar devolução:', e)

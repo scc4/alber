@@ -17,6 +17,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { createPixStaticQrCode, createPixAddressKey } from '../_shared/asaas.ts'
 
 const EVALUATION_LIMIT_BRL = 2000
@@ -104,11 +105,10 @@ export async function handleRequest(req: Request): Promise<Response> {
     return json(report, 200)
   }
 
-  const apiKeySecret = Deno.env.get('ASAAS_API_KEY')!
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')!
   let subApiKey: string
   try {
-    subApiKey = await aesDecrypt(userData.asaas_api_key_enc, apiKeySecret)
+    subApiKey = await decryptSubaccountKey(userData.asaas_api_key_enc)
     report.asaas_key_decrypt_ok = true
     report.asaas_key_preview    = preview(subApiKey)
     report.asaas_key_is_literal_null = subApiKey === 'null'

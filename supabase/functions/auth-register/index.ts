@@ -7,6 +7,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf, maskCpfForDisplay } from '../_shared/cpf.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
+import { encryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { createCompanyForOwner, CreateCompanyInput, isValidHandleFormat } from '../_shared/company.ts'
@@ -282,7 +283,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (await isReservedByOther(supabaseAdmin, handleNorm, reservedFor)) return err('HANDLE_TAKEN', 'Handle já em uso', 409)
   const cpfHash     = await sha256hex(cpfClean)
   const cpfMasked   = maskCpfForDisplay(cpfClean)
-  const encSecret   = Deno.env.get('ASAAS_API_KEY')!  // Asaas parent API key — também usada p/ criptografar asaas_api_key_enc
+  const encSecret   = Deno.env.get('ASAAS_API_KEY')!  // Asaas parent API key (credencial). A chave da subconta é cifrada por _shared/subaccount-key.ts
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')! // mesmo secret usado por todo o resto do sistema p/ pix_key
 
   // Payload sem campos sensíveis — armazenado apenas para diagnóstico/retomada
@@ -457,7 +458,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     asaasAccountId   = asaasAccount.id
     asaasWalletId    = asaasAccount.walletId
-    asaasApiKeyEnc   = await aesEncrypt(asaasAccount.apiKey, encSecret)
+    asaasApiKeyEnc   = await encryptSubaccountKey(asaasAccount.apiKey)
     // Manter o response bruto disponível para error_logs nas etapas seguintes.
     // A apiKey em texto claro só existe aqui — após aesEncrypt ela é descartada.
     asaasRawResponse = { id: asaasAccount.id, apiKey: asaasAccount.apiKey, walletId: asaasAccount.walletId }

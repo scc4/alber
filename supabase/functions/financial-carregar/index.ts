@@ -5,6 +5,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { createPixAddressKey, createPixStaticQrCode } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
@@ -133,11 +134,10 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('ACCOUNT_NOT_CONFIGURED', 'Subconta financeira não configurada', 503)
   }
 
-  const apiKeySecret = Deno.env.get('ASAAS_API_KEY')!
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')!
   let subApiKey: string
   try {
-    subApiKey = await aesDecrypt(wallet.asaasApiKeyEnc, apiKeySecret)
+    subApiKey = await decryptSubaccountKey(wallet.asaasApiKeyEnc)
   } catch (e) {
     console.error('API key decryption failed:', e)
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)

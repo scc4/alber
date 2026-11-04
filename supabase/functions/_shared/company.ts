@@ -14,6 +14,7 @@ import { isReservedByOther } from './handle-reservation.ts'
 import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { validateCnpj, normalizeCnpj, maskCnpjForDisplay } from './cnpj.ts'
 import { sha256hex, aesEncrypt } from './crypto.ts'
+import { encryptSubaccountKey } from './subaccount-key.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from './asaas.ts'
 import { logError } from './error-log.ts'
 import { evaluateOwnerCpf, fetchCnpjRegistry, reviewFor, verifyOwnerCpfHash, type CnpjRegistry, type OwnerLinkCheck } from './owner-link.ts'
@@ -333,7 +334,7 @@ export async function createCompanyForOwner(
   }
   if (!asaasAccount) return { ok: false, code: 'ASAAS_ERROR', message: 'Erro ao criar subconta financeira', status: 503 }
 
-  const asaasApiKeyEnc = await aesEncrypt(asaasAccount.apiKey, encSecret)
+  const asaasApiKeyEnc = await encryptSubaccountKey(asaasAccount.apiKey)
 
   let depositKeyEnc: string | null = null
   if (asaasAccount.apiKey) {

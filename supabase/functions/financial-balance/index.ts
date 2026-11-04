@@ -6,7 +6,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { aesDecrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'
 import { resolveWalletContext } from '../_shared/company-permissions.ts'
 
@@ -67,8 +67,7 @@ Deno.serve(async (req: Request) => {
 
   if (wallet.asaasApiKeyEnc) {
     try {
-      const encSecret = Deno.env.get('ASAAS_API_KEY')!
-      subApiKey       = await aesDecrypt(wallet.asaasApiKeyEnc, encSecret)
+      subApiKey       = await decryptSubaccountKey(wallet.asaasApiKeyEnc)
       asaasBalance    = await getSubcontaBalance(subApiKey)
     } catch (e) {
       console.error('Asaas balance fetch failed:', e)

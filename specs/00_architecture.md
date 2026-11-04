@@ -94,6 +94,15 @@ exigência regulatória (ver princípio de transparência BaaS abaixo).
 └─────────────┘   └─────────────────────┘
 ```
 
+### 4.1 Papel do Alber na fase atual (decisão de 04/11/2026)
+
+Na fase atual o foco é o **Alber Food** e o **Alber Admin**; o app Alber não será usado de início, e no futuro os produtos serão unificados. Por isso o Alber é usado **apenas como backend de dinheiro, quando necessário**: guarda as chaves das subcontas do Asaas, abre a subconta da empresa, controla KYC, extrato, guarda de saque, limites e executa o Pix de saque.
+
+- A **identidade, o login, os papéis e as telas** do restaurante ficam no Alber Food. O dono do restaurante **não tem usuário no Alber** e não se relaciona com nenhuma conta pessoa física Alber.
+- O Alber ganha uma **API de serviço por empresa** (`food-company-*`, chamada só pelo Alber Food com `x-alber-food-key` e autorização assinada por operação), sem depender de `users`. Uma migration pequena torna `companies.owner_id` e `transactions.user_id` opcionais (`owner_ref`/`actor_ref`).
+- O mundo pessoa física e as funções do app (`financial-*`, `company-*` com JWT de usuário, `auth-*`) ficam como estão, **congelados**, até a unificação.
+- Plano completo e fases: `plano-separacao-pf-pj.md` no repositório do Alber Food (`docs/`). Nada disso está implementado ainda.
+
 ---
 
 ## 5. Estrutura de pastas do projeto

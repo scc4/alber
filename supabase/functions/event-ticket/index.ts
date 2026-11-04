@@ -6,7 +6,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify, aesDecrypt } from '../_shared/crypto.ts'
+import { bcryptVerify } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance, transferToWallet } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
@@ -248,7 +249,7 @@ Deno.serve(async (req: Request) => {
 
   let userApiKey: string
   try {
-    userApiKey = await aesDecrypt(user.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+    userApiKey = await decryptSubaccountKey(user.asaas_api_key_enc)
   } catch (e) {
     await rollbackBatchSold()
     await logError(supabaseAdmin, 'event-ticket', e, { event_id: body.event_id })

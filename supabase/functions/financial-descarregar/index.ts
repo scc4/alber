@@ -6,6 +6,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { cashoutPix, transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -217,7 +218,7 @@ Deno.serve(async (req: Request) => {
 
   let subApiKey: string
   try {
-    subApiKey = await aesDecrypt(wallet.asaasApiKeyEnc, Deno.env.get('ASAAS_API_KEY')!)
+    subApiKey = await decryptSubaccountKey(wallet.asaasApiKeyEnc)
   } catch (e) {
     console.error('API key decryption failed:', e)
     await logError(supabaseAdmin, 'financial-descarregar', e, safePayload)

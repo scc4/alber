@@ -17,7 +17,8 @@
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
-import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
+import { aesEncrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { createPixAddressKey } from '../_shared/asaas.ts'
 import { applyCompanyKyc } from '../_shared/company-kyc.ts'
 
@@ -164,7 +165,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   if (newKycStatus === 'approved' && !userData.asaas_deposit_key && userData.asaas_api_key_enc) {
     try {
-      const subApiKey    = await aesDecrypt(userData.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+      const subApiKey    = await decryptSubaccountKey(userData.asaas_api_key_enc)
       const { key }      = await createPixAddressKey('EVP', subApiKey)
       const encryptedKey = await aesEncrypt(key, Deno.env.get('ENCRYPTION_KEY')!)
       await supabaseAdmin

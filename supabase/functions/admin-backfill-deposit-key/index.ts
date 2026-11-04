@@ -29,7 +29,8 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
+import { aesEncrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { createPixAddressKey } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 
@@ -58,7 +59,6 @@ export async function handleRequest(req: Request): Promise<Response> {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  const apiKeySecret = Deno.env.get('ASAAS_API_KEY')!
   const depositSecret = Deno.env.get('ENCRYPTION_KEY')!
   const asaasBase = Deno.env.get('ASAAS_ENVIRONMENT') === 'production'
     ? 'https://api.asaas.com/api/v3'
@@ -88,7 +88,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     for (const u of rows as { id: string; asaas_api_key_enc: string; asaas_deposit_key: string | null }[]) {
       try {
-        const subApiKey = await aesDecrypt(u.asaas_api_key_enc, apiKeySecret)
+        const subApiKey = await decryptSubaccountKey(u.asaas_api_key_enc)
 
         // Passo 1 — já existe uma EVP registrada na Asaas (ex.: criada manualmente)?
         let depositKey: string | null = null

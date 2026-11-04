@@ -5,7 +5,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { aesDecrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { transferToWallet } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
@@ -110,7 +110,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
       if (ownerUser?.asaas_api_key_enc) {
         try {
-          ownerApiKey = await aesDecrypt(ownerUser.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+          ownerApiKey = await decryptSubaccountKey(ownerUser.asaas_api_key_enc)
         } catch (e) {
           await logError(supabaseAdmin, 'event-cancel', e, { event_id: body.event_id, context: 'decrypt_owner_key' })
         }

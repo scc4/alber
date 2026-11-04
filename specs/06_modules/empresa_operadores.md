@@ -25,6 +25,15 @@ dentro de uma conta pessoal. Toda empresa tem exatamente um **master**
 Uma mesma pessoa pode ser master de uma empresa, operador de outra, e ainda
 manter sua conta pessoal — troca de contexto é local ao app (§8).
 
+> **Nota de 04/11/2026 (planejado, não implementado).** Este módulo descreve o
+> modelo do app, em que master e operadores são usuários pessoa física do Alber.
+> Na fase atual (só Alber Food e Alber Admin) as empresas abertas pelo Alber
+> Food **não terão master nem operadores no Alber**: a identidade do dono fica no
+> Alber Food e o Alber guarda só uma referência opaca (`owner_ref`). O texto
+> abaixo continua valendo para o app, que fica congelado até a unificação. Ver
+> `00_architecture.md` §4.1 e `plano-separacao-pf-pj.md` no repositório do Alber
+> Food.
+
 ---
 
 ## 2. Matriz de permissões

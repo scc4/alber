@@ -13,7 +13,8 @@
 
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { aesDecrypt, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 
@@ -44,7 +45,7 @@ async function checkEligibility(
   let balanceBrl = 0
   if (asaasApiKeyEnc) {
     try {
-      const subApiKey = await aesDecrypt(asaasApiKeyEnc, Deno.env.get('ASAAS_API_KEY')!)
+      const subApiKey = await decryptSubaccountKey(asaasApiKeyEnc)
       balanceBrl = await getSubcontaBalance(subApiKey)
     } catch (e) {
       console.error('[conta-excluir] balance check failed:', e)

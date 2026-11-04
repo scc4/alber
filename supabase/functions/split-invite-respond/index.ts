@@ -6,7 +6,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { aesDecrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance, transferToWallet, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
@@ -131,7 +131,7 @@ Deno.serve(async (req: Request) => {
 
   let callerApiKey: string
   try {
-    callerApiKey = await aesDecrypt(caller.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+    callerApiKey = await decryptSubaccountKey(caller.asaas_api_key_enc)
   } catch (e) {
     await logError(supabaseAdmin, 'split-invite-respond', e, { split_id: split.id, user_id: caller.id })
     return err('CRYPTO_ERROR', 'Erro interno de segurança', 500)

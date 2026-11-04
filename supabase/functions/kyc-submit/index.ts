@@ -5,7 +5,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { aesDecrypt } from '../_shared/crypto.ts'
+import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -70,7 +70,7 @@ Deno.serve(async (req: Request) => {
 
   let apiKey: string
   try {
-    apiKey = await aesDecrypt(user.asaas_api_key_enc, Deno.env.get('ASAAS_API_KEY')!)
+    apiKey = await decryptSubaccountKey(user.asaas_api_key_enc)
   } catch {
     return err('DECRYPT_FAILED', 'Erro ao descriptografar chave', 500)
   }

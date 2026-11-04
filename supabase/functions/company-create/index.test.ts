@@ -243,3 +243,107 @@ Deno.test('loginEmail é sempre o sintético, com ou sem e-mail de contato real 
   assertEquals(retry.bodies.map((b) => b.loginEmail), [synthetic, synthetic])
   assertEquals(retry.bodies[1]?.email, `dono+${VALID_COMPANY.cnpj}@loja.com.br`)
 })
+
+// ── Conferência do vínculo do responsável (owner_cpf) ───────────────────────────────────────────────────────────────────────────
+import { sha256hex } from '../_shared/crypto.ts'
+
+const OWNER_CPF = '12345678909' // dígitos 4 a 9: 456789
+const qsa = (role: string, mask = '***456789**') => new Response(JSON.stringify({ descricao_situacao_cadastral: 'ATIVA', razao_social: 'MINHA EMPRESA LTDA', qsa: [{ nome_socio: 'FULANO', cnpj_cpf_do_socio: mask, qualificacao_socio: role }] }), { status: 200 })
+
+function linkHandler(opts: { registry?: Response; ownerCpfHash?: string; asaasAccount?: (n: number) => Response; existingAccounts?: unknown } = {}) {
+  const inserted: Record<string, unknown>[] = []
+  const asaasPosts: number[] = []
+  let getByCnpj = 0
+  const handler: Handler = (url, method, body) => {
+    if (url.includes('brasilapi.com.br')) return opts.registry ?? qsa('Sócio-Administrador')
+    if (url.includes('/rest/v1/users') && url.includes('id=eq.')) return new Response(JSON.stringify({ ...OWNER, cpf: opts.ownerCpfHash }), { status: 200 })
+    if (url.includes('/rest/v1/companies') && method === 'POST') inserted.push(body as Record<string, unknown>)
+    if (url.includes('sandbox.asaas.com/api/v3/accounts') && method === 'POST') {
+      asaasPosts.push(1)
+      return opts.asaasAccount ? opts.asaasAccount(asaasPosts.length) : ok()
+    }
+    if (url.includes('sandbox.asaas.com/api/v3/accounts?cpfCnpj=')) {
+      getByCnpj++
+      return new Response(JSON.stringify({ data: opts.existingAccounts ?? [] }), { status: 200 })
+    }
+    return baseHandler()(url, method, body)
+  }
+  return { handler, inserted, asaasPosts, getByCnpj: () => getByCnpj }
+}
+const withCpf = (over: Record<string, unknown> = {}) => ({ ...VALID_COMPANY, owner_cpf: OWNER_CPF, ...over })
+
+Deno.test('CPF do responsável consta como sócio-administrador: veredito match, sem revisão, e vai para a empresa', async () => {
+  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf())))
+  const data = await res.json()
+  assertEquals(res.status, 201)
+  assertEquals([data.owner_link_check, data.owner_link_review], ['match', 'not_needed'])
+  assertEquals(t.inserted[0]?.owner_link_check, 'match')
+  assertEquals(t.inserted[0]?.owner_link_review, 'not_needed')
+  assertEquals(t.inserted[0]?.owner_link_qualification, 'Sócio-Administrador')
+  assertEquals(typeof t.inserted[0]?.owner_link_checked_at, 'string')
+  assertEquals(JSON.stringify(t.inserted[0]).includes(OWNER_CPF), false) // o CPF nunca vai para o banco
+})
+
+Deno.test('não confere, só sócio, CNPJ inativo ou consulta fora do ar: a empresa é criada e vai para a revisão da equipe', async () => {
+  const hash = await sha256hex(OWNER_CPF)
+  const cases: [string, Response][] = [
+    ['mismatch', qsa('Sócio-Administrador', '***111111**')],
+    ['partner', qsa('Sócio')],
+    ['inactive', new Response(JSON.stringify({ descricao_situacao_cadastral: 'BAIXADA', razao_social: 'X', qsa: [] }), { status: 200 })],
+    ['unavailable', new Response('{}', { status: 500 })],
+  ]
+  for (const [expected, registry] of cases) {
+    const t = linkHandler({ ownerCpfHash: hash, registry })
+    const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf())))
+    const data = await res.json()
+    assertEquals(res.status, 201, expected)
+    assertEquals([data.owner_link_check, data.owner_link_review], [expected, 'pending'], expected)
+  }
+})
+
+Deno.test('CPF de outra pessoa (válido, mas não é o da conta): 422 e nada é criado no Asaas', async () => {
+  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf({ owner_cpf: '529.982.247-25' }))))
+  assertEquals(res.status, 422)
+  assertEquals((await res.json()).error?.code ?? 'OWNER_CPF_MISMATCH', 'OWNER_CPF_MISMATCH')
+  assertEquals(t.asaasPosts.length, 0)
+  assertEquals(t.inserted.length, 0)
+})
+
+Deno.test('CPF inválido: 422 CPF_INVALID', async () => {
+  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf({ owner_cpf: '11111111111' }))))
+  assertEquals(res.status, 422)
+  assertEquals(t.asaasPosts.length, 0)
+})
+
+Deno.test('sem CPF (como o app faz hoje): empresa "não conferida" e em revisão', async () => {
+  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const res = await withMock(t.handler, () => handleRequest(makeReq()))
+  const data = await res.json()
+  assertEquals(res.status, 201)
+  assertEquals([data.owner_link_check, data.owner_link_review], ['unchecked', 'pending'])
+  assertEquals(t.inserted[0]?.owner_link_checked_at, null)
+})
+
+Deno.test('CNPJ já tem subconta no Asaas: só reaproveita com o vínculo conferido (match); senão recusa sem tocar nela', async () => {
+  const hash = await sha256hex(OWNER_CPF)
+  const dup = () => new Response(JSON.stringify({ errors: [{ description: 'O CNPJ 11222333000181 já está em uso por outra conta.' }] }), { status: 400 })
+  const existing = [{ id: 'asaas-old', walletId: 'wallet-old', apiKey: null }]
+
+  const noMatch = linkHandler({ ownerCpfHash: hash, registry: qsa('Sócio-Administrador', '***111111**'), asaasAccount: dup, existingAccounts: existing })
+  const denied = await withMock(noMatch.handler, () => handleRequest(makeReq(withCpf())))
+  assertEquals(denied.status, 409)
+  assertEquals(noMatch.getByCnpj(), 0) // nem consultou a subconta existente
+  assertEquals(noMatch.inserted.length, 0)
+
+  const semCpf = linkHandler({ ownerCpfHash: hash, asaasAccount: dup, existingAccounts: existing })
+  assertEquals((await withMock(semCpf.handler, () => handleRequest(makeReq()))).status, 409)
+
+  const match = linkHandler({ ownerCpfHash: hash, asaasAccount: dup, existingAccounts: existing })
+  const ok2 = await withMock(match.handler, () => handleRequest(makeReq(withCpf())))
+  assertEquals(ok2.status, 201)
+  assertEquals(match.getByCnpj(), 1)
+  assertEquals(match.inserted[0]?.asaas_account_id, 'asaas-old')
+})

@@ -20,7 +20,7 @@ Deno.env.set('ASAAS_WEBHOOK_SECRET', 'test-webhook-secret')
 Deno.env.set('ENCRYPTION_KEY', 'test-encryption-key') // secret diferente de ASAAS_API_KEY, de propósito
 
 import { handleRequest } from './index.ts'
-import { aesDecrypt } from '../_shared/crypto.ts'
+import { aesDecrypt, sha256hex } from '../_shared/crypto.ts'
 
 // ── Mock factory ──────────────────────────────────────────────────────────────
 // Suporta rotas estáticas (mesma resposta sempre) e rotas em sequência
@@ -775,7 +775,8 @@ Deno.test('cadastro de empresa com pix_key_type "cnpj" → companies insert grav
     // select id/email/phone) — distinta das checagens de duplicata de CPF/e-mail/
     // handle, que também batem em /rest/v1/users mas devem continuar vazias (BASE_ROUTES).
     if (method === 'GET' && url.includes('/rest/v1/users') && url.includes('id=eq.')) {
-      return new Response(JSON.stringify(NEW_DB_USER), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      // O CPF do usuário recém-criado (hash), que a conferência do vínculo compara com o CPF digitado no cadastro.
+      return new Response(JSON.stringify({ ...NEW_DB_USER, cpf: await sha256hex(VALID_CPF) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
     for (const r of BASE_ROUTES) {
       const methodOk = !r.method || r.method.toUpperCase() === method

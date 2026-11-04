@@ -102,6 +102,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     company_account_status: result.account_status,
     company_kyc_status:     result.kyc_status,
     company_onboarding_url: result.onboarding_url,
+    owner_link_check:       result.owner_link_check,
+    owner_link_review:      result.owner_link_review,
   }, 201)
 }
 

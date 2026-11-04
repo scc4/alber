@@ -16,6 +16,7 @@ import { validateCnpj, normalizeCnpj, maskCnpjForDisplay } from './cnpj.ts'
 import { sha256hex, aesEncrypt } from './crypto.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from './asaas.ts'
 import { logError } from './error-log.ts'
+import { evaluateOwnerCpf, fetchCnpjRegistry, reviewFor, verifyOwnerCpfHash, type CnpjRegistry, type OwnerLinkCheck } from './owner-link.ts'
 
 export interface CompanyAddressInput {
   street: string
@@ -38,6 +39,9 @@ export interface CreateCompanyInput {
   // E-mail de contato da empresa (o Asaas escreve para ele: pedidos de documento, avisos). Opcional: sem ele vai um endereço sintético
   // só da empresa. Se o Asaas recusar por já estar em uso em outra subconta, tenta de novo com `+cnpj` antes do @ (continua chegando ao dono).
   email?: string
+  // CPF do responsável, digitado por ele para confirmar o vínculo com o CNPJ. É conferido pelo hash da conta (tem de ser o CPF de quem
+  // está logado) e comparado com o quadro societário. Sem ele a empresa nasce "não conferida" e fica em revisão da equipe.
+  owner_cpf?: string
   // Regime tributário da empresa, como o Asaas aceita (taxRegime). Opcional.
   tax_regime?: 'MEI' | 'NATIONAL_SIMPLE' | 'NORMAL_REGIME' | 'UNKNOWN'
   // Chave Pix de SAQUE da própria empresa (nunca cpf/phone/email — só faz
@@ -68,6 +72,8 @@ export type CreateCompanyOutcome =
       account_status: string
       kyc_status: string
       onboarding_url: string | null
+      owner_link_check: OwnerLinkCheck | 'unchecked'
+      owner_link_review: 'not_needed' | 'pending'
     }
   | {
       ok: false
@@ -86,10 +92,16 @@ export function plusAliasEmail(email: string, cnpj: string): string {
   return `${local.split('+')[0]}+${cnpj.toLowerCase()}@${domain}`
 }
 
+export interface CreateCompanyDeps {
+  /** Consulta ao quadro societário do CNPJ (injetável nos testes). */
+  registry?: (cnpj: string) => Promise<CnpjRegistry | null>
+}
+
 export async function createCompanyForOwner(
   supabaseAdmin: SupabaseClient,
   ownerId: string,
   input: CreateCompanyInput,
+  deps: CreateCompanyDeps = {},
 ): Promise<CreateCompanyOutcome> {
   if (
     !input?.cnpj || !input.company_name?.trim() || !input.company_type ||
@@ -142,7 +154,7 @@ export async function createCompanyForOwner(
 
   const { data: owner } = await supabaseAdmin
     .from('users')
-    .select('id, email, phone')
+    .select('id, email, phone, cpf')
     .eq('id', ownerId)
     .maybeSingle()
 
@@ -161,6 +173,23 @@ export async function createCompanyForOwner(
       ? { ok: false, code: 'CNPJ_UNDER_REVIEW', message: 'Este CNPJ já está em processo de verificação por outra conta.', status: 409 }
       : { ok: false, code: 'CNPJ_DUPLICATE', message: 'CNPJ já cadastrado', status: 409 }
   }
+
+  // ── Vínculo do responsável com o CNPJ (antes de criar qualquer coisa no Asaas) ───────────────────────────────────────────────
+  // Com o CPF digitado: tem de ser o da conta (hash) e é comparado com o quadro societário. Sem ele: "não conferida" -> revisão.
+  let linkCheck: OwnerLinkCheck | 'unchecked' = 'unchecked'
+  let linkQualification: string | null = null
+  if (input.owner_cpf != null) {
+    const proof = await verifyOwnerCpfHash(input.owner_cpf, (owner as { cpf?: string | null }).cpf)
+    if (!proof.ok) {
+      return proof.code === 'CPF_INVALID'
+        ? { ok: false, code: 'CPF_INVALID', message: 'CPF inválido', status: 422 }
+        : { ok: false, code: 'OWNER_CPF_MISMATCH', message: 'O CPF informado não é o da sua conta Alber', status: 422 }
+    }
+    const verdict = evaluateOwnerCpf(proof.cpf, await (deps.registry ?? fetchCnpjRegistry)(cnpjClean))
+    linkCheck = verdict.check
+    linkQualification = verdict.qualification
+  }
+  const linkReview = reviewFor(linkCheck)
 
   const encSecret     = Deno.env.get('ASAAS_API_KEY')!
   const pixKeySecret   = Deno.env.get('ENCRYPTION_KEY')!
@@ -233,6 +262,11 @@ export async function createCompanyForOwner(
         return { ok: false, code: 'ASAAS_ERROR', message: description || 'Erro ao criar subconta financeira', status: 503 }
       }
 
+      // O CNPJ já tem subconta no Asaas (tentativa anterior abandonada ou recusada). Reaproveitá-la só com o vínculo conferido: sem isso,
+      // quem não é sócio herdaria a subconta (e os dados de contato) de uma tentativa anterior.
+      if (linkCheck !== 'match') {
+        return { ok: false, code: 'CNPJ_IN_USE', message: description, status: 409 }
+      }
       const existing = await getAsaasAccountByCpf(cnpjClean, encSecret)
       if (!existing) {
         return { ok: false, code: 'CNPJ_IN_USE', message: description, status: 409 }
@@ -321,6 +355,10 @@ export async function createCompanyForOwner(
       kyc_status:        'pending',
       account_status:    'evaluation',
       onboarding_url:    onboardingUrl,
+      owner_link_check:         linkCheck,
+      owner_link_review:        linkReview,
+      owner_link_qualification: linkQualification,
+      owner_link_checked_at:    linkCheck === 'unchecked' ? null : new Date().toISOString(),
     })
     .select('id')
     .single()
@@ -340,5 +378,7 @@ export async function createCompanyForOwner(
     account_status: 'evaluation',
     kyc_status:     'pending',
     onboarding_url: onboardingUrl,
+    owner_link_check:  linkCheck,
+    owner_link_review: linkReview,
   }
 }

@@ -602,7 +602,8 @@ export async function handleRequest(req: Request): Promise<Response> {
   let companyResult: Awaited<ReturnType<typeof createCompanyForOwner>> | null = null
 
   if (companyToCreate) {
-    companyResult = await createCompanyForOwner(supabaseAdmin, userId, companyToCreate)
+    // O CPF acabou de ser digitado no cadastro: serve para conferir o vínculo com o CNPJ (o hash confere com o da conta recém-criada).
+    companyResult = await createCompanyForOwner(supabaseAdmin, userId, { ...companyToCreate, owner_cpf: cpfClean })
     if (!companyResult.ok) {
       console.error('[auth-register] company creation failed (não-crítico para a conta pessoal):', companyResult.code, companyResult.message)
       await logError(supabaseAdmin, 'auth-register', new Error(`COMPANY_CREATE_FAILED: ${companyResult.code}`), safePayload, {

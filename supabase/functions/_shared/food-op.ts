@@ -238,6 +238,11 @@ export type StoredResult =
        * válida) ou outra com a mesma idempotency_key pode tentar de novo. Sem isto o erro fica guardado e é devolvido nas repetições.
        */
       retryable?: boolean
+      /**
+       * Desfecho DESCONHECIDO (ex.: a chamada ao Asaas caiu sem resposta, o dinheiro pode ter saído): a reserva continua `in_progress` e as
+       * repetições recebem OPERATION_IN_PROGRESS até a equipe reconciliar com a transação. Nunca fechar como falha nem liberar a chave.
+       */
+      leaveOpen?: boolean
     }
 
 export type Reservation =
@@ -329,6 +334,7 @@ export async function reserveFoodOp(supabaseAdmin: SupabaseClient, op: FoodOp, n
 /** Fecha a operação reservada com o desfecho. Falha retryable apaga a reserva (nada aconteceu). Devolve false se não conseguiu gravar. */
 export async function finishFoodOp(supabaseAdmin: SupabaseClient, id: string, result: StoredResult): Promise<boolean> {
   try {
+    if (!result.ok && result.leaveOpen) return true
     if (!result.ok && result.retryable) {
       const { error } = await supabaseAdmin.from('food_ops').delete().eq('id', id)
       return !error

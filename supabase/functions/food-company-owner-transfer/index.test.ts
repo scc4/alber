@@ -94,6 +94,32 @@ Deno.test('depois da troca: o dono antigo perde o acesso, o novo passa, e o saqu
 
 const txs0 = (w: World) => w.db.rows('transactions')[0]!
 
+Deno.test('limites de saque voltam ao padrão na troca e o pedido de aumento em aberto é cancelado (o histórico fica)', async () => {
+  const w = await makeWorld({
+    override: { withdraw_limit_per_tx_brl: '20000.00', withdraw_limit_per_day_brl: '60000.00', withdraw_limit_set_at: ago(D) },
+    rows: {
+      company_limit_requests: [
+        { id: 'aprovado', company_id: COMPANY_ID, status: 'approved', requested_by_ref: OWNER_REF, created_at: ago(5 * D) },
+        { id: 'aberto', company_id: COMPANY_ID, status: 'pending', requested_by_ref: OWNER_REF, created_at: ago(1 * D) },
+        { id: 'outra-empresa', company_id: 'outra', status: 'pending', requested_by_ref: OWNER_REF, created_at: ago(1 * D) },
+      ],
+    },
+  })
+  const before = await call(w, status, { company_id: COMPANY_ID, owner_ref: OWNER_REF })
+  assertEquals(before.data.limits, { per_tx_brl: 20000, per_day_brl: 60000, source: 'approved' })
+
+  assertEquals((await transfer(w)).status, 200)
+  const c = company(w)
+  assertEquals([c.withdraw_limit_per_tx_brl, c.withdraw_limit_per_day_brl, c.withdraw_limit_set_at], [null, null, null])
+  const statuses = Object.fromEntries(w.db.rows('company_limit_requests').map((r) => [r.id, r.status]))
+  assertEquals(statuses, { aprovado: 'approved', aberto: 'cancelled', 'outra-empresa': 'pending' })
+
+  const after = await call(w, status, { company_id: COMPANY_ID, owner_ref: OTHER_OWNER_REF })
+  assertEquals((after.data.limits as Record<string, unknown>).source, 'default')
+  assertEquals((after.data.limits as Record<string, unknown>).per_tx_brl, 5000)
+  assertEquals((w.db.rows('audit_logs').find((a) => a.event_type === 'company_owner_transferred')?.metadata as Record<string, unknown>).limits_reset, true)
+})
+
 Deno.test('repetir a mesma autorização devolve o resultado original sem refazer a conferência nem zerar de novo', async () => {
   const w = await makeWorld()
   const s = await transferOp()

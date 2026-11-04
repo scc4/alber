@@ -10,8 +10,9 @@
 //
 // DESVIO DO CONTRATO (aditivo, registrado no relatório): `cnpj` é obrigatório. O Alber guarda só o hash do CNPJ e a consulta ao quadro
 // societário precisa do CNPJ em claro; é conferido contra companies.cnpj (CNPJ_MISMATCH, 422).
-// Decisão pendente: os limites de saque aprovados e um pedido de aumento em aberto SEGUEM com a empresa depois da troca (o contrato não manda
-// limpar). A equipe pode voltar aos limites padrão no Alber Admin.
+// Decisão de 04/11/2026: na troca os limites de saque voltam ao PADRÃO (withdraw_limit_per_tx_brl, _per_day_brl e withdraw_limit_set_at zerados;
+// o novo dono não herda o aumento aprovado para o anterior) e qualquer pedido de aumento em aberto é cancelado (status 'cancelled'; o histórico
+// dos pedidos fica).
 
 import { handleCors, err } from '../_shared/cors.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
@@ -82,6 +83,10 @@ export async function handleRequest(req: Request, deps: OwnerTransferDeps = {}):
           pix_key_hash: null,
           pix_key_set_at: null,
           pix_key_changed_at: nowIso,
+          // Limites de saque de volta ao padrão.
+          withdraw_limit_per_tx_brl: null,
+          withdraw_limit_per_day_brl: null,
+          withdraw_limit_set_at: null,
           updated_at: nowIso,
         })
         .eq('id', company.id)
@@ -93,10 +98,18 @@ export async function handleRequest(req: Request, deps: OwnerTransferDeps = {}):
       }
       if (!saved || saved.length === 0) return refusal('NOT_OWNER', 'Esta empresa não pertence a este dono', 403)
 
+      // Pedido de aumento em aberto do dono anterior: cancelado (o histórico fica). Falha aqui não desfaz a troca, mas fica no log.
+      const { error: cancelErr } = await supabaseAdmin
+        .from('company_limit_requests')
+        .update({ status: 'cancelled', updated_at: nowIso })
+        .eq('company_id', company.id)
+        .eq('status', 'pending')
+      if (cancelErr) await logError(supabaseAdmin, 'food-company-owner-transfer', cancelErr, { company_id: company.id, context: 'cancel_limit_request' })
+
       await supabaseAdmin.from('audit_logs').insert({
         user_id: null,
         event_type: 'company_owner_transferred',
-        metadata: { company_id: company.id, from_owner_ref: op.owner_ref, to_owner_ref: toOwnerRef, owner_link_check: verdict.check, owner_link_review: review, wait_hours: WITHDRAW_RULES.pixKeyWaitHours },
+        metadata: { company_id: company.id, from_owner_ref: op.owner_ref, to_owner_ref: toOwnerRef, owner_link_check: verdict.check, owner_link_review: review, wait_hours: WITHDRAW_RULES.pixKeyWaitHours, limits_reset: true },
       }).then(() => {}, () => {})
 
       return {

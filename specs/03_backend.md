@@ -500,6 +500,7 @@ Funções chamadas **só pelo Alber Food** (`x-alber-food-key`, sem JWT de usuá
 | `food-company-limit-request` / `-limit-cancel` | pede / cancela aumento do limite de saque |
 | `food-company-owner-transfer` | troca o titular, zera a chave de saque — assinada |
 | `food-company-abandon` | o dono desiste do cadastro antes da aprovação do KYC (libera CNPJ e @) |
+| `food-company-withdraw-status` | acompanha os saques (processing / completed / failed) |
 
 ---
 

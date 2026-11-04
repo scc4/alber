@@ -142,14 +142,32 @@ Entrada: `{ company_id, owner_ref, amount_cents, op }` (+ `x-food-op-signature`)
 
 ### 4.5 `food-company-set-pix-key`
 
-Entrada: `{ company_id, owner_ref, key_type: 'cnpj'|'random', op, cnpj?, pix_key? }`. Saída `200`: `{ pix_key: { configured: true, type, masked, digest, changed_at, available_at } }`.
+Entrada: `{ company_id, owner_ref, key_type: 'cnpj'|'random', cnpj, pix_key?, op }`. Saída `200`: `{ pix_key: { configured: true, type, masked, digest, changed_at, available_at } }`.
 
-- A chave **só é gravada uma vez** (`409 PIX_KEY_EXISTS`; conferido de novo na gravação, que é condicional a "ainda sem chave"). O único caminho que a limpa é `food-company-owner-transfer`.
-- `cnpj`: destino é a conta do próprio CNPJ, **sem espera**. `random`: **48 h de espera** (`pix_key_changed_at`) antes do primeiro saque.
+**Decisão de 04/11/2026:** a chave de saque é, de preferência, a do **CNPJ**; a chave aleatória (EVP) só é aceita com verificação de que pertence ao CNPJ da empresa. O Alber **nunca gera** uma EVP na subconta (o saque voltaria para a própria subconta).
+
+- `cnpj`: **obrigatório nos dois tipos** (o Alber guarda só o hash do CNPJ); conferido contra `companies.cnpj` (`422 CNPJ_MISMATCH`, `422 CNPJ_INVALID`).
+- `pix_key`: **obrigatório para `random`** (ausente: `400 MISSING_FIELDS`; formato EVP inválido: `422 PIX_KEY_INVALID`) e **proibido para `cnpj`** (`400 INVALID_BODY`). Guardada em minúsculas.
+- A autorização `set_pix_key` leva **sempre** `destination_digest = SHA-256 hex de "${company_id}|${chave}"` (CNPJ normalizado em maiúsculas sem pontuação para `cnpj`; a EVP em minúsculas para `random`), amarrando a assinatura à chave confirmada pela pessoa.
+- A chave **só é gravada uma vez** (`409 PIX_KEY_EXISTS`; conferido de novo na gravação, condicional a "ainda sem chave"). O único caminho que a limpa é `food-company-owner-transfer`.
+- `cnpj`: destino é a conta do próprio CNPJ, **sem espera** e **sem consulta ao Asaas**. `random`: **48 h de espera** (`pix_key_changed_at`) antes do primeiro saque.
 - Exige empresa aprovada (`409 COMPANY_NOT_APPROVED`, dentro da operação assinada).
-- Autorização `set_pix_key`. **Quando o corpo traz a chave** (`cnpj` ou `pix_key`), a autorização **tem de trazer** `destination_digest = SHA-256 hex de "${company_id}|${chave}"` (CNPJ normalizado em maiúsculas sem pontuação; EVP em minúsculas), amarrando a assinatura à chave que a pessoa confirmou. Quando o Alber gera a chave, a autorização **não pode** trazer digest.
-- **Campos aditivos (desvio do contrato original, ver §7):** `cnpj` (obrigatório para `key_type = 'cnpj'`; conferido contra `companies.cnpj`: `422 CNPJ_MISMATCH`, `422 CNPJ_INVALID`) e `pix_key` (opcional para `random`: EVP que o dono já tem no banco dele; inválida: `422 PIX_KEY_INVALID`). Sem `pix_key`, o Alber registra uma EVP **nova na subconta** (`createPixAddressKey('EVP')`), como diz o contrato original; erro do Asaas: `503 ASAAS_ERROR` (repetível).
-- Erros: `INVALID_KEY_TYPE` (422), `MISSING_FIELDS` (400), `NOT_OWNER`, `INVALID_AUTHORIZATION`, `COMPANY_NOT_APPROVED`, `PIX_KEY_EXISTS` (409), `CNPJ_*`, `PIX_KEY_INVALID`, `ASAAS_ERROR`, `DB_ERROR`.
+
+**Verificação da EVP (só `random`) — fail-closed.** Depois da autorização assinada e da reserva (nunca antes), o Alber consulta o Asaas, `GET /v3/pix/addressKeys/external?type=EVP&key=<evp>`, com a chave de API da **subconta** da empresa (cabeçalho `access_token`, sem corpo; `lookupExternalPixKey` em `_shared/asaas.ts`, injetável nos testes). A resposta traz `owner.name` e `owner.cpfCnpj`. Só aceita se `owner.cpfCnpj`, normalizado como `normalizeCnpj`, tiver os **14 caracteres completos** e for **igual ao CNPJ do corpo**. Nunca aceita sem verificação conclusiva.
+
+| Resultado da consulta | Resposta | Reservação |
+|---|---|---|
+| documento completo e igual ao CNPJ | grava a chave e segue (espera de 48 h) | concluída |
+| chave não encontrada (404) | `422 PIX_KEY_NOT_FOUND` | erro guardado |
+| dono com outro documento | `422 PIX_KEY_OWNER_MISMATCH` (mensagem genérica, sem nome nem documento de terceiro) | erro guardado |
+| documento mascarado, incompleto ou ausente; ou 4xx inesperado | `503 PIX_KEY_VERIFICATION_UNAVAILABLE`, `retryable: false` (a mensagem manda usar a chave do CNPJ) | erro guardado |
+| rede, 5xx, 429 / token bucket, exceção | `503 PIX_KEY_VERIFICATION_UNAVAILABLE`, `retryable: true` | liberada (a mesma autorização, se válida, tenta de novo) |
+
+Toda recusa da verificação grava `audit_logs` `company_pix_key_rejected` (`user_id` nulo, `metadata = { company_id, via: 'food', owner_ref, reason }` com `reason` em `not_found`, `owner_mismatch`, `document_masked`, `verification_unavailable`), **sem dados do terceiro**.
+
+**A verificação em produção depende da resposta do Asaas.** Na documentação do Asaas, no sandbox só a chave `47996515839` pode ser consultada e o `cpfCnpj` vem **mascarado**; em produção o comportamento para CNPJ não está documentado (pergunta em `docs/perguntas-asaas.md`, repositório do Alber Food). Se vier mascarado também em produção, toda chave `random` cai em `503 ... retryable: false` e só a chave do CNPJ funciona (comportamento seguro por desenho).
+
+- Erros: `INVALID_KEY_TYPE` (422), `MISSING_FIELDS` / `INVALID_BODY` (400), `NOT_OWNER`, `INVALID_AUTHORIZATION`, `COMPANY_NOT_APPROVED`, `PIX_KEY_EXISTS` (409), `CNPJ_INVALID` / `CNPJ_MISMATCH` / `PIX_KEY_INVALID` / `PIX_KEY_NOT_FOUND` / `PIX_KEY_OWNER_MISMATCH` (422), `PIX_KEY_VERIFICATION_UNAVAILABLE` (503), `DB_ERROR`.
 - Auditoria: `company_pix_key_changed` (`user_id` nulo, `metadata.via = 'food'`, `owner_ref`). Sem push (o aviso ao dono é do Food).
 
 ### 4.6 `food-company-limit-request` e `food-company-limit-cancel`
@@ -167,7 +185,7 @@ Entrada: `{ company_id, from_owner_ref, to_owner_ref, new_owner: { cpf, name, ph
 - Depois da troca o dono antigo recebe `403 NOT_OWNER` em tudo; para sacar, o novo dono precisa cadastrar a chave (`food-company-set-pix-key`) **e** esperar as 48 h (mesmo com chave do tipo CNPJ, pois a espera é da troca).
 - Repetir a troca já feita (mesma autorização ou mesma `idempotency_key`) devolve o desfecho original; uma troca nova com dono de antes errado dá `403 NOT_OWNER`.
 - **Campo aditivo (desvio, §7):** `cnpj` obrigatório (o Alber guarda só o hash; a conferência do quadro societário precisa do CNPJ em claro; conferido contra `companies.cnpj`: `422 CNPJ_MISMATCH`).
-- **Fica como está** (decisão pendente, §11): limites de saque aprovados e pedido de aumento em aberto seguem com a empresa.
+- **Decisão de 04/11/2026:** os **limites de saque voltam ao padrão** na troca (`withdraw_limit_per_tx_brl`, `withdraw_limit_per_day_brl` e `withdraw_limit_set_at` zerados; `food-company-status` passa a mostrar `limits.source = 'default'`) e qualquer **pedido de aumento em aberto (`pending`) é cancelado** (`status = 'cancelled'`; o histórico dos pedidos fica).
 
 ### 4.8 `food-company-abandon`
 
@@ -180,6 +198,15 @@ Entrada: `{ company_id, owner_ref }` (sem autorização assinada: não move dinh
 - Auditoria: `audit_logs` `company_abandoned` com `user_id` nulo e `metadata = { company_id, previous_kyc_status, via: 'food', owner_ref }`.
 - Erros: `INVALID_COMPANY`/`INVALID_OWNER` (422), `COMPANY_NOT_FOUND` (404), `ALREADY_ABANDONED` (409), `COMPANY_ALREADY_APPROVED` (422), `DB_ERROR` (503 na leitura, 500 na gravação).
 
+### 4.9 `food-company-withdraw-status`
+
+Entrada: `{ company_id, owner_ref, transaction_ids: string[] }` (1 a 20 UUIDs; repetidos viram um; fora disso `422 INVALID_TRANSACTION_IDS`). Saída `200`: `{ items: [{ transaction_id, status: 'processing'|'completed'|'failed', amount_cents, destination_masked, created_at, completed_at|null, failure_code|null }] }`.
+
+- Somente leitura, **sem autorização assinada**. Acompanha os saques de `food-company-withdraw` (decisão de 04/11/2026).
+- Só devolve lançamentos de **saque desta empresa** (`type = 'descarregar'` com `metadata.via = 'food'`): ids de outra empresa, de outro tipo ou inexistentes simplesmente **não aparecem** (nunca 403 que revele existência). Empresa de outro dono, inexistente, removida ou do app: `404 COMPANY_NOT_FOUND` (como `food-company-abandon`). Os itens vêm na ordem pedida.
+- `status`: o que o webhook `TRANSFER_DONE`/`TRANSFER_FAILED` do Asaas grava na transação (`pending` e `processing` → `processing`; `completed`; `failed`). `completed_at`: data do `audit_logs` `descarregar_completed`/`descarregar_failed` do webhook (`transactions` não tem `updated_at`), ou `null` enquanto processa. `failure_code`: sempre `TRANSFER_FAILED` quando falhou (código genérico, nunca texto do Asaas). `amount_cents` e `destination_masked` são os do saque.
+- O Alber não avisa o Food quando o Pix conclui: o Food consulta por esta função.
+
 ## 5. Tabela de erros comuns
 
 | Código | HTTP | Quando |
@@ -190,7 +217,10 @@ Entrada: `{ company_id, owner_ref }` (sem autorização assinada: não move dinh
 | `UNAUTHORIZED` | 401 | `x-alber-food-key` ausente ou errada |
 | `SERVICE_NOT_CONFIGURED` | 503 | `ALBER_FOOD_SERVICE_KEY` ou `FOOD_OP_SIGNING_KEY` ausente/inválida |
 | `INVALID_COMPANY` / `INVALID_OWNER` | 422 | `company_id` / `owner_ref` fora do formato |
-| `COMPANY_NOT_FOUND` | 404 | empresa inexistente ou removida (em `food-company-abandon`, também dono errado) |
+| `COMPANY_NOT_FOUND` | 404 | empresa inexistente ou removida (em `food-company-abandon` e `food-company-withdraw-status`, também dono errado) |
+| `PIX_KEY_NOT_FOUND` / `PIX_KEY_OWNER_MISMATCH` | 422 | `food-company-set-pix-key` com EVP não encontrada / de outro dono (§4.5) |
+| `PIX_KEY_VERIFICATION_UNAVAILABLE` | 503 | verificação da EVP inconclusiva; `retryable` diz se vale tentar de novo (§4.5) |
+| `INVALID_TRANSACTION_IDS` | 422 | `food-company-withdraw-status` com lista fora de 1 a 20 UUIDs |
 | `ALREADY_ABANDONED` | 409 | `food-company-abandon` em empresa já cancelada |
 | `COMPANY_ALREADY_APPROVED` | 422 | `food-company-abandon` em empresa com KYC aprovado |
 | `NOT_OWNER` | 403 | `owner_ref` diferente de `companies.owner_ref` |
@@ -224,11 +254,11 @@ RLS: as policies de `companies`/`transactions`/`company_operators` comparam `own
 | # | Onde | Desvio | Por quê |
 |---|---|---|---|
 | 1 | `food-company-set-pix-key` | campo `cnpj` obrigatório quando `key_type = 'cnpj'` | o Alber guarda só o hash do CNPJ (projeto), então não tem o valor em claro para gravar a chave |
-| 2 | `food-company-set-pix-key` | campo `pix_key` opcional para `key_type = 'random'` | a chave de saque útil é uma chave do banco do dono; uma EVP registrada na própria subconta enviaria o saque de volta à própria subconta. Sem o campo, o Alber gera a EVP na subconta (literal do contrato) |
-| 3 | `food-company-set-pix-key` | com a chave no corpo, a autorização leva `destination_digest` da chave | amarra a assinatura à chave que a pessoa confirmou com o código por e-mail |
+| 2 | `food-company-set-pix-key` | `pix_key` **obrigatório** para `random` (proibido para `cnpj`) e o Alber **nunca gera** EVP; a EVP é verificada no Asaas (fail-closed, §4.5). **Decisão de 04/11/2026**, substitui o texto do contrato original ("`random` registra na subconta") | uma EVP gerada na própria subconta enviaria o saque de volta à própria subconta; a chave de saque útil é a do CNPJ ou uma chave do banco do dono que comprovadamente pertence ao CNPJ |
+| 3 | `food-company-set-pix-key` | a autorização leva **sempre** `destination_digest` da chave; `cnpj` obrigatório nos dois tipos | amarra a assinatura à chave que a pessoa confirmou com o código por e-mail |
 | 4 | `food-company-owner-transfer` | campo `cnpj` obrigatório | a conferência do quadro societário (BrasilAPI) precisa do CNPJ em claro; o Alber só tem o hash |
 | 5 | `food-company-create` | repetir (mesmo dono, mesmo CNPJ) devolve `200` com a empresa existente | evita subconta duplicada em retry após timeout |
-| 6 | `food-company-withdraw` | `status` da resposta é sempre `processing` | o Pix é assíncrono; `completed`/`failed` chegam pelo webhook do Asaas |
+| 6 | `food-company-withdraw` | `status` da resposta é sempre `processing` | o Pix é assíncrono; `completed`/`failed` chegam pelo webhook do Asaas e o Food acompanha por `food-company-withdraw-status` (função nova, decisão de 04/11/2026, §4.9) |
 | 7 | estados da empresa | `COMPANY_NOT_APPROVED` (e `PIX_KEY_EXISTS`) só aparecem **depois** da autorização nas operações assinadas | para a repetição de uma operação concluída devolver o original mesmo se a empresa mudou de estado |
 | 8 | `loadOwnedCompany` | na troca de titular também aceita o **novo** dono | idem: a repetição de uma troca já feita chega à idempotência |
 | 9 | `food-company-abandon` | função **nova**, fora da lista original de 8; dono errado dá `404 COMPANY_NOT_FOUND` (não `403 NOT_OWNER`); a gravação é condicional | pedido da sessão de origem (o Food já a chama); evita revelar a empresa a outro dono e nunca apaga uma empresa aprovada no meio da corrida |
@@ -252,7 +282,7 @@ No Alber (tratados nesta fase): `admin_review_company_link` e `admin_decide_limi
 2. **`idempotency_key`:** pode ser o `challenge_id`; repetir a mesma chave com outro valor/destino é recusado.
 3. **Timeouts:** `food-company-create` leva ~15 s com a chave de subconta; `food-company-status` até ~8 s se a empresa estiver pendente.
 4. **Desfecho desconhecido do saque:** `503 ASAAS_ERROR` + repetição com `OPERATION_IN_PROGRESS` significa "não sabemos se saiu": o Food não deve liberar o valor nem tentar de novo com outra chave; a equipe reconcilia pelo lançamento `pending`.
-5. **Acompanhar o saque:** a resposta é `processing`. Não há função de consulta de saque no contrato; o desfecho final (`TRANSFER_DONE`/`FAILED`) fica em `transactions` no Alber e não é enviado ao Food. Proposta para a fase 2/3: `food-company-withdraw-status { company_id, owner_ref, transaction_id }` (ou encaminhar `TRANSFER_*` pelo `webhooks-asaas-food`). **Não implementado** (fora do contrato).
+5. **Acompanhar o saque:** a resposta de `food-company-withdraw` é `processing`; o desfecho final se consulta com `food-company-withdraw-status` (§4.9). O Alber não envia nada ao Food.
 6. **Sem push/e-mail:** o Alber não avisa ninguém; os e-mails ao dono (saque, chave, troca) são do Food.
 7. **Troca de titular e o Asaas:** o responsável da subconta continua o antigo no KYC. O plano pede saque bloqueado até a resposta do Asaas; o Alber só impõe as 48 h e o novo veredito do vínculo. Se for preciso bloqueio maior, é decisão nova.
 
@@ -263,17 +293,19 @@ Pré-requisito do plano: backup completo e autorização explícita do usuário 
 1. **Segredos do Alber** (`supabase secrets set`, pelo usuário, sem colar em chat): `FOOD_OP_SIGNING_KEY` (32 bytes, **o mesmo valor** do Food); conferir que existem `ALBER_FOOD_SERVICE_KEY`, `ENCRYPTION_KEY`, `ASAAS_API_KEY` (+ `ALBER_KEYS_ENCRYPTION_KEY`, ver `05_security.md` §7.1), `ASAAS_WEBHOOK_SECRET`, `ASAAS_ENVIRONMENT`.
 2. **Zerar os dados de teste** (plano §5), com a limpeza das subcontas de teste no Asaas antes, se for o caso.
 3. **Migration 058** (`--dry-run` primeiro). Funções antigas continuam funcionando antes e depois (o caminho do app não envia as colunas novas).
-4. **Funções, nesta ordem:** `webhooks-asaas-pix` e `webhooks-asaas-kyc` (tolerância a nulo; seguem `--no-verify-jwt`), `auth-company-lookup`, `company-limit-request`, `company-create`, `auth-register`, `company-abandon`; depois as 9 novas (`food-company-create`, `-status`, `-balance`, `-set-pix-key`, `-withdraw`, `-limit-request`, `-limit-cancel`, `-owner-transfer`, `-abandon`) **sem** `--no-verify-jwt`. As funções de `_shared` são empacotadas com cada função: publicar todas as que importam `company.ts`, `company-kyc.ts`, `cnpj-dispute.ts`, `limit-request.ts` e `company-abandon.ts`.
+4. **Funções, nesta ordem:** `webhooks-asaas-pix` e `webhooks-asaas-kyc` (tolerância a nulo; seguem `--no-verify-jwt`), `auth-company-lookup`, `company-limit-request`, `company-create`, `auth-register`, `company-abandon`; depois as 10 novas (`food-company-create`, `-status`, `-balance`, `-set-pix-key`, `-withdraw`, `-limit-request`, `-limit-cancel`, `-owner-transfer`, `-abandon`, `-withdraw-status`) **sem** `--no-verify-jwt`. As funções de `_shared` são empacotadas com cada função: publicar todas as que importam `company.ts`, `company-kyc.ts`, `cnpj-dispute.ts`, `limit-request.ts` e `company-abandon.ts`.
 5. **Alber Food** (migrations e `food-api`, depois o site) e **Alber Admin** (views e funções), conforme o plano.
 6. **Fumaça** com CNPJs novos (sandbox): abrir empresa, status, chave Pix, saque de R$ 10, extrato, pedido de limite; conferir `food_ops` e `transactions`.
 7. Trocar a chave do Asaas com segurança só depois de `ALBER_KEYS_ENCRYPTION_KEY` definido (nota `05_security.md` §7.1).
 
-## 11. Decisões pendentes (do usuário)
+## 11. Decisões do usuário (04/11/2026)
 
-1. **Taxa do saque do Alber Food:** hoje **sem taxa** (o relatório do contrato aponta a cobrança no descarregar como bloqueante). Para ligar: `FOOD_WITHDRAW_FEE_ENABLED = true` em `_shared/food-company.ts` (e definir `ASAAS_PARENT_WALLET_ID`). Quem recebe a taxa e quanto (hoje `rates.cashout`, 2%) é decisão de negócio.
-2. **Limites aprovados e pedido de aumento em aberto depois da troca de titular:** seguem com a empresa. Alternativa: zerar para os padrões na troca.
-3. **Chave aleatória de saque:** confirmar o desvio 2 (§7): o dono cola a EVP do banco dele, ou o Alber gera a EVP na subconta.
-4. **Função de acompanhamento do saque** (§9, ponto 5).
+1. **Chave Pix de saque:** preferencialmente a do **CNPJ**; chave aleatória (EVP) **colada pelo dono**, só com verificação no Asaas de que pertence ao CNPJ da empresa (fail-closed, §4.5). O Alber não gera chave. Fica registrado que a verificação em produção depende da resposta do Asaas (§4.5).
+2. **Acompanhamento do saque:** função `food-company-withdraw-status` (§4.9).
+3. **Troca de titular:** os limites de saque voltam ao padrão e o pedido de aumento em aberto é cancelado (§4.7).
+4. **Taxa de saque do Alber Food: desligada** (é o padrão). A regra fica num único ponto, `FOOD_WITHDRAW_FEE_ENABLED` em `_shared/food-company.ts`; ligada, o Pix sai por `valor − taxa` (`rates.cashout`, padrão 2%), com lançamento `fee` e repasse à carteira `ASAAS_PARENT_WALLET_ID`. Ligar é uma decisão futura de negócio.
+
+Ainda em aberto: a troca de titular depende de como o Asaas troca o responsável da subconta (§9, ponto 7).
 
 ## 12. Testes
 

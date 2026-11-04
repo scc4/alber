@@ -315,6 +315,32 @@ export async function createPixAddressKey(
   return { key: d.key, type: d.type }
 }
 
+// ── Consulta de chave Pix de terceiros (dono da chave) ───────────────────────
+// GET /pix/addressKeys/external?type=EVP&key=<evp> com a chave de API da SUBCONTA. A resposta traz `owner` (nome e cpfCnpj do dono). Usado para
+// confirmar que uma chave aleatória de saque pertence ao CNPJ da empresa (food-company-set-pix-key). O documento pode vir mascarado (sandbox):
+// quem usa decide (fail-closed). Nunca lança: rede/5xx/429 = unavailable com retryable.
+
+export type ExternalPixKeyLookup =
+  | { kind: 'found'; ownerDocument: string }
+  | { kind: 'not_found' }
+  | { kind: 'unavailable'; retryable: boolean }
+
+export async function lookupExternalPixKey(evp: string, subcontaApiKey: string): Promise<ExternalPixKeyLookup> {
+  let res: { ok: boolean; status: number; data: unknown }
+  try {
+    res = await asaasRequest('GET', `/pix/addressKeys/external?type=EVP&key=${encodeURIComponent(evp)}`, subcontaApiKey)
+  } catch {
+    return { kind: 'unavailable', retryable: true }
+  }
+  if (res.status === 404) return { kind: 'not_found' }
+  if (res.status === 429 || res.status >= 500) return { kind: 'unavailable', retryable: true }
+  if (!res.ok) return { kind: 'unavailable', retryable: false }
+  const d = (res.data ?? {}) as { owner?: { cpfCnpj?: unknown }; data?: { owner?: { cpfCnpj?: unknown } } }
+  const doc = (d.owner ?? d.data?.owner)?.cpfCnpj
+  if (typeof doc !== 'string' || !doc) return { kind: 'unavailable', retryable: false }
+  return { kind: 'found', ownerDocument: doc }
+}
+
 // ── Refund (spec 04_api §4.6) ────────────────────────────────────────────────
 
 export async function refundPayment(

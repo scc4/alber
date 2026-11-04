@@ -11,7 +11,8 @@ import { sendPush } from './push.ts'
 
 export interface CompanyKycRow {
   id: string
-  owner_id: string
+  /** Nulo em empresa aberta pelo Alber Food (sem usuário no app): nada a avisar por push. */
+  owner_id: string | null
   kyc_status: string
   asaas_api_key_enc: string | null
   asaas_deposit_key: string | null
@@ -114,7 +115,9 @@ export async function applyCompanyKyc(
     } catch { /* chave que não decifra: segue sem o retrato */ }
   }
 
-  if (newKycStatus === 'approved') {
+  if (!company.owner_id) {
+    // Empresa do Alber Food: o Food lê a situação em food-company-status.
+  } else if (newKycStatus === 'approved') {
     await sendPush(company.owner_id, 'Empresa verificada!', 'A verificação da sua empresa foi concluída. Já pode usar o Alber.', { route: `/(app)/empresas/${company.id}` }, undefined, 'conta_kyc')
   } else {
     await sendPush(company.owner_id, 'Verificação da empresa não aprovada', 'A verificação de identidade da empresa não foi concluída. Acesse o app para mais informações.', { route: `/(app)/empresas/${company.id}` }, undefined, 'conta_kyc')

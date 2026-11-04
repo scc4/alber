@@ -4,6 +4,8 @@
 //                         diretamente — sem round-trip HTTP, pois o usuário
 //                         ainda não tem uma sessão/JWT nesse ponto do fluxo)
 //
+// Também serve ao Alber Food (food-company-create): o dono é uma conta do Food, sem usuário no Alber (ver FoodCompanyOwner).
+//
 // Espelha o essencial de auth-register (spec 04_api_asaas.md §4.1) para a
 // subconta PJ, mas sem a máquina de `pending_registrations`: a recuperação de
 // falha parcial aqui se apoia só em "se a Asaas já tem esse CNPJ, reusa a
@@ -18,6 +20,7 @@ import { encryptSubaccountKey } from './subaccount-key.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from './asaas.ts'
 import { logError } from './error-log.ts'
 import { evaluateOwnerCpf, fetchCnpjRegistry, reviewFor, verifyOwnerCpfHash, type CnpjRegistry, type OwnerLinkCheck } from './owner-link.ts'
+import { normalizeCpf, validateCpf } from './cpf.ts'
 import { decideTakeover, TAKEOVER_NOTICE, type ContestedCompany, type Takeover } from './cnpj-dispute.ts'
 import { sendPush } from './push.ts'
 
@@ -72,6 +75,7 @@ export type CreateCompanyOutcome =
   | {
       ok: true
       company_id: string
+      handle: string
       account_status: string
       kyc_status: string
       onboarding_url: string | null
@@ -95,17 +99,41 @@ export function plusAliasEmail(email: string, cnpj: string): string {
   return `${local.split('+')[0]}+${cnpj.toLowerCase()}@${domain}`
 }
 
+/**
+ * Dono vindo do Alber Food: não existe em `users`. O Alber guarda só `companies.owner_ref` (id opaco da conta no Alber Food). O CPF vem do
+ * cadastro da conta no Food (nunca de um campo digitado), então não há prova de hash contra `users`: ele só é validado e comparado com o
+ * quadro societário. O CPF não é guardado.
+ */
+export interface FoodCompanyOwner {
+  kind: 'food'
+  ref: string
+  cpf: string
+  phone: string
+}
+
+interface OwnerRow {
+  phone?: string | null
+  cpf?: string | null
+  account_status?: string | null
+  kyc_status?: string | null
+}
+
 export interface CreateCompanyDeps {
   /** Consulta ao quadro societário do CNPJ (injetável nos testes). */
   registry?: (cnpj: string) => Promise<CnpjRegistry | null>
+  /** Espera antes de buscar o link de documentos no Asaas (padrão: setTimeout; os testes passam uma função vazia). */
+  sleep?: (ms: number) => Promise<void>
 }
 
+/** `owner`: id do usuário (chamadas do app, comportamento de sempre) ou o dono vindo do Alber Food. */
 export async function createCompanyForOwner(
   supabaseAdmin: SupabaseClient,
-  ownerId: string,
+  owner: string | FoodCompanyOwner,
   input: CreateCompanyInput,
   deps: CreateCompanyDeps = {},
 ): Promise<CreateCompanyOutcome> {
+  const food = typeof owner === 'string' ? null : owner
+  const ownerId = typeof owner === 'string' ? owner : null
   if (
     !input?.cnpj || !input.company_name?.trim() || !input.company_type ||
     input.income_value == null || !input.address?.street || !input.address?.number ||
@@ -143,7 +171,7 @@ export async function createCompanyForOwner(
     supabaseAdmin.from('users').select('id').eq('handle', handleNorm).maybeSingle(),
     supabaseAdmin.from('companies').select('id').eq('handle', handleNorm).is('deleted_at', null).maybeSingle(),
   ])
-  if (handleUser || handleCompany || (await isReservedByOther(supabaseAdmin, handleNorm))) {
+  if (handleUser || handleCompany || (await isReservedByOther(supabaseAdmin, handleNorm, food?.ref ?? null))) {
     return { ok: false, code: 'COMPANY_HANDLE_TAKEN', message: '@handle da empresa já está em uso', status: 409 }
   }
 
@@ -155,22 +183,30 @@ export async function createCompanyForOwner(
   const cnpjHash   = await sha256hex(cnpjClean)
   const cnpjMasked = maskCnpjForDisplay(cnpjClean)
 
-  const { data: owner } = await supabaseAdmin
-    .from('users')
-    .select('id, email, phone, cpf, account_status, kyc_status')
-    .eq('id', ownerId)
-    .maybeSingle()
+  // Dono do app: lido de `users`. Dono do Alber Food: sem usuário no Alber; o CPF (do cadastro da conta no Food) é validado aqui.
+  let ownerRow: OwnerRow | null = null
+  let foodCpf = ''
+  if (food) {
+    foodCpf = normalizeCpf(food.cpf ?? '')
+    if (!validateCpf(foodCpf)) return { ok: false, code: 'CPF_INVALID', message: 'CPF inválido', status: 422 }
+  } else {
+    const { data: owner } = await supabaseAdmin
+      .from('users')
+      .select('id, email, phone, cpf, account_status, kyc_status')
+      .eq('id', ownerId)
+      .maybeSingle()
 
-  if (!owner) return { ok: false, code: 'USER_NOT_FOUND', message: 'Usuário não encontrado', status: 404 }
+    if (!owner) return { ok: false, code: 'USER_NOT_FOUND', message: 'Usuário não encontrado', status: 404 }
+    ownerRow = owner as OwnerRow
 
-  // Estado da conta do dono (plano de conferência CNPJ x administrador, fase 3): conta bloqueada ou com a verificação pessoal recusada não
-  // abre empresa. Quem acaba de se cadastrar (auth-register) está "pending"/"evaluation", então não é afetado.
-  const ownerState = owner as { account_status?: string | null; kyc_status?: string | null }
-  if (ownerState.account_status === 'blocked') {
-    return { ok: false, code: 'OWNER_ACCOUNT_BLOCKED', message: 'Sua conta está bloqueada e não pode abrir uma empresa. Fale com o suporte.', status: 403 }
-  }
-  if (ownerState.kyc_status === 'rejected') {
-    return { ok: false, code: 'PERSONAL_KYC_REJECTED', message: 'A verificação da sua conta pessoal foi recusada e não é possível abrir uma empresa. Fale com o suporte.', status: 403 }
+    // Estado da conta do dono (plano de conferência CNPJ x administrador, fase 3): conta bloqueada ou com a verificação pessoal recusada não
+    // abre empresa. Quem acaba de se cadastrar (auth-register) está "pending"/"evaluation", então não é afetado.
+    if (ownerRow?.account_status === 'blocked') {
+      return { ok: false, code: 'OWNER_ACCOUNT_BLOCKED', message: 'Sua conta está bloqueada e não pode abrir uma empresa. Fale com o suporte.', status: 403 }
+    }
+    if (ownerRow?.kyc_status === 'rejected') {
+      return { ok: false, code: 'PERSONAL_KYC_REJECTED', message: 'A verificação da sua conta pessoal foi recusada e não é possível abrir uma empresa. Fale com o suporte.', status: 403 }
+    }
   }
 
   // Empresas com deleted_at (rejeitada pelo Asaas ou abandonada pelo próprio
@@ -181,7 +217,7 @@ export async function createCompanyForOwner(
   // andamento por outra pessoa.
   const { data: existingCnpj } = await supabaseAdmin
     .from('companies')
-    .select('id, owner_id, kyc_status, created_at, owner_link_check, kyc_evidence, asaas_account_id')
+    .select(food ? 'id, owner_id, owner_ref, kyc_status, created_at, owner_link_check, kyc_evidence, asaas_account_id' : 'id, owner_id, kyc_status, created_at, owner_link_check, kyc_evidence, asaas_account_id')
     .eq('cnpj', cnpjHash).is('deleted_at', null).maybeSingle()
   // Só a empresa PENDENTE pode perder o CNPJ numa disputa (fase 5: vencimento e prioridade ao vínculo verificado, _shared/cnpj-dispute.ts).
   // A decisão sai depois da conferência do vínculo de quem está abrindo; aprovada ou em análise segue como "CNPJ já cadastrado".
@@ -194,8 +230,13 @@ export async function createCompanyForOwner(
   // Com o CPF digitado: tem de ser o da conta (hash) e é comparado com o quadro societário. Sem ele: "não conferida" -> revisão.
   let linkCheck: OwnerLinkCheck | 'unchecked' = 'unchecked'
   let linkQualification: string | null = null
-  if (input.owner_cpf != null) {
-    const proof = await verifyOwnerCpfHash(input.owner_cpf, (owner as { cpf?: string | null }).cpf)
+  if (food) {
+    // Alber Food: o CPF é o do cadastro da conta (já validado acima), então não há prova por hash; só a comparação com o quadro societário.
+    const verdict = evaluateOwnerCpf(foodCpf, await (deps.registry ?? fetchCnpjRegistry)(cnpjClean))
+    linkCheck = verdict.check
+    linkQualification = verdict.qualification
+  } else if (input.owner_cpf != null) {
+    const proof = await verifyOwnerCpfHash(input.owner_cpf, ownerRow?.cpf)
     if (!proof.ok) {
       return proof.code === 'CPF_INVALID'
         ? { ok: false, code: 'CPF_INVALID', message: 'CPF inválido', status: 422 }
@@ -210,7 +251,7 @@ export async function createCompanyForOwner(
   // ── Disputa do CNPJ com uma empresa pendente ─────────────────────────────────────────────────────────────────────────────────
   let takeover: Takeover | null = null
   if (contested) {
-    takeover = decideTakeover(contested, ownerId, linkCheck, new Date())
+    takeover = decideTakeover(contested, food ? { ownerRef: food.ref } : { userId: ownerId }, linkCheck, new Date())
     if (!takeover) {
       return { ok: false, code: 'CNPJ_UNDER_REVIEW', message: 'Este CNPJ já está em processo de verificação por outra conta.', status: 409 }
     }
@@ -230,10 +271,11 @@ export async function createCompanyForOwner(
       await supabaseAdmin.from('audit_logs').insert({
         user_id: contested.owner_id,
         event_type: takeover === 'expired' ? 'company_expired' : 'company_superseded',
-        metadata: { company_id: contested.id, claimant_id: ownerId, asaas_account_id: contested.asaas_account_id ?? null },
+        metadata: { company_id: contested.id, claimant_id: ownerId, claimant_ref: food?.ref ?? null, asaas_account_id: contested.asaas_account_id ?? null },
       })
     } catch { /* não crítico */ }
-    await sendPush(contested.owner_id, TAKEOVER_NOTICE[takeover].title, TAKEOVER_NOTICE[takeover].body, {}, 'other', 'conta_kyc')
+    // Empresa contestada aberta pelo Alber Food não tem usuário no app para avisar (o Food lê o estado em food-company-status).
+    if (contested.owner_id) await sendPush(contested.owner_id, TAKEOVER_NOTICE[takeover].title, TAKEOVER_NOTICE[takeover].body, {}, 'other', 'conta_kyc')
   }
 
   const encSecret     = Deno.env.get('ASAAS_API_KEY')!
@@ -241,7 +283,7 @@ export async function createCompanyForOwner(
   const supabaseUrl    = Deno.env.get('SUPABASE_URL')!
   const webhookUrl     = `${supabaseUrl}/functions/v1/webhooks-asaas-kyc`
   const pixWebhookUrl  = `${supabaseUrl}/functions/v1/webhooks-asaas-pix`
-  const ownerPhone     = (owner.phone ?? '').replace(/\D/g, '')
+  const ownerPhone     = ((food ? food.phone : ownerRow?.phone) ?? '').replace(/\D/g, '')
 
   // A Asaas exige e-mail único por subconta dentro da mesma conta pai — usar o
   // e-mail pessoal do dono aqui colide com a subconta pessoal dele (sempre:
@@ -373,7 +415,7 @@ export async function createCompanyForOwner(
   let onboardingUrl: string | null = null
   if (asaasAccount.apiKey) {
     try {
-      await new Promise<void>(resolve => setTimeout(resolve, 15_000))
+      await (deps.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))))(15_000)
       const asaasBase = Deno.env.get('ASAAS_ENVIRONMENT') === 'production'
         ? 'https://api.asaas.com/api/v3'
         : 'https://sandbox.asaas.com/api/v3'
@@ -393,6 +435,8 @@ export async function createCompanyForOwner(
     .from('companies')
     .insert({
       owner_id:          ownerId,
+      // Empresa do Alber Food: sem owner_id; owner_ref/origin só são enviados aqui (o caminho do app não depende da migration 058).
+      ...(food ? { owner_ref: food.ref, origin: 'food' } : {}),
       asaas_account_id:  asaasAccount.id,
       asaas_wallet_id:   asaasAccount.walletId,
       asaas_api_key_enc: asaasApiKeyEnc,
@@ -428,6 +472,7 @@ export async function createCompanyForOwner(
   if (insertErr || !company) {
     await logError(supabaseAdmin, 'company-create', insertErr ?? new Error('companies_insert_failed'), {
       owner_id: ownerId,
+      owner_ref: food?.ref ?? null,
     }, {
       asaas_account_id: asaasAccount.id,
     })
@@ -437,6 +482,7 @@ export async function createCompanyForOwner(
   return {
     ok:             true,
     company_id:     company.id,
+    handle:         handleNorm,
     account_status: 'evaluation',
     kyc_status:     'pending',
     onboarding_url: onboardingUrl,

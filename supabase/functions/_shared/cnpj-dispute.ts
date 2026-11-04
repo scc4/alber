@@ -15,7 +15,9 @@ const DAY_MS = 86_400_000
 
 export interface ContestedCompany {
   id: string
-  owner_id: string
+  /** Dono no app (users). Nulo em empresa aberta pelo Alber Food, que guarda só owner_ref. */
+  owner_id: string | null
+  owner_ref?: string | null
   kyc_status: string
   created_at: string
   owner_link_check: string
@@ -24,6 +26,18 @@ export interface ContestedCompany {
 }
 
 export type Takeover = 'expired' | 'superseded'
+
+/** Quem está abrindo a empresa: um usuário do app (`userId`) ou uma conta do Alber Food (`ownerRef`). Uma string vale como userId. */
+export interface Claimant {
+  userId?: string | null
+  ownerRef?: string | null
+}
+
+/** O pretendente é o mesmo dono da empresa contestada? (por usuário do app ou por owner_ref do Alber Food) */
+function isSameOwner(contested: ContestedCompany, claimant: Claimant): boolean {
+  return (claimant.userId != null && contested.owner_id === claimant.userId) ||
+    (claimant.ownerRef != null && contested.owner_ref != null && contested.owner_ref === claimant.ownerRef)
+}
 
 /** Algum grupo de documentos já foi enviado (em análise ou aprovado): o dono de verdade já está em andamento. */
 export function hasDocumentProgress(evidence: ContestedCompany['kyc_evidence']): boolean {
@@ -34,14 +48,15 @@ export function hasDocumentProgress(evidence: ContestedCompany['kyc_evidence']):
  * Decide se uma empresa pendente que segura o CNPJ perde o CNPJ para quem está abrindo agora.
  * Devolve o motivo ('expired' | 'superseded') ou null (continua segurando: o novo recebe CNPJ_UNDER_REVIEW).
  */
-export function decideTakeover(contested: ContestedCompany, claimantId: string, claimantCheck: string, now: Date): Takeover | null {
+export function decideTakeover(contested: ContestedCompany, claimant: string | Claimant, claimantCheck: string, now: Date): Takeover | null {
   if (contested.kyc_status !== 'pending') return null
   if (hasDocumentProgress(contested.kyc_evidence)) return null
 
   const ageMs = now.getTime() - new Date(contested.created_at).getTime()
   if (ageMs > PENDING_EXPIRY_DAYS * DAY_MS) return 'expired'
 
-  if (contested.owner_id !== claimantId && claimantCheck === 'match' && (contested.owner_link_check === 'mismatch' || contested.owner_link_check === 'unchecked')) {
+  const who: Claimant = typeof claimant === 'string' ? { userId: claimant } : claimant
+  if (!isSameOwner(contested, who) && claimantCheck === 'match' && (contested.owner_link_check === 'mismatch' || contested.owner_link_check === 'unchecked')) {
     return 'superseded'
   }
   return null

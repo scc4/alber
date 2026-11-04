@@ -100,11 +100,10 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   if (!company) return json({ kind: 'not_company' })
 
-  const { data: master } = await supabaseAdmin
-    .from('users')
-    .select('id, name')
-    .eq('id', company.owner_id)
-    .maybeSingle()
+  // Empresa do Alber Food não tem dono em users (owner_id nulo): sem master para listar.
+  const { data: master } = company.owner_id
+    ? await supabaseAdmin.from('users').select('id, name').eq('id', company.owner_id).maybeSingle()
+    : { data: null }
 
   const { data: operatorRows } = await supabaseAdmin
     .from('company_operators')

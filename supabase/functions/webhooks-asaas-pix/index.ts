@@ -95,7 +95,8 @@ export async function handleRequest(req: Request): Promise<Response> {
       metadata:   { transaction_id: tx.id, asaas_transfer_id: transfer.id, value: transfer.value },
     })
 
-    await sendPush(
+    // Saque feito pelo Alber Food (food-company-withdraw) não tem usuário do app (user_id nulo, actor_ref): sem push.
+    if (tx.user_id) await sendPush(
       tx.user_id,
       newStatus === 'completed' ? 'Pix enviado com sucesso!' : 'Falha no envio do Pix',
       newStatus === 'completed'

@@ -49,3 +49,19 @@ Deno.test('o próprio dono com pendência recente não "assume" a si mesmo; empr
     assertEquals(decideTakeover(co({ kyc_status: kyc, created_at: daysAgo(60) }), 'dono', 'match', NOW), null, kyc)
   }
 })
+
+// ── Pretendente do Alber Food (owner_ref, sem usuário) ───────────────────────
+
+Deno.test('Alber Food: o mesmo owner_ref não assume a si mesmo; outro owner_ref com vínculo verificado assume; empresa do app não tem owner_ref', () => {
+  const food = co({ owner_id: null, owner_ref: 'conta-a', owner_link_check: 'mismatch' })
+  assertEquals(decideTakeover(food, { ownerRef: 'conta-a' }, 'match', NOW), null)
+  assertEquals(decideTakeover(food, { ownerRef: 'conta-b' }, 'match', NOW), 'superseded')
+  assertEquals(decideTakeover(food, { ownerRef: 'conta-b' }, 'mismatch', NOW), null)
+  // pretendente é usuário do app e a pendente é do Food (ou o inverso): donos diferentes
+  assertEquals(decideTakeover(food, { userId: 'dono' }, 'match', NOW), 'superseded')
+  assertEquals(decideTakeover(co({ owner_id: 'dono', owner_link_check: 'mismatch' }), { ownerRef: 'conta-a' }, 'match', NOW), 'superseded')
+  // um userId igual a um owner_ref não confunde os dois mundos
+  assertEquals(decideTakeover(co({ owner_id: null, owner_ref: 'x', owner_link_check: 'mismatch' }), { userId: 'x' }, 'match', NOW), 'superseded')
+  // o vencimento vale para qualquer pretendente
+  assertEquals(decideTakeover(co({ owner_id: null, owner_ref: 'conta-a', created_at: daysAgo(PENDING_EXPIRY_DAYS + 1), owner_link_check: 'match' }), { ownerRef: 'conta-a' }, 'unchecked', NOW), 'expired')
+})

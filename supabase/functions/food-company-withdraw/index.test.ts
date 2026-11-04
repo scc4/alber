@@ -363,6 +363,22 @@ Deno.test('dois saques diferentes ao mesmo tempo que juntos estourariam o limite
   assert(live.reduce((s, t) => s + Number(t.amount), 0) <= 1500)
 })
 
+Deno.test('repetir um saque já concluído devolve o resultado original mesmo que a empresa tenha sido bloqueada depois (idempotência vale mais que o estado atual)', async () => {
+  const w = await makeWorld()
+  const s = await withdrawOp(150_000)
+  const first = await call(w, handleRequest, body(150_000, { op: s.op }), { signature: s.signature })
+  assertEquals(first.status, 200)
+  w.db.rows('companies')[0]!.account_status = 'blocked'
+  const again = await call(w, handleRequest, body(150_000, { op: s.op }), { signature: s.signature })
+  assertEquals([again.status, again.data], [200, first.data])
+  assertEquals(transfers(w).length, 1)
+  // uma operação NOVA na empresa bloqueada é recusada
+  const fresh = await withdrawOp(150_000)
+  const refused = await call(w, handleRequest, body(150_000, { op: fresh.op }), { signature: fresh.signature })
+  assertEquals([refused.status, refused.data.code], [409, 'COMPANY_NOT_APPROVED'])
+  assertEquals(transfers(w).length, 1)
+})
+
 // ── Falhas do Asaas ──────────────────────────────────────────────────────────
 
 Deno.test('Asaas recusa o Pix: 503, lançamento failed, e a repetição devolve o erro sem tentar de novo', async () => {

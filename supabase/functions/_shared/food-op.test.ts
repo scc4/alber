@@ -66,6 +66,28 @@ Deno.test('a assinatura independe da ordem das chaves do objeto enviado', async 
   assertEquals(reason(await verifyFoodOp(headersWith(await signFoodOp(op, SECRET)), shuffled, await expectWithdraw(), NOW, SECRET)), 'OK')
 })
 
+// Vetor de teste publicado em specs/06_modules/food_company_service.md §3.3: quem implementa o assinador do lado do Alber Food confere com ele.
+Deno.test('vetor de teste do contrato: JSON canônico e assinatura conhecidos (segredo em hexadecimal e em base64 dão a mesma assinatura)', async () => {
+  const secretHex = '000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f'
+  const secretB64 = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8='
+  const company = '11111111-1111-4111-8111-111111111111'
+  assertEquals(await destinationDigest(company, '11222333000181'), '00741111dadb7014c4a789aa8ee428fb274debb4e0dd3354e5ec06ac40351226')
+  const op = {
+    kind: 'withdraw', company_id: company, owner_ref: '22222222-2222-4222-8222-222222222222', amount_cents: 150000,
+    destination_digest: '00741111dadb7014c4a789aa8ee428fb274debb4e0dd3354e5ec06ac40351226', nonce: 'Zm9vZC1vcC1ub25jZS0wMDAx',
+    issued_at: '2026-11-10T12:00:00.000Z', expires_at: '2026-11-10T12:01:30.000Z', idempotency_key: 'chal_7f3a9c1e-0b52-4c1d-9d11-aa01',
+  }
+  assertEquals(
+    canonicalJson(op),
+    '{"amount_cents":150000,"company_id":"11111111-1111-4111-8111-111111111111","destination_digest":"00741111dadb7014c4a789aa8ee428fb274debb4e0dd3354e5ec06ac40351226","expires_at":"2026-11-10T12:01:30.000Z","idempotency_key":"chal_7f3a9c1e-0b52-4c1d-9d11-aa01","issued_at":"2026-11-10T12:00:00.000Z","kind":"withdraw","nonce":"Zm9vZC1vcC1ub25jZS0wMDAx","owner_ref":"22222222-2222-4222-8222-222222222222"}',
+  )
+  const expected = 'v1=6e0f446afeb74f118f186759351d1f4a9c75b28bdfebd2d2198bde14a7015a18'
+  assertEquals(await signFoodOp(op, secretHex), expected)
+  assertEquals(await signFoodOp(op, secretB64), expected)
+  const verdict = await verifyFoodOp(headersWith(expected), op, { kind: 'withdraw', companyId: company, ownerRef: op.owner_ref, amountCents: 150000, destinationDigest: op.destination_digest }, new Date('2026-11-10T12:00:30.000Z'), secretB64)
+  assertEquals(verdict.ok, true)
+})
+
 // ── Caminho feliz dos três tipos ─────────────────────────────────────────────
 
 Deno.test('saque, chave Pix (com e sem chave no corpo) e troca de titular: autorização válida passa', async () => {

@@ -200,7 +200,29 @@ Entrada: `{ company_id, owner_ref }` (sem autorização assinada: não move dinh
 
 ### 4.9 `food-company-withdraw-status`
 
-Entrada: `{ company_id, owner_ref, transaction_ids: string[] }` (1 a 20 UUIDs; repetidos viram um; fora disso `422 INVALID_TRANSACTION_IDS`). Saída `200`: `{ items: [{ transaction_id, status: 'processing'|'completed'|'failed', amount_cents, destination_masked, created_at, completed_at|null, failure_code|null }] }`.
+Entrada: `{ company_id, owner_ref, transaction_ids?: string[], idempotency_keys?: string[] }` (ao menos um; no total, de 1 a 20; ids em UUID e chaves de 8 a 64 caracteres imprimíveis; repetidos viram um; fora disso `422 INVALID_TRANSACTION_IDS` / `INVALID_IDEMPOTENCY_KEYS`). Saída `200`: `{ items: [{ transaction_id|null, idempotency_key|null, status: 'processing'|'completed'|'failed', amount_cents, destination_masked|null, created_at, completed_at|null, failure_code|null }] }`.
+
+**Consulta pela chave de idempotência (04/11/2026, lacuna "resposta perdida").** O Food chama o saque com `idempotency_key` = id do desafio da etapa extra. Se a resposta se perde (rede, tempo esgotado), ele não conhece o `transaction_id`; pergunta pela chave. Como o lançamento nasce **antes** do Pix, com a chave nos metadados:
+
+| Situação da chave | Item devolvido |
+|---|---|
+| Há lançamento com a chave (saque do Food desta empresa) | o item de sempre, com `transaction_id` e `idempotency_key` |
+| Sem lançamento, operação `in_progress` | `status: 'processing'`, `transaction_id: null`: o Alber ainda não terminou, o desfecho segue **desconhecido** e a equipe reconcilia pelo Admin (§4.10) |
+| Sem lançamento, operação `failed` | `status: 'failed'`, `failure_code` = código da recusa guardada (ex.: `INSUFFICIENT_BALANCE`, `OPERATION_ABANDONED`; texto livre vira `OPERATION_FAILED`) |
+| Chave desconhecida | o item **não aparece**: a chamada nunca chegou, e repetir o saque com a mesma chave é seguro |
+
+O pedido por `transaction_ids` continua igual; o mesmo lançamento pedido por id e por chave vem uma vez só.
+
+### 4.10 Encerrar operação presa (`public.admin_resolve_food_op`, migration 059)
+
+Não é rota HTTP: é função SQL `SECURITY DEFINER` que só o Alber Admin (`admin_app`) executa, depois de a equipe **conferir o Asaas** (o Admin nunca move dinheiro). Resolve o saque cujo desfecho ficou desconhecido: o Pix pode ter saído ou não, a operação fica `in_progress` e repetir dá `OPERATION_IN_PROGRESS` para sempre. Assinatura: `(p_op_id uuid, p_outcome text, p_by text, p_transfer_id text DEFAULT NULL) -> { previous, new, transaction_id }`.
+
+| Desfecho | Quando | Efeito |
+|---|---|---|
+| `not_sent` | A equipe conferiu: **não há** transferência no Asaas (a referência externa é o id do lançamento). Vale para qualquer tipo de operação | Lançamento pendente sem id de transferência vai a `failed` (sai da soma do limite do dia); operação vira `failed` com resultado `OPERATION_ABANDONED` (409). O Food, ao repetir ou consultar, recebe essa recusa e pode fazer um **pedido novo** |
+| `sent` | A equipe conferiu: **há** transferência no Asaas e informou o id dela. Só saque, com lançamento pendente ainda sem id | Liga o id ao lançamento e o leva a `processing` (o webhook `TRANSFER_DONE`/`FAILED` conclui); operação vira `completed` com o desfecho original (`transaction_id`, `processing`, valor, destino mascarado) |
+
+Travas: só operação `in_progress` **há mais de 10 minutos** (`CONTAIN_TOO_RECENT`: uma chamada ainda viva não é fechada por baixo); lançamento que já tem id de transferência nunca é dado como não enviado (`CONTAIN_INVALID_TRANSITION`); id de transferência inválido, desfecho desconhecido ou responsável em branco (`CONTAIN_ARGS_INVALID`/`CONTAIN_ACTION_INVALID`); operação inexistente (`CONTAIN_NOT_FOUND`). Cada uso grava `audit_logs` `food_op_resolved` (op, tipo, empresa, desfecho, lançamento, quem; nunca valor, chave Pix nem documento). Verificada em PGlite sobre as 59 migrations reais (incl. privilégios: `anon`, `authenticated` e `service_role` não executam). Caso fora do alcance: lançamento pendente **sem** id de transferência em que o Pix de fato saiu e a equipe usa `sent` com o id achado no Asaas; se nem isso for possível, é conciliação manual no banco.
 
 - Somente leitura, **sem autorização assinada**. Acompanha os saques de `food-company-withdraw` (decisão de 04/11/2026).
 - Só devolve lançamentos de **saque desta empresa** (`type = 'descarregar'` com `metadata.via = 'food'`): ids de outra empresa, de outro tipo ou inexistentes simplesmente **não aparecem** (nunca 403 que revele existência). Empresa de outro dono, inexistente, removida ou do app: `404 COMPANY_NOT_FOUND` (como `food-company-abandon`). Os itens vêm na ordem pedida.
@@ -294,7 +316,7 @@ Pré-requisito do plano: backup completo e autorização explícita do usuário 
 
 1. **Segredos do Alber** (`supabase secrets set`, pelo usuário, sem colar em chat): `FOOD_OP_SIGNING_KEY` (32 bytes, **o mesmo valor** do Food); conferir que existem `ALBER_FOOD_SERVICE_KEY`, `ENCRYPTION_KEY`, `ASAAS_API_KEY` (+ `ALBER_KEYS_ENCRYPTION_KEY`, ver `05_security.md` §7.1), `ASAAS_WEBHOOK_SECRET`, `ASAAS_ENVIRONMENT`.
 2. **Zerar os dados de teste** (plano §5), com a limpeza das subcontas de teste no Asaas antes, se for o caso.
-3. **Migration 058** (`--dry-run` primeiro). Funções antigas continuam funcionando antes e depois (o caminho do app não envia as colunas novas).
+3. **Migrations 058 e 059** (`--dry-run` primeiro; a 059 depende da 058: `admin_resolve_food_op` usa `food_ops`). Funções antigas continuam funcionando antes e depois (o caminho do app não envia as colunas novas).
 4. **Funções, nesta ordem:** `webhooks-asaas-pix` e `webhooks-asaas-kyc` (tolerância a nulo; seguem `--no-verify-jwt`), `auth-company-lookup`, `company-limit-request`, `company-create`, `auth-register`, `company-abandon`; depois as 10 novas (`food-company-create`, `-status`, `-balance`, `-set-pix-key`, `-withdraw`, `-limit-request`, `-limit-cancel`, `-owner-transfer`, `-abandon`, `-withdraw-status`) **sem** `--no-verify-jwt`. As funções de `_shared` são empacotadas com cada função: publicar todas as que importam `company.ts`, `company-kyc.ts`, `cnpj-dispute.ts`, `limit-request.ts` e `company-abandon.ts`.
 5. **Alber Food** (migrations e `food-api`, depois o site) e **Alber Admin** (views e funções), conforme o plano.
 6. **Fumaça** com CNPJs novos (sandbox): abrir empresa, status, chave Pix, saque de R$ 10, extrato, pedido de limite; conferir `food_ops` e `transactions`.

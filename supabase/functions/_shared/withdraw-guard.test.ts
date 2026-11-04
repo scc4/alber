@@ -1,6 +1,6 @@
 // Roda com: deno test supabase/functions/_shared/withdraw-guard.test.ts --allow-env --allow-net
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
-import { checkCompanyWithdrawal, evaluateWithdrawal, WITHDRAW_RULES, type WithdrawFacts } from './withdraw-guard.ts'
+import { checkCompanyWithdrawal, effectiveLimits, evaluateWithdrawal, LIMIT_REQUEST_CAPS, WITHDRAW_RULES, type WithdrawFacts } from './withdraw-guard.ts'
 
 const NOW = new Date('2026-11-10T12:00:00Z')
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString()
@@ -108,4 +108,51 @@ Deno.test('empresa que não existe ou erro de leitura: recusa (503), nunca liber
     const v = await checkCompanyWithdrawal(db, 'c1', 10, NOW)
     assertEquals(v.ok === false && [v.code, v.status], ['WITHDRAW_CHECK_FAILED', 503])
   }
+})
+
+// ── Aumento de limite aprovado pela equipe (decisão de 04/11/2026) ───────────────────────────────────────────────────────────────
+Deno.test('limite aprovado substitui os dois limites padrão, de empresa nova ou madura', () => {
+  for (const kycApprovedAt of [ago(5 * D), ago(90 * D), null]) {
+    const aprovado = { kycApprovedAt, overridePerTxBrl: 8000, overridePerDayBrl: 30000 }
+    assertEquals(code(facts({ ...aprovado, amountBrl: 8000 })), 'OK')
+    assertEquals(code(facts({ ...aprovado, amountBrl: 8001 })), 'WITHDRAW_LIMIT_PER_TX')
+    assertEquals(code(facts({ ...aprovado, amountBrl: 8000, sumLast24hBrl: 22000 })), 'OK')
+    assertEquals(code(facts({ ...aprovado, amountBrl: 8000, sumLast24hBrl: 22001 })), 'WITHDRAW_LIMIT_DAILY')
+  }
+})
+
+Deno.test('o aumento mexe só nos valores: vínculo em revisão e chave Pix recente continuam barrando', () => {
+  const aprovado = { overridePerTxBrl: 50000, overridePerDayBrl: 200000, amountBrl: 100 }
+  assertEquals(code(facts({ ...aprovado, ownerLinkReview: 'pending' })), 'OWNER_LINK_PENDING')
+  assertEquals(code(facts({ ...aprovado, ownerLinkReview: 'rejected' })), 'OWNER_LINK_REJECTED')
+  assertEquals(code(facts({ ...aprovado, pixKeyChangedAt: ago(H) })), 'PIX_KEY_RECENTLY_CHANGED')
+})
+
+Deno.test('limites efetivos: padrão por idade ou aprovado; aprovado incompleto ou incoerente é ignorado', () => {
+  const base = { kycApprovedAt: ago(5 * D), now: NOW }
+  assertEquals(effectiveLimits({ ...base }), { perTxBrl: 1000, perDayBrl: 2000, source: 'default', isNew: true })
+  assertEquals(effectiveLimits({ kycApprovedAt: ago(40 * D), now: NOW }), { perTxBrl: 5000, perDayBrl: 20000, source: 'default', isNew: false })
+  assertEquals(effectiveLimits({ ...base, overridePerTxBrl: 4000, overridePerDayBrl: 9000 }), { perTxBrl: 4000, perDayBrl: 9000, source: 'approved', isNew: true })
+  assertEquals(effectiveLimits({ ...base, overridePerTxBrl: '4000' as unknown as number, overridePerDayBrl: '9000' as unknown as number }).source, 'approved') // numeric chega como texto
+  for (const bad of [{ overridePerTxBrl: 4000, overridePerDayBrl: null }, { overridePerTxBrl: null, overridePerDayBrl: 9000 }, { overridePerTxBrl: 9000, overridePerDayBrl: 4000 }, { overridePerTxBrl: 0, overridePerDayBrl: 10 }, { overridePerTxBrl: -5, overridePerDayBrl: 10 }]) {
+    assertEquals(effectiveLimits({ ...base, ...bad }).source, 'default', JSON.stringify(bad))
+  }
+  assertEquals([LIMIT_REQUEST_CAPS.perTxBrl, LIMIT_REQUEST_CAPS.perDayBrl], [500000, 2000000])
+})
+
+Deno.test('a mensagem de limite excedido manda pedir aumento, não o suporte', () => {
+  const v = evaluateWithdrawal(facts({ kycApprovedAt: ago(5 * D), amountBrl: 1500 }))
+  assertEquals(v.ok === false && v.message.includes('peça um aumento do limite'), true)
+  assertEquals(v.ok === false && v.message.includes('nos primeiros 30 dias'), true)
+  const aprovado = evaluateWithdrawal(facts({ overridePerTxBrl: 2000, overridePerDayBrl: 4000, amountBrl: 2500 }))
+  assertEquals(aprovado.ok === false && aprovado.message.includes('nos primeiros 30 dias'), false) // limite aprovado não é o de empresa nova
+})
+
+Deno.test('lê os limites aprovados do banco (numeric pode vir como texto) e os aplica', async () => {
+  const aprovada = { ...company, withdraw_limit_per_tx_brl: '9000.00', withdraw_limit_per_day_brl: '40000.00' }
+  assertEquals((await checkCompanyWithdrawal(fakeDb({ company: aprovada, tx: [{ amount: 30000 }] }), 'c1', 9000, NOW)).ok, true)
+  const acima = await checkCompanyWithdrawal(fakeDb({ company: aprovada }), 'c1', 9001, NOW)
+  assertEquals(acima.ok === false && acima.code, 'WITHDRAW_LIMIT_PER_TX')
+  const diario = await checkCompanyWithdrawal(fakeDb({ company: aprovada, tx: [{ amount: 35000 }] }), 'c1', 6000, NOW)
+  assertEquals(diario.ok === false && diario.code, 'WITHDRAW_LIMIT_DAILY')
 })

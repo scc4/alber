@@ -6,6 +6,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { pollCompanyKyc } from '../_shared/company-kyc.ts'
+import { effectiveLimits } from '../_shared/withdraw-guard.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -54,16 +55,50 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   const { data: ownedCompanies } = await supabaseAdmin
     .from('companies')
-    .select('id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked, pix_key_type, owner_link_check, owner_link_review')
+    .select('id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked, pix_key_type, owner_link_check, owner_link_review, kyc_approved_at, withdraw_limit_per_tx_brl, withdraw_limit_per_day_brl')
     .eq('owner_id', user.id)
 
   // ── Empresas onde é operador ativo ────────────────────────────────────────────
 
   const { data: operatorRows } = await supabaseAdmin
     .from('company_operators')
-    .select('permissions, companies:company_id (id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked, pix_key_type, owner_link_check, owner_link_review)')
+    .select('permissions, companies:company_id (id, handle, company_name, trading_name, account_status, kyc_status, onboarding_url, cnpj_masked, pix_key_type, owner_link_check, owner_link_review, kyc_approved_at, withdraw_limit_per_tx_brl, withdraw_limit_per_day_brl)')
     .eq('user_id', user.id)
     .eq('status', 'active')
+
+  // Limites de saque que valem agora (padrão pela idade da empresa ou o aprovado pela equipe) e o último pedido de aumento do master.
+  const limitsOf = (c: { kyc_approved_at: string | null; withdraw_limit_per_tx_brl: number | string | null; withdraw_limit_per_day_brl: number | string | null }) => {
+    const l = effectiveLimits({
+      kycApprovedAt: c.kyc_approved_at ?? null,
+      overridePerTxBrl: c.withdraw_limit_per_tx_brl == null ? null : Number(c.withdraw_limit_per_tx_brl),
+      overridePerDayBrl: c.withdraw_limit_per_day_brl == null ? null : Number(c.withdraw_limit_per_day_brl),
+      now: new Date(),
+    })
+    return { per_tx_brl: l.perTxBrl, per_day_brl: l.perDayBrl, source: l.source }
+  }
+  const ownedIds = (ownedCompanies ?? []).map((c) => c.id as string)
+  const lastRequest = new Map<string, Record<string, unknown>>()
+  if (ownedIds.length > 0) {
+    const { data: reqs } = await supabaseAdmin
+      .from('company_limit_requests')
+      .select('id, company_id, status, requested_per_tx_brl, requested_per_day_brl, approved_per_tx_brl, approved_per_day_brl, created_at, decided_at')
+      .in('company_id', ownedIds)
+      .order('created_at', { ascending: false })
+    for (const r of Array.isArray(reqs) ? reqs : []) {
+      if (!lastRequest.has(r.company_id as string)) {
+        lastRequest.set(r.company_id as string, {
+          id: r.id,
+          status: r.status,
+          requested_per_tx_brl: Number(r.requested_per_tx_brl),
+          requested_per_day_brl: Number(r.requested_per_day_brl),
+          approved_per_tx_brl: r.approved_per_tx_brl == null ? null : Number(r.approved_per_tx_brl),
+          approved_per_day_brl: r.approved_per_day_brl == null ? null : Number(r.approved_per_day_brl),
+          created_at: r.created_at,
+          decided_at: r.decided_at,
+        })
+      }
+    }
+  }
 
   const result = [
     ...(ownedCompanies ?? []).map(c => ({
@@ -78,13 +113,15 @@ export async function handleRequest(req: Request): Promise<Response> {
       pix_key_type:   c.pix_key_type,
       owner_link_check:  c.owner_link_check,
       owner_link_review: c.owner_link_review,
+      withdraw_limits:   limitsOf(c as never),
+      limit_request:     lastRequest.get(c.id as string) ?? null,
       role:           'master' as const,
       permissions:    null,
     })),
     ...(operatorRows ?? [])
       .filter(r => r.companies)
       .map(r => {
-        const c = r.companies as unknown as { id: string; handle: string; company_name: string; trading_name: string | null; account_status: string; kyc_status: string; onboarding_url: string | null; cnpj_masked: string | null; pix_key_type: string | null; owner_link_check: string; owner_link_review: string }
+        const c = r.companies as unknown as { id: string; handle: string; company_name: string; trading_name: string | null; account_status: string; kyc_status: string; onboarding_url: string | null; cnpj_masked: string | null; pix_key_type: string | null; owner_link_check: string; owner_link_review: string; kyc_approved_at: string | null; withdraw_limit_per_tx_brl: number | string | null; withdraw_limit_per_day_brl: number | string | null }
         return {
           id:             c.id,
           handle:         c.handle,
@@ -97,6 +134,8 @@ export async function handleRequest(req: Request): Promise<Response> {
           pix_key_type:   c.pix_key_type,
           owner_link_check:  c.owner_link_check,
           owner_link_review: c.owner_link_review,
+          withdraw_limits:   limitsOf(c),
+          limit_request:     null,
           role:           'operator' as const,
           permissions:    r.permissions,
         }

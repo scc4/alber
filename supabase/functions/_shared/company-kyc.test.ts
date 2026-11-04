@@ -19,7 +19,7 @@ const { handleRequest: companyList } = await import('../company-list/index.ts')
 interface Call { method: string; url: string; body: Record<string, unknown> | null; headers: Record<string, string> }
 const calls: Call[] = []
 
-interface Mock { company?: unknown; general?: string | null; statusFails?: boolean; ownedPending?: unknown[]; docs?: unknown[] }
+interface Mock { company?: unknown; general?: string | null; statusFails?: boolean; ownedPending?: unknown[]; docs?: unknown[]; limitRequests?: unknown[] }
 
 function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
   const orig = globalThis.fetch
@@ -29,6 +29,7 @@ function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
     const method = (init?.method ?? 'GET').toUpperCase()
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null, headers: (init?.headers ?? {}) as Record<string, string> })
     const ok = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } })
+    if (url.includes('/rest/v1/company_limit_requests')) return ok(m.limitRequests ?? [])
     if (url.includes('/myAccount/documents')) return m.docs ? ok({ onboardingUrl: 'https://x', data: m.docs }) : ok({ error: 'x' }, 500)
     if (url.includes('/myAccount/status')) return m.statusFails ? ok({ error: 'x' }, 500) : ok({ id: 'acc', general: m.general ?? 'PENDING', commercialInfo: 'APPROVED' })
     if (url.includes('/pix/addressKeys')) return ok({ key: 'evp-key', type: 'EVP' })
@@ -187,4 +188,33 @@ Deno.test('aprovação e recusa tiram o retrato final; recusa marca o motivo da 
     assertPatchesUseRealColumns()
     if (status === 'rejected') assertEquals(patches().some((b) => b.deleted_reason === 'kyc_rejected' && typeof b.deleted_at === 'string'), true)
   }
+})
+
+// ── Limites de saque e pedido de aumento no company-list ─────────────────────────────────────────────────────────────────────────
+const listCompanies = async (m: Mock) => {
+  const req = new Request('http://localhost/company-list', { method: 'GET', headers: { Authorization: 'Bearer user-jwt' } })
+  const res = await withMock(m, () => companyList(req))
+  assertEquals(res.status, 200)
+  return (await res.json()).companies as Record<string, unknown>[]
+}
+
+Deno.test('company-list devolve os limites que valem (padrão por idade ou aprovado) e o último pedido de aumento do master', async () => {
+  const day = 86_400_000
+  const nova = await listCompanies({ company: await company({ kyc_status: 'approved', kyc_approved_at: new Date(Date.now() - 5 * day).toISOString() }) })
+  assertEquals(nova[0]?.withdraw_limits, { per_tx_brl: 1000, per_day_brl: 2000, source: 'default' })
+  assertEquals(nova[0]?.limit_request, null)
+
+  const madura = await listCompanies({ company: await company({ kyc_status: 'approved', kyc_approved_at: new Date(Date.now() - 90 * day).toISOString() }) })
+  assertEquals(madura[0]?.withdraw_limits, { per_tx_brl: 5000, per_day_brl: 20000, source: 'default' })
+
+  const aprovada = await listCompanies({
+    company: await company({ kyc_status: 'approved', kyc_approved_at: new Date(Date.now() - 90 * day).toISOString(), withdraw_limit_per_tx_brl: '9000.00', withdraw_limit_per_day_brl: '40000.00' }),
+    limitRequests: [
+      { id: 'r2', company_id: 'c1', status: 'approved', requested_per_tx_brl: '9000.00', requested_per_day_brl: '40000.00', approved_per_tx_brl: '9000.00', approved_per_day_brl: '40000.00', created_at: '2026-11-03T10:00:00Z', decided_at: '2026-11-03T12:00:00Z' },
+      { id: 'r1', company_id: 'c1', status: 'rejected', requested_per_tx_brl: '100000.00', requested_per_day_brl: '500000.00', approved_per_tx_brl: null, approved_per_day_brl: null, created_at: '2026-10-01T10:00:00Z', decided_at: '2026-10-02T10:00:00Z' },
+    ],
+  })
+  assertEquals(aprovada[0]?.withdraw_limits, { per_tx_brl: 9000, per_day_brl: 40000, source: 'approved' })
+  // só o mais recente (a lista vem do mais novo para o mais antigo) e com os números como número
+  assertEquals(aprovada[0]?.limit_request, { id: 'r2', status: 'approved', requested_per_tx_brl: 9000, requested_per_day_brl: 40000, approved_per_tx_brl: 9000, approved_per_day_brl: 40000, created_at: '2026-11-03T10:00:00Z', decided_at: '2026-11-03T12:00:00Z' })
 })

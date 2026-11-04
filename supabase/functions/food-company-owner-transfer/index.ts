@@ -51,7 +51,7 @@ export async function handleRequest(req: Request, deps: OwnerTransferDeps = {}):
   if (!validateCnpj(cnpjClean)) return err('CNPJ_INVALID', 'CNPJ inválido', 422)
 
   const supabaseAdmin = adminClient()
-  const loaded = await loadOwnedCompany(supabaseAdmin, ids.companyId, ids.ownerRef)
+  const loaded = await loadOwnedCompany(supabaseAdmin, ids.companyId, ids.ownerRef, [toOwnerRef])
   if (!loaded.ok) return loaded.res
   const company = loaded.company
   if (await sha256hex(cnpjClean) !== company.cnpj) return err('CNPJ_MISMATCH', 'Esse CNPJ não corresponde ao cadastrado para esta empresa', 422)

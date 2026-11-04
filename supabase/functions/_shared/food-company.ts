@@ -95,14 +95,18 @@ export interface FoodCompany {
   withdraw_limit_per_day_brl: number | string | null
 }
 
-/** Lê a empresa e confere que `ownerRef` é o dono dela. 404 (não existe ou foi removida) ou 403 NOT_OWNER. */
-export async function loadOwnedCompany(supabaseAdmin: SupabaseClient, companyId: string, ownerRef: string): Promise<{ ok: true; company: FoodCompany } | { ok: false; res: Response }> {
+/**
+ * Lê a empresa e confere que `ownerRef` é o dono dela. 404 (não existe ou foi removida) ou 403 NOT_OWNER.
+ * `alsoAllow`: outros donos aceitos nesta leitura. Só a troca de titular usa (aceita também o NOVO dono, para a repetição de uma troca já feita
+ * chegar à idempotência e devolver o desfecho original; uma troca nova segue protegida pela atualização condicional ao dono de antes).
+ */
+export async function loadOwnedCompany(supabaseAdmin: SupabaseClient, companyId: string, ownerRef: string, alsoAllow: string[] = []): Promise<{ ok: true; company: FoodCompany } | { ok: false; res: Response }> {
   const { data, error } = await supabaseAdmin.from('companies').select(COMPANY_COLUMNS).eq('id', companyId).maybeSingle()
   if (error) return { ok: false, res: err('DB_ERROR', 'Erro ao consultar a empresa', 503) }
   const company = data as FoodCompany | null
   if (!company || company.deleted_at) return { ok: false, res: err('COMPANY_NOT_FOUND', 'Empresa não encontrada', 404) }
   // Empresa aberta pelo app (owner_ref nulo) nunca é do Alber Food.
-  if (!company.owner_ref || company.owner_ref !== ownerRef) return { ok: false, res: err('NOT_OWNER', 'Esta empresa não pertence a este dono', 403) }
+  if (!company.owner_ref || (company.owner_ref !== ownerRef && !alsoAllow.includes(company.owner_ref))) return { ok: false, res: err('NOT_OWNER', 'Esta empresa não pertence a este dono', 403) }
   return { ok: true, company }
 }
 

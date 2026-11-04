@@ -17,7 +17,7 @@ import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { checkCompanyWithdrawal, LIMIT_REQUEST_CAPS } from '../_shared/withdraw-guard.ts'
 import { logError } from '../_shared/error-log.ts'
 import {
-  adminClient, decryptPixKey, destinationDigest, foodWithdrawFeeBrl, isInt, isObject, isOperational, loadOwnedCompany, maskPixKey, notApproved, readIds,
+  adminClient, decryptPixKey, destinationDigest, foodWithdrawFeeBrl, isInt, isObject, isOperational, loadOwnedCompany, maskPixKey, readIds,
   readServiceBody, refusal, runFoodOp,
 } from '../_shared/food-company.ts'
 import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -51,7 +51,6 @@ export async function handleRequest(req: Request, deps: WithdrawDeps = {}): Prom
   const loaded = await loadOwnedCompany(supabaseAdmin, ids.companyId, ids.ownerRef)
   if (!loaded.ok) return loaded.res
   const company = loaded.company
-  if (!isOperational(company)) return notApproved()
   if (!company.pix_key || !company.pix_key_type) return err('COMPANY_PIX_KEY_NOT_CONFIGURED', 'Chave Pix da empresa ainda não configurada', 422)
 
   let pixKey: string
@@ -69,6 +68,10 @@ export async function handleRequest(req: Request, deps: WithdrawDeps = {}): Prom
     supabaseAdmin, 'food-company-withdraw', req, body.op,
     { kind: 'withdraw', companyId: company.id, ownerRef: ids.ownerRef, amountCents, destinationDigest: await destinationDigest(company.id, pixKey) },
     async (op) => {
+      // Estado da empresa conferido DEPOIS da autorização e da reserva: repetir um saque já concluído devolve o desfecho original mesmo que a
+      // empresa tenha sido bloqueada no meio tempo (idempotência).
+      if (!isOperational(company)) return refusal('COMPANY_NOT_APPROVED', 'Empresa sem conta aprovada', 409)
+
       const blocked = async (code: string, extra: Record<string, unknown>) => {
         await supabaseAdmin.from('audit_logs').insert({
           user_id: null, event_type: 'company_withdraw_blocked',

@@ -23,7 +23,7 @@ import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { isValidEvpKey } from '../_shared/pix-key.ts'
 import { logError } from '../_shared/error-log.ts'
 import {
-  adminClient, destinationDigest, isObject, isOperational, loadOwnedCompany, notApproved, pixKeyView, readIds, readServiceBody, refusal, runFoodOp, sha256hex,
+  adminClient, destinationDigest, isObject, isOperational, loadOwnedCompany, pixKeyView, readIds, readServiceBody, refusal, runFoodOp, sha256hex,
   type FoodCompany,
 } from '../_shared/food-company.ts'
 
@@ -44,8 +44,6 @@ export async function handleRequest(req: Request): Promise<Response> {
   const loaded = await loadOwnedCompany(supabaseAdmin, ids.companyId, ids.ownerRef)
   if (!loaded.ok) return loaded.res
   const company: FoodCompany = loaded.company
-  if (!isOperational(company)) return notApproved()
-  if (company.pix_key) return err('PIX_KEY_EXISTS', 'Chave Pix já cadastrada', 409)
 
   // A chave que o corpo traz (se trouxer), já validada. Sem ela (random sem pix_key), o Alber gera uma EVP nova.
   let material: string | null = null
@@ -66,6 +64,11 @@ export async function handleRequest(req: Request): Promise<Response> {
     supabaseAdmin, 'food-company-set-pix-key', req, body.op,
     { kind: 'set_pix_key', companyId: company.id, ownerRef: ids.ownerRef, destinationDigest: material ? await destinationDigest(company.id, material) : null },
     async (op) => {
+      // Estado da empresa conferido DEPOIS da autorização e da reserva: repetir uma operação já concluída devolve o desfecho original mesmo
+      // que a empresa tenha mudado de estado (idempotência), e o erro de uma tentativa nova fica guardado junto com ela.
+      if (!isOperational(company)) return refusal('COMPANY_NOT_APPROVED', 'Empresa sem conta aprovada', 409)
+      if (company.pix_key) return refusal('PIX_KEY_EXISTS', 'Chave Pix já cadastrada', 409)
+
       const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')!
       let key = material
       if (!key) {

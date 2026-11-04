@@ -98,7 +98,8 @@ CREATE TABLE security_questions (
 ```sql
 CREATE TABLE transactions (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          UUID REFERENCES users(id),  -- sempre quem executou a ação, mesmo em transações de empresa
+  user_id          UUID REFERENCES users(id),  -- sempre quem executou a ação, mesmo em transações de empresa. NULL só em saque do Alber Food (migration 058)
+  actor_ref        TEXT,                       -- quem pediu quando não há usuário (owner_ref do Alber Food); user_id OU actor_ref presente
   company_id       UUID REFERENCES companies(id), -- NULL = transação pessoal; ver 3.10b
   type             TEXT NOT NULL,
   amount           NUMERIC(10,2) NOT NULL,
@@ -238,7 +239,10 @@ CREATE TABLE rates (
 ```sql
 CREATE TABLE companies (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  owner_id          UUID NOT NULL REFERENCES users(id),  -- master, acesso total implícito
+  owner_id          UUID REFERENCES users(id),  -- master, acesso total implícito. NULL em empresa do Alber Food (migration 058)
+  owner_ref         TEXT,                       -- id opaco da conta do dono no Alber Food; owner_id OU owner_ref presente
+  origin            TEXT NOT NULL DEFAULT 'app',  -- 'app' | 'food'
+  pix_key_set_at    TIMESTAMPTZ,                -- quando a chave de saque foi cadastrada (qualquer tipo); pix_key_changed_at é só a espera de 48 h
   asaas_account_id  TEXT UNIQUE NOT NULL,
   cnpj              TEXT NOT NULL,       -- hash SHA-256, único entre linhas com deleted_at IS NULL
   handle            TEXT NOT NULL,       -- único entre linhas com deleted_at IS NULL, cruza com users.handle na aplicação
@@ -482,6 +486,20 @@ campo `deleted_at`.
 // 401 WRONG_SECURITY_ANSWER | 401 SMS_EXPIRED | 401 SMS_INVALID
 ```
 
+### 4.10 API de serviço para o Alber Food (`food-company-*`)
+
+Funções chamadas **só pelo Alber Food** (`x-alber-food-key`, sem JWT de usuário; `verify_jwt` no padrão, como as `takeaway-*`), para empresas cujo dono não tem usuário no Alber (`companies.owner_ref`, `transactions.actor_ref`). Saque, chave Pix de saque e troca de titular exigem ainda uma **autorização assinada** (`x-food-op-signature`, segredo `FOOD_OP_SIGNING_KEY`). Contrato completo, erros, modelo de dados e ordem de publicação: `06_modules/food_company_service.md`.
+
+| Função | Faz |
+|---|---|
+| `food-company-create` | abre a subconta PJ (CPF do dono vem do cadastro no Food) |
+| `food-company-status` | KYC, vínculo, chave Pix (tipo, máscara, digest), limites, pré-checagem do saque |
+| `food-company-balance` | saldo da subconta em centavos (extrato: `takeaway-company-statement`) |
+| `food-company-set-pix-key` | cadastra a chave de saque (uma vez) — assinada |
+| `food-company-withdraw` | Pix de saque para a chave cadastrada — assinado |
+| `food-company-limit-request` / `-limit-cancel` | pede / cancela aumento do limite de saque |
+| `food-company-owner-transfer` | troca o titular, zera a chave de saque — assinada |
+
 ---
 
 ## 5. Regras de negócio críticas
@@ -543,4 +561,6 @@ SUPABASE_SERVICE_ROLE_KEY=
 JWT_SECRET=
 PIX_EXPIRATION_MINUTES=30
 CRON_SECRET=                  # autentica chamadas do scheduler a cron-activate-batches
+ALBER_FOOD_SERVICE_KEY=       # x-alber-food-key: autentica o Alber Food nas funções takeaway-* e food-company-* (32+ caracteres)
+FOOD_OP_SIGNING_KEY=          # HMAC da autorização assinada de saque / chave Pix / troca de titular (32+ bytes, hex ou base64; mesmo valor no Alber Food)
 ```

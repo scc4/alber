@@ -2,7 +2,7 @@
 **Versão:** 1.0
 **Data:** 04/11/2026
 **Depende de:** 00_architecture.md §4.1, 03_backend.md, 04_api_asaas.md, 05_security.md §7.1, 06_modules/empresa_operadores.md
-**Status:** Implementado na branch da fase 1 (`claude/fase1-api-servico-944c65`); **nada publicado** (nem migration 058, nem funções, nem segredo). O corte é único, depois (ver §10).
+**Status:** Implementado e mesclado no `main` (04/11/2026, vindo da branch `claude/fase1-api-servico-944c65`, sem push); **nada publicado** (nem migration 058, nem funções, nem segredo). O corte é único, depois (ver §10).
 **Contraparte:** Alber Food, fase 2 (identidade do dono). Plano e desenho: `docs/plano-separacao-pf-pj.md` e `specs/phases/4_identidade_financeira_e_saque.md` no repositório do Alber Food.
 
 ---
@@ -232,6 +232,8 @@ Entrada: `{ company_id, owner_ref, transaction_ids: string[] }` (1 a 20 UUIDs; r
 ## 6. Modelo de dados (migration `20260101000058_food_company_service.sql`)
 
 Aditiva e idempotente (`IF NOT EXISTS` / checagem em `pg_constraint`); **não aplicada em produção**.
+
+**Verificação feita em 04/11/2026 (sem tocar no banco de produção):** (a) catálogo de produção, só leitura: última migration aplicada 057; `companies.owner_id`, `transactions.user_id` e `company_limit_requests.requested_by` eram `NOT NULL`; nenhuma coluna, restrição, índice ou tabela da 058 existia; nenhum dado violaria as restrições novas; as duas funções do Admin existem com a mesma assinatura, `SECURITY DEFINER`, `search_path = pg_catalog, public` e execução só para `admin_app`; o único gatilho das tabelas é `update_updated_at`. (b) As definições das duas funções em produção são idênticas às da 058, exceto pelo `IF ... IS NOT NULL` em volta do aviso in-app (nenhum ajuste feito direto em produção seria sobrescrito). (c) Execução num Postgres em memória (PGlite, com stubs de `auth`, `storage` e papéis do Supabase): as 58 migrations aplicam sem erro, a 058 reaplicada não falha, e sobre um banco com dados anteriores ela mantém as linhas como `origin = 'app'`, aceita empresa, saque e pedido de limite do Food (referência em vez de usuário), recusa linha sem dono e sem referência, mantém `food_ops` único por `nonce` e por `idempotency_key`, `cleanup_food_ops()` apaga só concluídas vencidas, `anon` e `authenticated` não leem `food_ops` nem executam a limpeza, e as funções do Admin decidem empresa e pedido do Food sem aviso e do app com aviso. Não coberto: o tempo de bloqueio das tabelas em produção (as tabelas têm 5, 61 e 0 linhas hoje) e a RLS de `companies` sob `authenticated`, que no ambiente em memória já dava recursão infinita antes da 058 (herança do esquema atual, sem relação com esta migration).
 
 | Mudança | Detalhe |
 |---|---|

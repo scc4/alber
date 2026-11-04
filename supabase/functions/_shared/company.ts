@@ -17,6 +17,8 @@ import { sha256hex, aesEncrypt } from './crypto.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from './asaas.ts'
 import { logError } from './error-log.ts'
 import { evaluateOwnerCpf, fetchCnpjRegistry, reviewFor, verifyOwnerCpfHash, type CnpjRegistry, type OwnerLinkCheck } from './owner-link.ts'
+import { decideTakeover, TAKEOVER_NOTICE, type ContestedCompany, type Takeover } from './cnpj-dispute.ts'
+import { sendPush } from './push.ts'
 
 export interface CompanyAddressInput {
   street: string
@@ -177,11 +179,14 @@ export async function createCompanyForOwner(
   // não sugerir "já existe uma conta" quando na verdade é só verificação em
   // andamento por outra pessoa.
   const { data: existingCnpj } = await supabaseAdmin
-    .from('companies').select('id, kyc_status').eq('cnpj', cnpjHash).is('deleted_at', null).maybeSingle()
-  if (existingCnpj) {
-    return existingCnpj.kyc_status === 'pending'
-      ? { ok: false, code: 'CNPJ_UNDER_REVIEW', message: 'Este CNPJ já está em processo de verificação por outra conta.', status: 409 }
-      : { ok: false, code: 'CNPJ_DUPLICATE', message: 'CNPJ já cadastrado', status: 409 }
+    .from('companies')
+    .select('id, owner_id, kyc_status, created_at, owner_link_check, kyc_evidence, asaas_account_id')
+    .eq('cnpj', cnpjHash).is('deleted_at', null).maybeSingle()
+  // Só a empresa PENDENTE pode perder o CNPJ numa disputa (fase 5: vencimento e prioridade ao vínculo verificado, _shared/cnpj-dispute.ts).
+  // A decisão sai depois da conferência do vínculo de quem está abrindo; aprovada ou em análise segue como "CNPJ já cadastrado".
+  const contested = existingCnpj as ContestedCompany | null
+  if (contested && contested.kyc_status !== 'pending') {
+    return { ok: false, code: 'CNPJ_DUPLICATE', message: 'CNPJ já cadastrado', status: 409 }
   }
 
   // ── Vínculo do responsável com o CNPJ (antes de criar qualquer coisa no Asaas) ───────────────────────────────────────────────
@@ -200,6 +205,35 @@ export async function createCompanyForOwner(
     linkQualification = verdict.qualification
   }
   const linkReview = reviewFor(linkCheck)
+
+  // ── Disputa do CNPJ com uma empresa pendente ─────────────────────────────────────────────────────────────────────────────────
+  let takeover: Takeover | null = null
+  if (contested) {
+    takeover = decideTakeover(contested, ownerId, linkCheck, new Date())
+    if (!takeover) {
+      return { ok: false, code: 'CNPJ_UNDER_REVIEW', message: 'Este CNPJ já está em processo de verificação por outra conta.', status: 409 }
+    }
+    // A outra empresa já perdeu o CNPJ (venceu ou foi superada): sai do ar aqui, antes do Asaas, para o estado do Alber ficar certo mesmo
+    // que o Asaas ainda tenha a subconta dela (aí a limpeza no Asaas é do suporte; veja o aviso "company-dispute" abaixo).
+    const now = new Date().toISOString()
+    const { error: cancelErr } = await supabaseAdmin
+      .from('companies')
+      .update({ deleted_at: now, deleted_reason: takeover, updated_at: now })
+      .eq('id', contested.id)
+      .is('deleted_at', null)
+    if (cancelErr) {
+      await logError(supabaseAdmin, 'company-create', cancelErr, { context: 'cancel_contested', company_id: contested.id })
+      return { ok: false, code: 'DB_ERROR', message: 'Erro temporário ao criar empresa. Tente novamente.', status: 503 }
+    }
+    try {
+      await supabaseAdmin.from('audit_logs').insert({
+        user_id: contested.owner_id,
+        event_type: takeover === 'expired' ? 'company_expired' : 'company_superseded',
+        metadata: { company_id: contested.id, claimant_id: ownerId, asaas_account_id: contested.asaas_account_id ?? null },
+      })
+    } catch { /* não crítico */ }
+    await sendPush(contested.owner_id, TAKEOVER_NOTICE[takeover].title, TAKEOVER_NOTICE[takeover].body, {}, 'other', 'conta_kyc')
+  }
 
   const encSecret     = Deno.env.get('ASAAS_API_KEY')!
   const pixKeySecret   = Deno.env.get('ENCRYPTION_KEY')!
@@ -274,11 +308,23 @@ export async function createCompanyForOwner(
 
       // O CNPJ já tem subconta no Asaas (tentativa anterior abandonada ou recusada). Reaproveitá-la só com o vínculo conferido: sem isso,
       // quem não é sócio herdaria a subconta (e os dados de contato) de uma tentativa anterior.
+      // O Asaas só devolve a chave da API na criação: sem ela a empresa não poderia consultar o KYC nem operar. Subconta sem chave NUNCA é
+      // reaproveitada (plano, seção 4.5): o dono recebe CNPJ_IN_USE ("fale com o suporte") e o caso vai para a lista da equipe no Admin
+      // (aviso "company-dispute"), que remove a subconta no Asaas (DELETE /myAccount com a chave da própria subconta, irreversível).
+      const flagForSupport = () => logError(supabaseAdmin, 'company-dispute', new Error('cnpj_in_use_at_asaas'), {
+        cnpj_prefix: cnpjClean.slice(0, 8),
+        link_check: linkCheck,
+        takeover,
+        old_company_id: contested?.id ?? null,
+        old_asaas_account_id: contested?.asaas_account_id ?? null,
+      })
       if (linkCheck !== 'match') {
+        await flagForSupport()
         return { ok: false, code: 'CNPJ_IN_USE', message: description, status: 409 }
       }
       const existing = await getAsaasAccountByCpf(cnpjClean, encSecret)
-      if (!existing) {
+      if (!existing || !existing.apiKey) {
+        await flagForSupport()
         return { ok: false, code: 'CNPJ_IN_USE', message: description, status: 409 }
       }
       asaasAccount = existing
@@ -306,14 +352,18 @@ export async function createCompanyForOwner(
   // da empresa — fica sem chave e o master configura depois manualmente.
   let withdrawalKeyEnc:  string | null = null
   let withdrawalKeyType: 'cnpj' | 'random' | null = null
+  // Hash da chave de saque: a equipe acha a MESMA chave em empresas diferentes (Alber Admin, alertas). A chave em si fica cifrada.
+  let withdrawalKeyHash: string | null = null
   if (input.pix_key_type === 'cnpj') {
     withdrawalKeyEnc  = await aesEncrypt(cnpjClean, pixKeySecret)
     withdrawalKeyType = 'cnpj'
+    withdrawalKeyHash = cnpjHash
   } else if (input.pix_key_type === 'random' && asaasAccount.apiKey) {
     try {
       const { key } = await createPixAddressKey('EVP', asaasAccount.apiKey)
       withdrawalKeyEnc  = await aesEncrypt(key, pixKeySecret)
       withdrawalKeyType = 'random'
+      withdrawalKeyHash = await sha256hex(key)
     } catch (e) {
       console.warn('[company-create] erro ao registrar chave Pix de saque (não-crítico):', e)
     }
@@ -348,6 +398,7 @@ export async function createCompanyForOwner(
       asaas_deposit_key: depositKeyEnc,
       pix_key:           withdrawalKeyEnc,
       pix_key_type:      withdrawalKeyType,
+      pix_key_hash:      withdrawalKeyHash,
       cnpj:              cnpjHash,
       cnpj_masked:       cnpjMasked,
       handle:            handleNorm,

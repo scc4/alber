@@ -407,6 +407,35 @@ export async function getAccountGeneralStatus(apiKey: string): Promise<string | 
   return typeof general === 'string' ? general : null
 }
 
+// ── Evidências do KYC (somente leitura, para a equipe decidir a revisão do vínculo) ────────────────────────────
+// GET /myAccount/documents (com a chave da SUBCONTA) devolve os grupos de documentos pedidos, o status de cada um e quem é o responsável
+// (`responsible`). Daqui só saem tipo, status e o TIPO do responsável: nome, documentos e links nunca são guardados.
+
+export interface KycDocumentGroup {
+  type: string
+  status: string
+  responsibleType: string | null
+}
+
+export async function getAccountDocuments(apiKey: string): Promise<KycDocumentGroup[] | null> {
+  const res = await asaasRequest('GET', '/myAccount/documents', apiKey)
+  if (!res.ok) return null
+  const data = (res.data as { data?: unknown }).data
+  if (!Array.isArray(data)) return null
+  const groups: KycDocumentGroup[] = []
+  for (const g of data as Array<Record<string, unknown>>) {
+    const type = typeof g.type === 'string' ? g.type.slice(0, 60) : null
+    if (!type) continue
+    const responsible = g.responsible as { type?: unknown } | null | undefined
+    groups.push({
+      type,
+      status: typeof g.status === 'string' ? g.status.slice(0, 30) : 'UNKNOWN',
+      responsibleType: typeof responsible?.type === 'string' ? responsible.type.slice(0, 60) : null,
+    })
+  }
+  return groups
+}
+
 // ── Conta pai: saldo, a receber e extrato (somente leitura, para o Alber Admin) ───────────────────────────────
 
 const toCents = (reais: unknown): number => (typeof reais === 'number' && Number.isFinite(reais) ? Math.round(reais * 100) : 0)

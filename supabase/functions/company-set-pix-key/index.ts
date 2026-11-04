@@ -156,7 +156,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const encrypted = await aesEncrypt(cnpjClean, pixKeySecret)
     const { error: updateErr } = await supabaseAdmin
       .from('companies')
-      .update({ pix_key: encrypted, pix_key_type: 'cnpj' })
+      .update({ pix_key: encrypted, pix_key_type: 'cnpj', pix_key_hash: cnpjHash })
       .eq('id', company.id)
 
     if (updateErr) {
@@ -179,7 +179,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   const encrypted = await aesEncrypt(key, pixKeySecret)
   const { error: updateErr } = await supabaseAdmin
     .from('companies')
-    .update({ pix_key: encrypted, pix_key_type: 'random', pix_key_changed_at: new Date().toISOString() })
+    .update({ pix_key: encrypted, pix_key_type: 'random', pix_key_hash: await sha256hex(key), pix_key_changed_at: new Date().toISOString() })
     .eq('id', company.id)
 
   if (updateErr) {

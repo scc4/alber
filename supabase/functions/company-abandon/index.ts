@@ -60,7 +60,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   const { error: updateErr } = await supabaseAdmin
     .from('companies')
-    .update({ deleted_at: new Date().toISOString() })
+    .update({ deleted_at: new Date().toISOString(), deleted_reason: 'abandoned' })
     .eq('id', company.id)
 
   if (updateErr) {

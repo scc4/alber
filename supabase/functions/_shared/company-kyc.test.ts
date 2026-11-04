@@ -19,7 +19,7 @@ const { handleRequest: companyList } = await import('../company-list/index.ts')
 interface Call { method: string; url: string; body: Record<string, unknown> | null; headers: Record<string, string> }
 const calls: Call[] = []
 
-interface Mock { company?: unknown; general?: string | null; statusFails?: boolean; ownedPending?: unknown[] }
+interface Mock { company?: unknown; general?: string | null; statusFails?: boolean; ownedPending?: unknown[]; docs?: unknown[] }
 
 function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
   const orig = globalThis.fetch
@@ -29,6 +29,7 @@ function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
     const method = (init?.method ?? 'GET').toUpperCase()
     calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null, headers: (init?.headers ?? {}) as Record<string, string> })
     const ok = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } })
+    if (url.includes('/myAccount/documents')) return m.docs ? ok({ onboardingUrl: 'https://x', data: m.docs }) : ok({ error: 'x' }, 500)
     if (url.includes('/myAccount/status')) return m.statusFails ? ok({ error: 'x' }, 500) : ok({ id: 'acc', general: m.general ?? 'PENDING', commercialInfo: 'APPROVED' })
     if (url.includes('/pix/addressKeys')) return ok({ key: 'evp-key', type: 'EVP' })
     if (url.includes('/auth/v1/user')) return ok({ id: 'auth-1' })
@@ -140,5 +141,50 @@ Deno.test('aprovar e rejeitar (webhook e consulta) só gravam colunas que existe
     assertEquals(r, 'updated', status)
     assertEquals(patches().length > 0, true, status)
     assertPatchesUseRealColumns()
+  }
+})
+
+// ── Fase 4: retrato das evidências do Asaas (companies.kyc_evidence) ─────────────────────────────────────────────────────────────
+const DOCS = [
+  { id: 'g1', type: 'IDENTIFICATION', status: 'PENDING', title: 'Documento', description: 'x', responsible: { name: 'FULANO DE TAL', type: 'LEGAL_REPRESENTATIVE' }, documents: [{ id: 'd1', status: 'PENDING' }] },
+  { id: 'g2', type: 'SOCIAL_CONTRACT', status: 'NOT_SENT', title: 'Contrato', description: 'y', responsible: null, documents: [] },
+]
+const evidencePatches = () => patches().filter((b) => 'kyc_evidence' in b)
+
+Deno.test('consulta de empresa pendente grava o retrato dos documentos: só tipo, status e TIPO do responsável (nunca nome)', async () => {
+  await withMock({ company: await company(), general: 'PENDING', docs: DOCS }, () => pollCompanyKyc(admin(), 'c1'))
+  const p = evidencePatches()
+  assertEquals(p.length, 1)
+  assertEquals(p[0]?.kyc_evidence, {
+    groups: [{ type: 'IDENTIFICATION', status: 'PENDING', responsible_type: 'LEGAL_REPRESENTATIVE' }, { type: 'SOCIAL_CONTRACT', status: 'NOT_SENT', responsible_type: null }],
+    total: 2, approved: 0, not_sent: 1,
+  })
+  assertEquals(typeof p[0]?.kyc_evidence_at, 'string')
+  assertEquals(JSON.stringify(p[0]).includes('FULANO'), false)
+  assertPatchesUseRealColumns()
+})
+
+Deno.test('retrato recente (menos de 10 minutos) não consulta o Asaas de novo; vencido consulta', async () => {
+  const recent = await company({ kyc_evidence_at: new Date(Date.now() - 60_000).toISOString() })
+  await withMock({ company: recent, general: 'PENDING', docs: DOCS }, () => pollCompanyKyc(admin(), 'c1'))
+  assertEquals(calls.some((c) => c.url.includes('/myAccount/documents')), false)
+  const old = await company({ kyc_evidence_at: new Date(Date.now() - 11 * 60_000).toISOString() })
+  await withMock({ company: old, general: 'PENDING', docs: DOCS }, () => pollCompanyKyc(admin(), 'c1'))
+  assertEquals(calls.some((c) => c.url.includes('/myAccount/documents')), true)
+})
+
+Deno.test('documentos indisponíveis ou erro no Asaas: o KYC segue normal e nada é gravado', async () => {
+  const r = await withMock({ company: await company(), general: 'APPROVED' }, () => pollCompanyKyc(admin(), 'c1')) // sem docs -> 500
+  assertEquals(r, 'approved')
+  assertEquals(evidencePatches().length, 0)
+})
+
+Deno.test('aprovação e recusa tiram o retrato final; recusa marca o motivo da exclusão', async () => {
+  for (const status of ['approved', 'rejected'] as const) {
+    const row = await company()
+    await withMock({ company: row, docs: DOCS }, () => applyCompanyKyc(admin(), row, status, { via: 'webhook' }))
+    assertEquals(evidencePatches().length, 1, status)
+    assertPatchesUseRealColumns()
+    if (status === 'rejected') assertEquals(patches().some((b) => b.deleted_reason === 'kyc_rejected' && typeof b.deleted_at === 'string'), true)
   }
 })

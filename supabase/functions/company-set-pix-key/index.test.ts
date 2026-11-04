@@ -360,3 +360,12 @@ Deno.test('chave Pix do tipo CNPJ: não espera (o destino é a conta do próprio
   assertEquals('pix_key_changed_at' in (r.patches[0] ?? {}), false)
   assertEquals(r.pushes.length, 0)
 })
+
+// Fase 7: o hash da chave de saque (a chave fica cifrada) deixa a equipe achar a MESMA chave em empresas diferentes.
+Deno.test('a chave de saque grava pix_key_hash (SHA-256 da chave; no tipo CNPJ, o hash do CNPJ)', async () => {
+  const evp = '123e4567-e89b-12d3-a456-426614174000'
+  const random = await setKeyAndCapture({ type: 'random', pix_key: evp })
+  assertEquals(random.patches[0]?.pix_key_hash, await sha256hex(evp))
+  const cnpj = await setKeyAndCapture({})
+  assertEquals(cnpj.patches[0]?.pix_key_hash, await sha256hex(VALID_CNPJ))
+})

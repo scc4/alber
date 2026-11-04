@@ -309,3 +309,54 @@ Deno.test('tipo random com chave EVP válida → salva sem chamar Asaas e grava 
   assertEquals(companyUpdated, true)
   assertEquals(auditEvent, 'company_pix_key_changed')
 })
+
+// ── Guarda de saque: chave ALEATÓRIA tranca os saques por 48 h e avisa o dono; chave do CNPJ não ───────────────────────────────────
+async function setKeyAndCapture(body: Record<string, unknown>) {
+  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
+  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const patches: Record<string, unknown>[] = []
+  const pushes: Record<string, unknown>[] = []
+  const routes: MockRoute[] = [
+    { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
+    { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
+    { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company({ cnpj: await sha256hex(VALID_CNPJ) })] },
+    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
+  ]
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (url.includes('/rest/v1/companies') && method === 'PATCH') {
+      patches.push(JSON.parse(init!.body as string))
+      return new Response(JSON.stringify([]), { status: 200 })
+    }
+    if (url.includes('/functions/v1/push-send')) {
+      pushes.push(JSON.parse(init!.body as string))
+      return new Response('{}', { status: 200 })
+    }
+    if (url.includes('/rest/v1/audit_logs') && method === 'POST') return new Response('{}', { status: 201 })
+    return mockFetch(routes)(input, init)
+  }) as typeof fetch
+  try {
+    const res = await handleRequest(makeReq(body))
+    return { status: res.status, patches, pushes }
+  } finally {
+    globalThis.fetch = orig
+  }
+}
+
+Deno.test('chave Pix ALEATÓRIA: grava pix_key_changed_at (saques bloqueados por 48 h) e avisa o dono por push', async () => {
+  const r = await setKeyAndCapture({ type: 'random', pix_key: '123e4567-e89b-12d3-a456-426614174000' })
+  assertEquals(r.status, 200)
+  assertEquals(typeof r.patches[0]?.pix_key_changed_at, 'string')
+  assertEquals(r.pushes.length, 1)
+  assertEquals(String(r.pushes[0]?.title ?? ''), 'Chave Pix de saque da empresa cadastrada')
+})
+
+Deno.test('chave Pix do tipo CNPJ: não espera (o destino é a conta do próprio CNPJ) e não manda aviso', async () => {
+  const r = await setKeyAndCapture({})
+  assertEquals(r.status, 200)
+  assertEquals('pix_key_changed_at' in (r.patches[0] ?? {}), false)
+  assertEquals(r.pushes.length, 0)
+})

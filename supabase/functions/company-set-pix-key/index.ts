@@ -18,6 +18,8 @@ import {
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { isValidEvpKey } from '../_shared/pix-key.ts'
 import { logError } from '../_shared/error-log.ts'
+import { sendPush } from '../_shared/push.ts'
+import { WITHDRAW_RULES } from '../_shared/withdraw-guard.ts'
 
 interface SetPixKeyRequest {
   company_id:            string
@@ -133,6 +135,12 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')!
+  // A chave de saque só é gravada UMA vez (PIX_KEY_EXISTS acima). Chave ALEATÓRIA é uma chave de qualquer banco, colada pelo master, então é o caminho
+  // para desviar dinheiro: os saques ficam bloqueados por 48 h depois de cadastrá-la e o dono é avisado. Chave do tipo CNPJ não espera: o destino é a
+  // conta do próprio CNPJ.
+  const waitForRandomKey = async () => {
+    await sendPush(company.owner_id, 'Chave Pix de saque da empresa cadastrada', `Uma chave Pix aleatória foi cadastrada para os saques da empresa. Os saques ficam bloqueados por ${WITHDRAW_RULES.pixKeyWaitHours} horas. Se não foi você, fale com o suporte agora.`, {}, 'other')
+  }
 
   // ── Tipo CNPJ — reconfirma que bate com o CNPJ já cadastrado da empresa ──────
 
@@ -171,7 +179,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   const encrypted = await aesEncrypt(key, pixKeySecret)
   const { error: updateErr } = await supabaseAdmin
     .from('companies')
-    .update({ pix_key: encrypted, pix_key_type: 'random' })
+    .update({ pix_key: encrypted, pix_key_type: 'random', pix_key_changed_at: new Date().toISOString() })
     .eq('id', company.id)
 
   if (updateErr) {
@@ -180,6 +188,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   await logAudit(supabaseAdmin, caller.id, 'company_pix_key_changed', { company_id: company.id, pix_key_type: 'random' })
+  await waitForRandomKey()
 
   return json({ pix_key_masked: `${key.slice(0, 8)}...`, pix_key_type: 'random' })
 }

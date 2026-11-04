@@ -83,7 +83,7 @@ const patches = () => calls.filter((c) => c.method === 'PATCH' && c.url.includes
 Deno.test('empresa pendente que o Asaas já aprovou: grava approved, cria a chave Pix e consulta com a chave da SUBCONTA', async () => {
   const r = await withMock({ company: await company(), general: 'APPROVED' }, () => pollCompanyKyc(admin(), 'c1'))
   assertEquals(r, 'approved')
-  assertEquals(patches().some((b) => b.kyc_status === 'approved'), true)
+  assertEquals(patches().some((b) => b.kyc_status === 'approved' && typeof b.kyc_approved_at === 'string'), true) // data da aprovação: limites de saque dos primeiros 30 dias
   assertPatchesUseRealColumns()
   assertEquals(patches().some((b) => 'asaas_deposit_key' in b), true)
   const status = calls.find((c) => c.url.includes('/myAccount/status'))!

@@ -11,6 +11,7 @@ import { cashoutPix, transferToWallet, getSubcontaBalance, AsaasError } from '..
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 import { resolveWalletContext } from '../_shared/company-permissions.ts'
+import { checkCompanyWithdrawal } from '../_shared/withdraw-guard.ts'
 
 interface DescarregarRequest {
   amount_albers: number
@@ -97,6 +98,15 @@ Deno.serve(async (req: Request) => {
 
   if (wallet.kycStatus !== 'approved') {
     return err('KYC_REQUIRED', 'Verificação de identidade necessária para descarregar', 403)
+  }
+
+  // ── Empresa: vínculo do responsável, espera após trocar a chave Pix e limites de valor (_shared/withdraw-guard.ts) ────────────
+  if (wallet.ownerType === 'company' && wallet.companyId) {
+    const guard = await checkCompanyWithdrawal(supabaseAdmin, wallet.companyId, amount_albers)
+    if (!guard.ok) {
+      await supabaseAdmin.from('audit_logs').insert({ user_id: user.id, event_type: 'company_withdraw_blocked', metadata: { company_id: wallet.companyId, code: guard.code, amount: amount_albers, via: 'descarregar' } }).then(() => {}, () => {})
+      return err(guard.code, guard.message, guard.status, guard.extra)
+    }
   }
 
   // ── Verificar chave Pix cadastrada ───────────────────────────────────────────

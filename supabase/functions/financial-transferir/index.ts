@@ -13,6 +13,7 @@ import { transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asa
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 import { resolveWalletContext } from '../_shared/company-permissions.ts'
+import { checkCompanyWithdrawal } from '../_shared/withdraw-guard.ts'
 
 interface TransferirRequest {
   destinatario_identifier: string   // CPF, @handle ou e-mail
@@ -192,6 +193,16 @@ Deno.serve(async (req: Request) => {
     return err(senderWalletResolution.code, senderWalletResolution.message, senderWalletResolution.status)
   }
   const senderWallet = senderWalletResolution.wallet
+
+  // Empresa: vínculo do responsável, espera após trocar a chave Pix e limites de valor. Transferir da empresa para um Alber (e de lá sacar) é
+  // outro caminho de saída do dinheiro, então passa pela mesma guarda (_shared/withdraw-guard.ts).
+  if (senderWallet.ownerType === 'company' && senderWallet.companyId) {
+    const guard = await checkCompanyWithdrawal(supabaseAdmin, senderWallet.companyId, amount_albers)
+    if (!guard.ok) {
+      await supabaseAdmin.from('audit_logs').insert({ user_id: sender.id, event_type: 'company_withdraw_blocked', metadata: { company_id: senderWallet.companyId, code: guard.code, amount: amount_albers, via: 'transferir' } }).then(() => {}, () => {})
+      return err(guard.code, guard.message, guard.status, guard.extra)
+    }
+  }
 
   // ── Localizar destinatário ───────────────────────────────────────────────────
 

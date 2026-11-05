@@ -1,7 +1,7 @@
 // Cobrança de pedido de take away do Alber Food (Pix ou cartão, com split para a empresa do restaurante).
 // POST /takeaway-payment-create
 //   { company_id, external_reference: 'food_<uuid>', amount_cents, fee_total_cents, method: 'pix'|'credit_card',
-//     customer: { name, phone? }, description, expires_at }
+//     customer: { name, phone?, cpf_cnpj? }, description, expires_at }
 //   -> { payment_id, pix_payload?, invoice_url?, expires_at }
 //
 // Só o Alber Food chama (x-alber-food-key). O cliente do restaurante é anônimo. A cobrança nasce na conta PAI com
@@ -15,6 +15,8 @@ import {
   createTakeawayCustomer, createTakeawayPayment, findPaymentByReference, getPixQrCode, AsaasError,
 } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { validateCnpj } from '../_shared/cnpj.ts'
+import { validateCpf } from '../_shared/cpf.ts'
 
 /** Valores aceitos (centavos): o mínimo da cobrança no Asaas e um teto de segurança igual ao do Alber Food. */
 const MIN_CENTS = 500
@@ -26,7 +28,7 @@ interface CreateBody {
   amount_cents?: unknown
   fee_total_cents?: unknown
   method?: unknown
-  customer?: { name?: unknown; phone?: unknown }
+  customer?: { name?: unknown; phone?: unknown; cpf_cnpj?: unknown }
   description?: unknown
   expires_at?: unknown
 }
@@ -53,6 +55,9 @@ export async function handleRequest(req: Request): Promise<Response> {
   const method = body.method
   const name = typeof body.customer?.name === 'string' ? body.customer.name.trim() : ''
   const phoneDigits = typeof body.customer?.phone === 'string' ? body.customer.phone.replace(/\D/g, '') : ''
+  // CPF ou CNPJ de quem paga: o Asaas exige para emitir a cobrança. Opcional aqui (clientes antigos do Alber Food não mandam), mas, se vier, tem de ser um
+  // documento válido. Nunca é gravado nem registrado.
+  const cpfCnpjDigits = typeof body.customer?.cpf_cnpj === 'string' ? body.customer.cpf_cnpj.replace(/\D/g, '') : ''
   const expiresAt = typeof body.expires_at === 'string' ? new Date(body.expires_at) : null
   if (!UUID.test(companyId)) return err('INVALID_COMPANY', 'company_id inválido', 422)
   if (!FOOD_REFERENCE.test(reference)) return err('INVALID_REFERENCE', 'external_reference inválida', 422)
@@ -62,6 +67,9 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!isInt(body.fee_total_cents) || body.fee_total_cents < 0 || body.fee_total_cents >= body.amount_cents) return err('INVALID_FEE', 'fee_total_cents inválido', 422)
   if (name.length < 2 || name.length > 60) return err('INVALID_CUSTOMER', 'customer.name inválido', 422)
   if (phoneDigits && !/^\d{10,11}$/.test(phoneDigits)) return err('INVALID_CUSTOMER', 'customer.phone inválido', 422)
+  if (body.customer?.cpf_cnpj !== undefined && body.customer.cpf_cnpj !== null && body.customer.cpf_cnpj !== '' && !(cpfCnpjDigits.length === 11 ? validateCpf(cpfCnpjDigits) : cpfCnpjDigits.length === 14 && validateCnpj(cpfCnpjDigits))) {
+    return err('INVALID_CUSTOMER', 'customer.cpf_cnpj inválido', 422)
+  }
   if (!expiresAt || Number.isNaN(expiresAt.getTime())) return err('INVALID_EXPIRY', 'expires_at inválido', 422)
   const description = (typeof body.description === 'string' ? body.description : 'Pedido Alber Food').slice(0, 120)
 
@@ -90,7 +98,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       paymentId = existing.id
       invoiceUrl = existing.invoiceUrl
     } else {
-      const customer = await createTakeawayCustomer(name, phoneDigits || null, parentKey)
+      const customer = await createTakeawayCustomer(name, phoneDigits || null, parentKey, cpfCnpjDigits || null)
       const created = await createTakeawayPayment(
         {
           customer,

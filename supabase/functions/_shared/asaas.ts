@@ -357,17 +357,20 @@ export async function refundPayment(
 
 // ── Cobranças de take away do Alber Food (conta pai + split) ───────────────────
 // A cobrança é criada na conta PAI, com o split para a carteira da empresa do restaurante: o Asaas liquida direto na
-// carteira e o que sobra (taxa Alber + gateway) fica na conta pai. O cliente do restaurante é anônimo: o customer só
-// leva nome e telefone. Quem chama é o Alber Food, por funções de serviço (takeaway-payment-*).
+// carteira e o que sobra (taxa Alber + gateway) fica na conta pai. O cliente do restaurante é anônimo: o customer leva nome, telefone e o CPF/CNPJ,
+// que o Asaas exige para emitir a cobrança (sem ele responde "é necessário preencher o CPF ou CNPJ do cliente"). O documento só passa por aqui:
+// não é gravado no Alber nem entra em log. Quem chama é o Alber Food, por funções de serviço (takeaway-payment-*).
 
 export async function createTakeawayCustomer(
   name: string,
   mobilePhone: string | null,
   parentApiKey: string,
+  cpfCnpj: string | null = null,
 ): Promise<string> {
   const res = await asaasRequest('POST', '/customers', parentApiKey, {
     name,
     ...(mobilePhone ? { mobilePhone } : {}),
+    ...(cpfCnpj ? { cpfCnpj } : {}),
     notificationDisabled: true, // o aviso ao cliente é do Alber Food, não do Asaas
   })
   if (!res.ok) throw new AsaasError('ASAAS_CUSTOMER_CREATE_FAILED', res.data as Record<string, unknown>)

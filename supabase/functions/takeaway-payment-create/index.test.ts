@@ -86,6 +86,32 @@ Deno.test('Pix: cria a cobrança na conta pai com split para a carteira da empre
   assertEquals(JSON.stringify(r.json).includes('wallet'), false)
 })
 
+Deno.test('CPF ou CNPJ do cliente: vai ao Asaas no cadastro do cliente (só dígitos) e nunca volta na resposta nem no registro de auditoria', async () => {
+  const withDoc = { ...good, customer: { ...good.customer, cpf_cnpj: '529.982.247-25' } }
+  const r = await run(withDoc)
+  assertEquals(r.status, 201)
+  const customer = calls.find((c) => c.method === 'POST' && c.url.endsWith('/customers'))!.body as Record<string, unknown>
+  assertEquals(customer.cpfCnpj, '52998224725')
+  assertEquals(customer.name, 'Maria Souza')
+  assertEquals(JSON.stringify(r.json).includes('52998224725'), false)
+  assertEquals(calls.some((c) => c.url.includes('/rest/v1/') && JSON.stringify(c.body).includes('52998224725')), false)
+  // CNPJ também vale.
+  const cnpj = await run({ ...good, customer: { ...good.customer, cpf_cnpj: '11.222.333/0001-81' } })
+  assertEquals(cnpj.status, 201)
+  assertEquals((calls.find((c) => c.url.endsWith('/customers'))!.body as Record<string, unknown>).cpfCnpj, '11222333000181')
+  // Sem documento (cliente antigo do Alber Food): segue como antes, sem o campo.
+  await run(good)
+  assertEquals('cpfCnpj' in (calls.find((c) => c.url.endsWith('/customers'))!.body as Record<string, unknown>), false)
+})
+
+Deno.test('CPF ou CNPJ inválido é recusado antes de qualquer chamada ao Asaas', async () => {
+  for (const doc of ['11111111111', '12345678900', '5299822472', '52998224725x9', '11222333000182', 'abc']) {
+    const r = await run({ ...good, customer: { ...good.customer, cpf_cnpj: doc } })
+    assertEquals([r.status, r.json.error], [422, 'INVALID_CUSTOMER'], doc)
+    assertEquals(calls.some((c) => c.url.includes('asaas.com')), false)
+  }
+})
+
 Deno.test('cartão: devolve a página hospedada do Asaas, sem QR', async () => {
   const r = await run({ ...good, method: 'credit_card' })
   assertEquals(r.status, 201)

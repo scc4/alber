@@ -16,6 +16,7 @@ import { FakeDb, installFakeFetch, type Row } from './fake-postgrest.ts'
 import { aesEncrypt, sha256hex } from './crypto.ts'
 import { encryptSubaccountKey } from './subaccount-key.ts'
 import { destinationDigest, signFoodOp, type FoodOp } from './food-op.ts'
+import { signRelease, type ReleaseAttestation } from './food-release.ts'
 
 export const SERVICE_KEY = 'f'.repeat(40)
 export const SIGNING_SECRET = 'ab'.repeat(32)
@@ -172,6 +173,28 @@ export async function signedOp(fields: Partial<FoodOp> & Pick<FoodOp, 'kind'>, s
 export const withdrawOp = async (amountCents: number, clearKey = CNPJ, fields: Partial<FoodOp> = {}) =>
   await signedOp({ kind: 'withdraw', amount_cents: amountCents, destination_digest: await destinationDigest(COMPANY_ID, clearKey), ...fields })
 
+// ── Atestado de liberação (abertura da conta) ──
+
+export interface SignedRelease { release: ReleaseAttestation; signature: string }
+
+/** Atestado válido por padrão para o dono, CNPJ e CPF informados (emitido há 1 s, vence em 60 s). */
+export async function signedRelease(fields: { ownerRef?: string; cnpj?: string; cpf?: string; override?: Partial<ReleaseAttestation> } = {}, secret = SIGNING_SECRET): Promise<SignedRelease> {
+  const now = Date.now()
+  const release: ReleaseAttestation = {
+    kind: 'company_release',
+    request_id: crypto.randomUUID(),
+    owner_ref: fields.ownerRef ?? OWNER_REF,
+    cnpj_hash: await sha256hex((fields.cnpj ?? '11222333000181').replace(/\D/g, '')),
+    cpf_hash: await sha256hex((fields.cpf ?? CPF).replace(/\D/g, '')),
+    decided_at: new Date(now - 3_600_000).toISOString(),
+    nonce: uniq('nonce').padEnd(20, 'x'),
+    issued_at: new Date(now - 1000).toISOString(),
+    expires_at: new Date(now + 60_000).toISOString(),
+    ...fields.override,
+  }
+  return { release, signature: await signRelease(release, secret) }
+}
+
 // ── Chamada ──────────────────────────────────────────────────────────────────
 
 export interface CallOptions {
@@ -179,6 +202,8 @@ export interface CallOptions {
   key?: string | null
   /** Assinatura da autorização (cabeçalho x-food-op-signature). */
   signature?: string | null
+  /** Assinatura do atestado de liberação (cabeçalho x-food-release-signature). */
+  releaseSignature?: string | null
   method?: string
   rawBody?: string
 }
@@ -193,6 +218,7 @@ export async function call<D = undefined>(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (opts.key !== null) headers['x-alber-food-key'] = opts.key ?? SERVICE_KEY
   if (opts.signature) headers['x-food-op-signature'] = opts.signature
+  if (opts.releaseSignature) headers['x-food-release-signature'] = opts.releaseSignature
   const restore = world.live ? () => {} : installWorld(world)
   try {
     const method = opts.method ?? 'POST'

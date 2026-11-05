@@ -1,5 +1,5 @@
 // POST /food-company-create   (Alber Food -> Alber; x-alber-food-key; sem JWT de usuário; verify_jwt padrão, como as takeaway-*)
-//   { owner_ref: uuid, owner: { cpf, name, phone, email? },
+//   { owner_ref: uuid, owner: { cpf, name, phone, email? }, release: <atestado de liberação>,
 //     company: { cnpj, company_name, trading_name?, company_type, email?, tax_regime?,
 //                address: { street, number, complement?, district, cep, city, state }, income_value, handle } }
 //   -> 201 { company_id, handle, kyc_status, account_status, onboarding_url|null, owner_link_check, owner_link_review }
@@ -8,6 +8,10 @@
 // do cadastro dessa conta (nunca de um campo digitado), então não há prova de hash. Reaproveita createCompanyForOwner (_shared/company.ts):
 // conferência do vínculo pelo quadro societário (dígitos 4 a 9 do CPF), disputa de CNPJ, subconta órfã nunca reaproveitada, e os mesmos erros
 // de company-create (CNPJ_UNDER_REVIEW, CNPJ_IN_USE, CNPJ_DUPLICATE, COMPANY_HANDLE_TAKEN...).
+// ATESTADO DE LIBERAÇÃO (obrigatório): no novo onboarding a subconta só nasce depois que a equipe Alber conferiu o responsável contra o CNPJ. O
+// Alber Food assina o atestado (cabeçalho x-food-release-signature; _shared/food-release.ts) amarrado a este dono, a este CNPJ e a este CPF. Sem
+// atestado válido a resposta é 403 INVALID_AUTHORIZATION (sempre a mesma, sem dizer o motivo; o motivo vai para o audit_logs) e nada é criado.
+// Com ele o vínculo do responsável nasce aprovado (owner_link_review = approved).
 // Repetir a chamada do MESMO dono para o MESMO CNPJ devolve a empresa já aberta (200), sem criar outra subconta.
 // Limite: 5 aberturas por dono a cada 15 minutos (cada sucesso cria uma subconta real no Asaas).
 
@@ -17,6 +21,7 @@ import { adminClient, isObject, readServiceBody, sha256hex } from '../_shared/fo
 import { UUID } from '../_shared/food-service.ts'
 import { normalizeCnpj, validateCnpj } from '../_shared/cnpj.ts'
 import { logError } from '../_shared/error-log.ts'
+import { verifyRelease } from '../_shared/food-release.ts'
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
 
@@ -67,6 +72,19 @@ export async function handleRequest(req: Request, deps: CreateCompanyDeps = {}):
 
   const supabaseAdmin = adminClient()
 
+  // Atestado de liberação da equipe: sem ele, nada é criado (nem a repetição devolve empresa).
+  const cnpjForRelease = normalizeCnpj(input.cnpj)
+  const verdict = await verifyRelease(
+    req.headers,
+    body.release,
+    { ownerRef, cnpjHash: await sha256hex(cnpjForRelease), cpfHash: await sha256hex(cpf.replace(/\D/g, '')) },
+    new Date(),
+  )
+  if (!verdict.ok) {
+    await supabaseAdmin.from('audit_logs').insert({ user_id: null, event_type: 'food_op_rejected', metadata: { function: 'food-company-create', kind: 'company_release', owner_ref: ownerRef, reason: verdict.reason } }).then(() => {}, () => {})
+    return err('INVALID_AUTHORIZATION', 'Autorização da operação inválida', 403)
+  }
+
   // Repetição do mesmo dono para o mesmo CNPJ (ex.: timeout na chamada anterior): devolve a empresa que já existe.
   const cnpjClean = normalizeCnpj(input.cnpj)
   if (validateCnpj(cnpjClean)) {
@@ -97,7 +115,7 @@ export async function handleRequest(req: Request, deps: CreateCompanyDeps = {}):
   if ((attempts ?? 0) >= 5) return err('RATE_LIMITED', 'Muitas tentativas. Aguarde alguns minutos.', 429)
   await supabaseAdmin.from('audit_logs').insert({ user_id: null, event_type: 'food_company_create_attempt', metadata: { owner_ref: ownerRef } }).then(() => {}, () => {})
 
-  const result = await createCompanyForOwner(supabaseAdmin, { kind: 'food', ref: ownerRef, cpf, phone: phoneDigits }, input, deps)
+  const result = await createCompanyForOwner(supabaseAdmin, { kind: 'food', ref: ownerRef, cpf, phone: phoneDigits, releasedByTeam: true }, input, deps)
   if (!result.ok) {
     if (result.code === 'DB_ERROR') await logError(supabaseAdmin, 'food-company-create', new Error(result.message), { owner_ref: ownerRef })
     return err(result.code, result.message, result.status)

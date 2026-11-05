@@ -80,7 +80,7 @@ export type CreateCompanyOutcome =
       kyc_status: string
       onboarding_url: string | null
       owner_link_check: OwnerLinkCheck | 'unchecked'
-      owner_link_review: 'not_needed' | 'pending'
+      owner_link_review: 'not_needed' | 'pending' | 'approved'
     }
   | {
       ok: false
@@ -109,6 +109,8 @@ export interface FoodCompanyOwner {
   ref: string
   cpf: string
   phone: string
+  /** A equipe Alber liberou este responsável contra este CNPJ (atestado assinado conferido por food-company-create): o vínculo nasce aprovado. */
+  releasedByTeam?: boolean
 }
 
 interface OwnerRow {
@@ -246,7 +248,9 @@ export async function createCompanyForOwner(
     linkCheck = verdict.check
     linkQualification = verdict.qualification
   }
-  const linkReview = reviewFor(linkCheck)
+  // Liberado pela equipe antes de a subconta existir (novo onboarding do Alber Food): o vínculo nasce aprovado, e a conferência automática acima
+  // fica só como informação (check) para a ficha.
+  const linkReview = food?.releasedByTeam ? 'approved' : reviewFor(linkCheck)
 
   // ── Disputa do CNPJ com uma empresa pendente ─────────────────────────────────────────────────────────────────────────────────
   let takeover: Takeover | null = null

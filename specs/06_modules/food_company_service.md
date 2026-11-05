@@ -104,6 +104,8 @@ Todas em `supabase/functions/<nome>/index.ts`, com testes ao lado (`index.test.t
 
 ### 4.1 `food-company-create`
 
+> **Atestado de liberação (05/11/2026, novo onboarding do Alber Food).** A criação passou a exigir `release` no corpo e o cabeçalho `x-food-release-signature: v1=<hex>` (HMAC-SHA256 do JSON canônico, mesma chave e mesma regra de bytes do `FOOD_OP_SIGNING_KEY`). Campos: `kind: "company_release"`, `request_id`, `owner_ref`, `cnpj_hash` e `cpf_hash` (SHA-256 hex dos dígitos), `decided_at`, `nonce`, `issued_at`, `expires_at` (no máximo 120 s). Significa "a equipe Alber conferiu este responsável contra este CNPJ" (plano: `docs/plano-onboarding-verificacao-manual.md` do Alber Food). Conferido contra o corpo (dono, CNPJ, CPF); qualquer falha dá `403 INVALID_AUTHORIZATION` sempre igual, com o motivo só em `audit_logs` (`food_op_rejected`, `kind: company_release`). Com o atestado o vínculo nasce `approved` (a conferência automática fica só como informação em `owner_link_check`). Sem nonce guardado: repetir o atestado só devolve a empresa já aberta. Código: `_shared/food-release.ts`.
+
 Entrada: `{ owner_ref: uuid, owner: { cpf, name, phone, email? }, company: { cnpj, company_name, trading_name?, company_type: 'MEI'|'LIMITED'|'INDIVIDUAL'|'ASSOCIATION', email?, tax_regime?, address: { street, number, complement?, district, cep, city, state }, income_value: number, handle } }`
 
 Saída `201`: `{ company_id, handle, kyc_status, account_status, onboarding_url|null, owner_link_check, owner_link_review }`.

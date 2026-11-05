@@ -1,6 +1,6 @@
 // Roda com: deno test supabase/functions/food-company-create/index.test.ts --allow-env --allow-net --allow-read
 import { assert, assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
-import { ago, call, CNPJ, COMPANY_ID, CPF, D, EVP, makeWorld, OTHER_OWNER_REF, OWNER_REF, uniq, type World } from '../_shared/food-test-kit.ts'
+import { ago, call, CNPJ, COMPANY_ID, CPF, D, EVP, makeWorld, OTHER_OWNER_REF, OWNER_REF, signedRelease, uniq, type World } from '../_shared/food-test-kit.ts'
 import { aesDecrypt, sha256hex } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import type { CnpjRegistry } from '../_shared/owner-link.ts'
@@ -24,7 +24,17 @@ const validBody = (over: { owner?: Record<string, unknown>; company?: Record<str
 
 const newWorld = (rows: Record<string, Record<string, unknown>[]> = {}) => makeWorld({ override: null, rows })
 const deps = (registry: () => Promise<CnpjRegistry | null> = MATCH) => ({ registry, sleep: async () => {} })
-const run = (w: World, body: unknown, registry?: () => Promise<CnpjRegistry | null>, opts: Parameters<typeof call>[3] = {}) => call(w, handleRequest, body, opts, deps(registry))
+/** Chamada com o atestado de liberação da equipe (válido, amarrado ao dono, CNPJ e CPF do corpo), salvo se `opts.releaseSignature` for dado (inclusive null = sem cabeçalho). */
+const run = async (w: World, body: unknown, registry?: () => Promise<CnpjRegistry | null>, opts: Parameters<typeof call>[3] = {}) => {
+  const b = (body ?? {}) as { owner_ref?: unknown; owner?: { cpf?: unknown }; company?: { cnpj?: unknown } }
+  const sr = await signedRelease({
+    ...(typeof b.owner_ref === 'string' ? { ownerRef: b.owner_ref } : {}),
+    ...(typeof b.company?.cnpj === 'string' ? { cnpj: b.company.cnpj } : {}),
+    ...(typeof b.owner?.cpf === 'string' ? { cpf: b.owner.cpf } : {}),
+  })
+  const withRelease = typeof body === 'object' && body !== null ? { ...(body as object), release: sr.release } : body
+  return call(w, handleRequest, withRelease, { releaseSignature: sr.signature, ...opts }, deps(registry))
+}
 const accountCalls = (w: World) => w.asaas.filter((c) => c.method === 'POST' && c.path === '/accounts')
 const companies = (w: World) => w.db.rows('companies')
 
@@ -33,12 +43,12 @@ Deno.test('abre a empresa do Alber Food sem usuário: owner_id nulo, owner_ref, 
   const r = await run(w, validBody())
   assertEquals(r.status, 201)
   assertEquals(Object.keys(r.data).sort(), ['account_status', 'company_id', 'handle', 'kyc_status', 'onboarding_url', 'owner_link_check', 'owner_link_review'])
-  assertEquals([r.data.handle, r.data.kyc_status, r.data.account_status, r.data.owner_link_check, r.data.owner_link_review], ['meurestaurante', 'pending', 'evaluation', 'match', 'not_needed'])
+  assertEquals([r.data.handle, r.data.kyc_status, r.data.account_status, r.data.owner_link_check, r.data.owner_link_review], ['meurestaurante', 'pending', 'evaluation', 'match', 'approved'])
   assertEquals(r.data.onboarding_url, 'https://docs.test/onboarding')
 
   const [c] = companies(w)
   assertEquals(c?.id, r.data.company_id)
-  assertEquals([c?.owner_id, c?.owner_ref, c?.origin, c?.owner_link_check, c?.owner_link_review, c?.owner_link_qualification], [null, OWNER_REF, 'food', 'match', 'not_needed', 'Sócio-Administrador'])
+  assertEquals([c?.owner_id, c?.owner_ref, c?.origin, c?.owner_link_check, c?.owner_link_review, c?.owner_link_qualification], [null, OWNER_REF, 'food', 'match', 'approved', 'Sócio-Administrador'])
   assertEquals([c?.cnpj, c?.handle, c?.company_type, c?.province, c?.postal_code, c?.city, c?.state], [await sha256hex(CNPJ), 'meurestaurante', 'LIMITED', 'Centro', '01000000', 'São Paulo', 'SP'])
   assertEquals(await decryptSubaccountKey(c?.asaas_api_key_enc as string), 'new-sub-key')
   assertEquals(typeof c?.asaas_deposit_key === 'string' && await aesDecrypt(c.asaas_deposit_key as string, Deno.env.get('ENCRYPTION_KEY')!), EVP)
@@ -57,14 +67,48 @@ Deno.test('abre a empresa do Alber Food sem usuário: owner_id nulo, owner_ref, 
   assertEquals(w.db.rows('audit_logs').find((a) => a.event_type === 'food_company_create')?.user_id, null)
 })
 
-Deno.test('vínculo: CPF fora do quadro societário, sócio sem poderes ou consulta indisponível vão para a revisão da equipe', async () => {
+Deno.test('liberada pela equipe, o vínculo nasce aprovado mesmo que a conferência automática não confirme (ela fica só como informação)', async () => {
   for (const [registry, check] of [[STRANGER, 'mismatch'], [async () => registryWith('***982247**', 'Sócio'), 'partner'], [async () => null, 'unavailable']] as const) {
     const w = await newWorld()
     const r = await run(w, validBody(), registry)
     assertEquals(r.status, 201)
-    assertEquals([r.data.owner_link_check, r.data.owner_link_review], [check, 'pending'])
-    assertEquals(companies(w)[0]?.owner_link_review, 'pending')
+    assertEquals([r.data.owner_link_check, r.data.owner_link_review], [check, 'approved'])
+    assertEquals(companies(w)[0]?.owner_link_review, 'approved')
   }
+})
+
+Deno.test('sem atestado de liberação válido nada é criado: 403 INVALID_AUTHORIZATION sempre igual, com o motivo só no audit_logs', async () => {
+  const good = await signedRelease()
+  const now = Date.now()
+  const cases: [string, Parameters<typeof signedRelease>[0] | null, string][] = [
+    ['sem atestado', null, 'missing_signature'],
+    ['dono diferente', { ownerRef: OTHER_OWNER_REF }, 'owner'],
+    ['CNPJ diferente', { cnpj: '04252011000110' }, 'cnpj'],
+    ['CPF diferente', { cpf: '39053344705' }, 'cpf'],
+    ['vencido', { override: { issued_at: new Date(now - 300_000).toISOString(), expires_at: new Date(now - 200_000).toISOString() } }, 'expired'],
+    ['validade longa demais', { override: { issued_at: new Date(now - 1000).toISOString(), expires_at: new Date(now + 600_000).toISOString() } }, 'ttl'],
+  ]
+  for (const [name, spec, reason] of cases) {
+    const w = await newWorld()
+    const sr = spec ? await signedRelease(spec) : null
+    const body = { ...validBody(), ...(sr ? { release: sr.release } : {}) }
+    const r = await call(w, handleRequest, body, sr ? { releaseSignature: sr.signature } : {}, deps())
+    assertEquals([name, r.status, r.data.code], [name, 403, 'INVALID_AUTHORIZATION'])
+    assertEquals(accountCalls(w).length, 0, name) // nada foi ao Asaas
+    assertEquals(companies(w).length, 0, name)
+    const log = w.db.rows('audit_logs').find((l) => l.event_type === 'food_op_rejected')
+    assertEquals((log?.metadata as Record<string, unknown>)?.reason, reason, name)
+    assertEquals(JSON.stringify(r.data).includes(reason), false, name) // a resposta não diz qual verificação falhou
+  }
+  // Assinatura de outro segredo, corpo adulterado depois de assinado e cabeçalho malformado.
+  const w2 = await newWorld()
+  const other = await signedRelease({}, 'cd'.repeat(32))
+  assertEquals((await call(w2, handleRequest, { ...validBody(), release: other.release }, { releaseSignature: other.signature }, deps())).status, 403)
+  assertEquals((await call(w2, handleRequest, { ...validBody(), release: { ...good.release, nonce: 'x'.repeat(20) } }, { releaseSignature: good.signature }, deps())).status, 403)
+  assertEquals((await call(w2, handleRequest, { ...validBody(), release: good.release }, { releaseSignature: 'v1=zz' }, deps())).status, 403)
+  assertEquals(accountCalls(w2).length, 0)
+  // O atestado correto, uma vez, abre a empresa.
+  assertEquals((await call(w2, handleRequest, { ...validBody(), release: good.release }, { releaseSignature: good.signature }, deps())).status, 201)
 })
 
 Deno.test('CPF do dono inválido 422 CPF_INVALID (sem Asaas); telefone, nome e owner_ref inválidos 422; owner ou company ausentes 400', async () => {

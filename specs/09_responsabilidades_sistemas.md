@@ -1,5 +1,5 @@
 # Alber — Responsabilidades dos três sistemas (Alber, Alber Food, Alber Admin)
-**Versão:** 1.0
+**Versão:** 1.1 (07/11/2026: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
 **Data:** 05/11/2026
 **Status:** Documento de referência. Vale para os três repositórios; cada um deve apontar para ele (ou copiá-lo) no seu `CLAUDE.md`.
 **Depende de:** `00_architecture.md` §4.1, `06_modules/food_company_service.md`, e, nos outros repositórios, `alber-food/rules.md` e `alber-admin/rules.md`.
@@ -168,8 +168,10 @@ Qualquer comunicação **fora** desta tabela é proibida. Precisa de um canal no
 | C6 | Admin → Food | Funções SQL `takeaway.admin_*` (`SECURITY DEFINER`) | papel `admin_app` | Taxas, destravar conta, revogar sessão/convite, suspender restaurante, revisar vínculo do dono. |
 | C7 | Admin ← Alber / Food | Views somente leitura (`admin_v.*`, `admin.v_alber_*`) | papel `admin_app` | Leitura mascarada. Gatilho `INSTEAD OF` recusa escrita. |
 | C8 | Food → sistema do restaurante | Webhook assinado (HMAC-SHA256) / API `/api/v1/*` | assinatura / API key | Exportar pedidos, receber integrações. |
+| C9 | Admin → Alber | Edge Function `admin-parent-balance` (POST, servidor) | `x-alber-admin-key` (`ALBER_ADMIN_KEY`) | **Só leitura** do saldo e extrato da conta pai (tela Plataforma). A chave do Asaas fica no Alber; cada consulta vai para o `audit_logs` do Alber com quem pediu. Único canal HTTP do Admin. |
+| C10 | Food → Alber | `auth-check-handle` e `auth-reserve-handle` | `x-alber-food-key` (a reserva) | **TRANSITÓRIO, a remover (plano P1).** Conferência e reserva de @ no mundo pessoa física do Alber. Contradiz a regra 4; não usar em código novo. `auth-check-email` também aceita a chave do Food, mas o Food não o chama mais: também sai. |
 
-> Alber e Food **não** se enxergam por SQL. Admin enxerga os dois **só por view**.
+> Alber e Food **não** se enxergam por SQL. Admin enxerga os dois **por view** (leitura) e por funções `admin_*` (escrita), mais o canal C9 (leitura).
 
 ### 6.1 Referências opacas
 
@@ -255,7 +257,15 @@ Padrão obrigatório: `SECURITY DEFINER`, `search_path` fixo, checagem do chamad
 | Produto | Funções |
 |---|---|
 | Alber (`public`) | `admin_set_rates`, `admin_unlock_login`, `admin_set_user_status`, `admin_set_company_status`, `admin_decide_limit_request`, `admin_review_company_link`, `admin_reset_company_limits`, `admin_resolve_food_op` |
-| Alber Food (`takeaway`) | `admin_set_fees`, `admin_unlock_account`, `admin_revoke_sessions`, `admin_revoke_invite`, `admin_reset_onboarding_code`, `admin_set_restaurant_status`, `admin_review_owner_link` |
+| Alber Food (`takeaway`) | `admin_set_fees`, `admin_unlock_account`, `admin_revoke_sessions`, `admin_revoke_invite`, `admin_reset_onboarding_code`, `admin_set_restaurant_status`, `admin_review_owner_link`, `admin_decide_receiving_request`, `admin_set_owner_transfer`, `admin_save_space`, `admin_save_space_owner`, `admin_set_space_status`, `admin_set_restaurant_space`, `admin_set_restaurant_location` |
+
+Notas sobre as funções do Food que não são óbvias:
+
+- `admin_decide_receiving_request`: a equipe decide o pedido de conta de recebimento (`release` / `fix` / `reject`). É a conferência manual que dá origem ao atestado `company_release` (§6.2).
+- `admin_set_owner_transfer`: a equipe só **congela, descongela ou cancela** uma troca de titular. **Nunca conclui nem aceita**; quem conclui é o novo dono, no Food, e a execução financeira é do Alber (`food-company-owner-transfer`).
+- Funções de **Spaces** (`admin_save_space*`, `admin_set_space_status`, `admin_set_restaurant_space`, `admin_set_restaurant_location`): Spaces (praça de alimentação, shopping) são dado do domínio do Food, cadastrado pela equipe no Admin. O Admin lê por views e grava só por estas funções.
+
+**Verificação automática:** o Admin tem um teste (`tests/product-contract.test.ts`) que confere que toda função `public.admin_*` / `takeaway.admin_*` chamada pelo código existe nas migrations reais do Alber e do Food. Ao incluir uma função nesta tabela, o teste a cobra.
 
 ---
 
@@ -271,7 +281,21 @@ Padrão obrigatório: `SECURITY DEFINER`, `search_path` fixo, checagem do chamad
 | Segredo do evento Alber → Food (HMAC `timestamp.corpo`) | ✅ | ✅ | ❌ | Janela de 5 min. |
 | `FOOD_BFF_SECRET` (site ↔ `food-api`) | ❌ | ✅ | ❌ | Só site e função do Food. |
 | `APP_PIN_PEPPER`, `APP_ENCRYPTION_KEY` | ❌ | ✅ | ❌ | A `APP_ENCRYPTION_KEY` precisa de backup: sem ela não se decifra o CNPJ. |
+| `ALBER_ADMIN_KEY` (= `x-alber-admin-key`) | ✅ (confere) | ❌ | ✅ (envia) | Canal C9, ≥ 32 caracteres. |
 | `ADMIN_BFF_SECRET`, `ADMIN_ENCRYPTION_KEY`, segredo Google | ❌ | ❌ | ✅ | Só site e função do Admin. |
+
+### 9.1 Mesmo segredo, nomes diferentes (cuidado ao configurar)
+
+O mesmo valor tem nome diferente em cada lado. Configurar o nome errado deixa a função em `503 SERVICE_NOT_CONFIGURED` ou recusa tudo com `401`.
+
+| Valor | Nome no Alber | Nome no Alber Food | Nome no Alber Admin |
+|---|---|---|---|
+| Chave de serviço Food → Alber (`x-alber-food-key`) | `ALBER_FOOD_SERVICE_KEY` | `ALBER_SERVICE_KEY` | — |
+| Chave de assinatura das autorizações | `FOOD_OP_SIGNING_KEY` | `FOOD_OP_SIGNING_KEY` | — |
+| Segredo HMAC do evento de pagamento Alber → Food | `FOOD_WEBHOOK_SECRET` (e `FOOD_WEBHOOK_URL`) | `ALBER_WEBHOOK_SECRET` | — |
+| Token do webhook da conta pai (Asaas → Alber) | `FOOD_ASAAS_WEBHOOK_TOKEN` | — | — |
+| Chave do canal C9 (`x-alber-admin-key`) | `ALBER_ADMIN_KEY` | — | `ALBER_ADMIN_KEY` |
+| URL das funções do Alber | — | `ALBER_FUNCTIONS_URL` (padrão: URL do projeto) | `ALBER_FUNCTIONS_URL` |
 
 ---
 
@@ -332,6 +356,21 @@ Os três publicam separado. O que precisa de ordem:
 5. **Vínculo CPF × KYC do Asaas PJ** não tem garantia técnica por nome; por isso existe a conferência pelo quadro societário e a revisão manual da equipe.
 6. **Unificação futura Alber + Food:** hoje as fronteiras (identidade no Food, dinheiro no Alber) foram desenhadas para permitir a unificação sem refazer o dinheiro. Nenhuma funcionalidade nova deve criar acoplamento que a impeça (ex.: FK entre schemas, dono do restaurante como usuário PF do Alber).
 7. **Painel Admin no spec do Alber** (`08_admin_panel.md`) está desatualizado (é o rascunho de 28/04/2026). A fonte de verdade do Admin é o `rules.md` do repositório `alber-admin`; este documento prevalece nas fronteiras.
+
+---
+
+### 13.1 Desvios conhecidos (auditoria de 07/11/2026)
+
+Código que ainda não está de acordo com este documento. Cada item tem dono e plano; não é desculpa para novo código seguir o mesmo caminho.
+
+| # | Desvio | Regra violada | Plano |
+|---|---|---|---|
+| 1 | O Food ainda chama `auth-check-handle` / `auth-reserve-handle` (`onboarding/service.ts`), reservando @ em `public.handle_reservations`. | Regra 4 e §3.2 (o dono não existe no Alber) | **P1:** função de serviço só para @ de empresa; remover a reserva; entra no corte. |
+| 2 | `auth-check-email` aceita a chave do Food, sem ser chamado. | Superfície sem uso | **P1** |
+| 3 | `takeaway-payment-create` não tem teto para `fee_total_cents` (aceita qualquer valor menor que o total). | Regra 2 (o cofre protege o dinheiro) | **P2:** teto de taxa no Alber, com teste. |
+| 4 | Funções de execução única `admin-backfill-deposit-key`, `admin-diag-carregar`, `admin-fix-pix-key-encryption` (Alber, `service_role`, segredo próprio); o nome "admin-*" confunde com o Alber Admin. | Regra 3 e §5.2 (clareza de quem é o Admin) | **P2:** conferir se estão publicadas; remover ou renomear para `ops-*` e apagar os segredos. |
+| 5 | `receiving/service.ts` (Food) grava `kyc_status = 'rejected'` localmente. | §7 (o `kyc_status` é espelho; fonte é o Alber) | **P4:** verificar se só espelha o que o Alber informou. |
+| 6 | O cliente falso do Food reimplementa a guarda de saque. | Regra 6 (risco de deriva do contrato) | **P4:** vetores de contrato compartilhados. |
 
 ---
 

@@ -231,6 +231,15 @@ Travas: só operação `in_progress` **há mais de 10 minutos** (`CONTAIN_TOO_RE
 - `status`: o que o webhook `TRANSFER_DONE`/`TRANSFER_FAILED` do Asaas grava na transação (`pending` e `processing` → `processing`; `completed`; `failed`). `completed_at`: data do `audit_logs` `descarregar_completed`/`descarregar_failed` do webhook (`transactions` não tem `updated_at`), ou `null` enquanto processa. `failure_code`: sempre `TRANSFER_FAILED` quando falhou (código genérico, nunca texto do Asaas). `amount_cents` e `destination_masked` são os do saque.
 - O Alber não avisa o Food quando o Pix conclui: o Food consulta por esta função.
 
+### 4.11 `food-company-handle-check`
+
+Entrada: `{ handle }` (com ou sem `@`, maiúsculas aceitas). Saída `200`: `{ available: boolean }`. Sem autorização assinada (somente leitura).
+
+- **Substitui `auth-check-handle` para o Alber Food** (plano P1 de `09_responsabilidades_sistemas.md`): aquele é do mundo pessoa física (aberto ao público, com limite por IP e reservas); o Food não depende mais dele.
+- Mesma regra de unicidade de `food-company-create`: o @ não pode existir entre **usuários** (com e sem `@` gravado) nem entre **empresas ativas** (`deleted_at` nulo). Formato inválido (inclusive @ que não começa por letra): `422 HANDLE_INVALID`, sem tocar no banco. Falha de leitura: `503 DB_ERROR` (**nunca** devolve "livre" por erro; o Food trata como "sem resposta" e o `food-company-create` decide no fim com `COMPANY_HANDLE_TAKEN`).
+- **Reservas de @ não contam e não existem mais para o Food:** `auth-reserve-handle` (reserva e liberação) e `auth-check-email` foram **removidas** do código; elas aceitavam a chave do Food e pertenciam ao mundo pessoa física. A tabela `handle_reservations` (migration 050) e o código que ainda a lê (`auth-check-handle`, `auth-register`, `perfil-update-handle`, `company.ts`) ficam até a limpeza pós-corte (a tabela fica vazia; os dados de teste são zerados no corte).
+- Sem limite por IP aqui: a chamada é de servidor para servidor e o Alber Food limita o visitante que digita.
+
 ## 5. Tabela de erros comuns
 
 | Código | HTTP | Quando |
@@ -319,7 +328,8 @@ Pré-requisito do plano: backup completo e autorização explícita do usuário 
 1. **Segredos do Alber** (`supabase secrets set`, pelo usuário, sem colar em chat): `FOOD_OP_SIGNING_KEY` (32 bytes, **o mesmo valor** do Food); conferir que existem `ALBER_FOOD_SERVICE_KEY`, `ENCRYPTION_KEY`, `ASAAS_API_KEY` (+ `ALBER_KEYS_ENCRYPTION_KEY`, ver `05_security.md` §7.1), `ASAAS_WEBHOOK_SECRET`, `ASAAS_ENVIRONMENT`.
 2. **Zerar os dados de teste** (plano §5), com a limpeza das subcontas de teste no Asaas antes, se for o caso.
 3. **Migrations 058 e 059** (`--dry-run` primeiro; a 059 depende da 058: `admin_resolve_food_op` usa `food_ops`). Funções antigas continuam funcionando antes e depois (o caminho do app não envia as colunas novas).
-4. **Funções, nesta ordem:** `webhooks-asaas-pix` e `webhooks-asaas-kyc` (tolerância a nulo; seguem `--no-verify-jwt`), `auth-company-lookup`, `company-limit-request`, `company-create`, `auth-register`, `company-abandon`; depois as 10 novas (`food-company-create`, `-status`, `-balance`, `-set-pix-key`, `-withdraw`, `-limit-request`, `-limit-cancel`, `-owner-transfer`, `-abandon`, `-withdraw-status`) **sem** `--no-verify-jwt`. As funções de `_shared` são empacotadas com cada função: publicar todas as que importam `company.ts`, `company-kyc.ts`, `cnpj-dispute.ts`, `limit-request.ts` e `company-abandon.ts`.
+4. **Funções, nesta ordem:** `webhooks-asaas-pix` e `webhooks-asaas-kyc` (tolerância a nulo; seguem `--no-verify-jwt`), `auth-company-lookup`, `company-limit-request`, `company-create`, `auth-register`, `company-abandon`; depois as 11 novas (`food-company-create`, `-status`, `-balance`, `-set-pix-key`, `-withdraw`, `-limit-request`, `-limit-cancel`, `-owner-transfer`, `-abandon`, `-withdraw-status`, `-handle-check`) **sem** `--no-verify-jwt`. As funções de `_shared` são empacotadas com cada função: publicar todas as que importam `company.ts`, `company-kyc.ts`, `cnpj-dispute.ts`, `limit-request.ts` e `company-abandon.ts`.
+4b. **Remover do projeto** as funções `auth-reserve-handle` e `auth-check-email` (`supabase functions delete`), **depois** de o Food novo estar no ar (o Food antigo ainda as chama).
 5. **Alber Food** (migrations e `food-api`, depois o site) e **Alber Admin** (views e funções), conforme o plano.
 6. **Fumaça** com CNPJs novos (sandbox): abrir empresa, status, chave Pix, saque de R$ 10, extrato, pedido de limite; conferir `food_ops` e `transactions`.
 7. Trocar a chave do Asaas com segurança só depois de `ALBER_KEYS_ENCRYPTION_KEY` definido (nota `05_security.md` §7.1).

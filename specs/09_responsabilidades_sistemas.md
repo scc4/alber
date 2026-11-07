@@ -1,5 +1,5 @@
 # Alber — Responsabilidades dos três sistemas (Alber, Alber Food, Alber Admin)
-**Versão:** 1.1 (07/11/2026: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
+**Versão:** 1.2 (07/11/2026: P1 aplicado no código, @ da empresa pela função de serviço e sem reserva no Alber; v1.1: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
 **Data:** 05/11/2026
 **Status:** Documento de referência. Vale para os três repositórios; cada um deve apontar para ele (ou copiá-lo) no seu `CLAUDE.md`.
 **Depende de:** `00_architecture.md` §4.1, `06_modules/food_company_service.md`, e, nos outros repositórios, `alber-food/rules.md` e `alber-admin/rules.md`.
@@ -160,7 +160,7 @@ Qualquer comunicação **fora** desta tabela é proibida. Precisa de um canal no
 
 | # | De → Para | Canal | Autenticação | Para quê |
 |---|---|---|---|---|
-| C1 | Food → Alber | Edge Functions `food-company-*` (POST, JSON, servidor) | `x-alber-food-key` (`ALBER_FOOD_SERVICE_KEY`) + `apikey`/`Authorization` anon do projeto | Abrir empresa, status, saldo, chave Pix, saque, status do saque, limites, troca de titular, abandono. |
+| C1 | Food → Alber | Edge Functions `food-company-*` (POST, JSON, servidor) | `x-alber-food-key` (`ALBER_FOOD_SERVICE_KEY`) + `apikey`/`Authorization` anon do projeto | Abrir empresa, status, saldo, chave Pix, saque, status do saque, limites, troca de titular, abandono, conferir o @ da empresa (`food-company-handle-check`). |
 | C2 | Food → Alber | Edge Functions `takeaway-payment-create/cancel/refund`, `takeaway-company-statement` | `x-alber-food-key` | Cobrança, cancelamento, estorno e extrato dos pedidos. |
 | C3 | Asaas → Alber | `webhooks-asaas-kyc`, `webhooks-asaas-pix`, `webhooks-asaas-food` | token do Asaas (tempo constante) | KYC, transferências, cobranças. |
 | C4 | Alber → Food | `POST /api/internal/asaas-event` do site do Food | HMAC-SHA256 de `timestamp.corpo`, janela de 5 min | Repassar só eventos de cobrança com referência `food_<id>`. Idempotente no Food (`webhook_events`). |
@@ -169,7 +169,7 @@ Qualquer comunicação **fora** desta tabela é proibida. Precisa de um canal no
 | C7 | Admin ← Alber / Food | Views somente leitura (`admin_v.*`, `admin.v_alber_*`) | papel `admin_app` | Leitura mascarada. Gatilho `INSTEAD OF` recusa escrita. |
 | C8 | Food → sistema do restaurante | Webhook assinado (HMAC-SHA256) / API `/api/v1/*` | assinatura / API key | Exportar pedidos, receber integrações. |
 | C9 | Admin → Alber | Edge Function `admin-parent-balance` (POST, servidor) | `x-alber-admin-key` (`ALBER_ADMIN_KEY`) | **Só leitura** do saldo e extrato da conta pai (tela Plataforma). A chave do Asaas fica no Alber; cada consulta vai para o `audit_logs` do Alber com quem pediu. Único canal HTTP do Admin. |
-| C10 | Food → Alber | `auth-check-handle` e `auth-reserve-handle` | `x-alber-food-key` (a reserva) | **TRANSITÓRIO, a remover (plano P1).** Conferência e reserva de @ no mundo pessoa física do Alber. Contradiz a regra 4; não usar em código novo. `auth-check-email` também aceita a chave do Food, mas o Food não o chama mais: também sai. |
+| ~~C10~~ | ~~Food → Alber~~ | ~~`auth-check-handle`, `auth-reserve-handle`, `auth-check-email`~~ | | **REMOVIDO no P1 (07/11/2026).** A conferência do @ passou para C1 (`food-company-handle-check`); o Food não reserva mais @ no Alber. As funções `auth-reserve-handle` e `auth-check-email` saíram do código do Alber (saem do projeto no corte, depois que o Food novo estiver no ar). |
 
 > Alber e Food **não** se enxergam por SQL. Admin enxerga os dois **por view** (leitura) e por funções `admin_*` (escrita), mais o canal C9 (leitura).
 
@@ -365,8 +365,8 @@ Código que ainda não está de acordo com este documento. Cada item tem dono e 
 
 | # | Desvio | Regra violada | Plano |
 |---|---|---|---|
-| 1 | O Food ainda chama `auth-check-handle` / `auth-reserve-handle` (`onboarding/service.ts`), reservando @ em `public.handle_reservations`. | Regra 4 e §3.2 (o dono não existe no Alber) | **P1:** função de serviço só para @ de empresa; remover a reserva; entra no corte. |
-| 2 | `auth-check-email` aceita a chave do Food, sem ser chamado. | Superfície sem uso | **P1** |
+| 1 | ~~O Food chamava `auth-check-handle` / `auth-reserve-handle`, reservando @ em `public.handle_reservations`.~~ | Regra 4 e §3.2 | **P1 FEITO no código (07/11/2026):** `food-company-handle-check` no Alber, reserva removida do Food. Falta publicar no corte e, depois, apagar as duas funções do projeto e a tabela `handle_reservations` (limpeza pós-corte). |
+| 2 | ~~`auth-check-email` aceitava a chave do Food, sem ser chamado.~~ | Superfície sem uso | **P1 FEITO no código:** função removida; sai do projeto no corte. |
 | 3 | `takeaway-payment-create` não tem teto para `fee_total_cents` (aceita qualquer valor menor que o total). | Regra 2 (o cofre protege o dinheiro) | **P2:** teto de taxa no Alber, com teste. |
 | 4 | Funções de execução única `admin-backfill-deposit-key`, `admin-diag-carregar`, `admin-fix-pix-key-encryption` (Alber, `service_role`, segredo próprio); o nome "admin-*" confunde com o Alber Admin. | Regra 3 e §5.2 (clareza de quem é o Admin) | **P2:** conferir se estão publicadas; remover ou renomear para `ops-*` e apagar os segredos. |
 | 5 | `receiving/service.ts` (Food) grava `kyc_status = 'rejected'` localmente. | §7 (o `kyc_status` é espelho; fonte é o Alber) | **P4:** verificar se só espelha o que o Alber informou. |

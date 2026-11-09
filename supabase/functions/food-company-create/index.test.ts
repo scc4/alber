@@ -137,15 +137,11 @@ Deno.test('validações da empresa (as mesmas de company-create): CNPJ, tipo, ha
   assertEquals(accountCalls(w).length, 0)
 })
 
-Deno.test('@ da empresa já em uso por empresa, por usuário do app ou reservado por outro dono: 409; reserva do próprio dono não bloqueia', async () => {
+Deno.test('@ da empresa já em uso por empresa ou por usuário do app: 409 (não há mais reserva de @ no Alber)', async () => {
   const takenByCompany = await newWorld({ companies: [{ id: uniq('c'), handle: 'meurestaurante', cnpj: 'outro-hash', deleted_at: null, owner_ref: OTHER_OWNER_REF }] })
   assertEquals((await run(takenByCompany, validBody())).data.code, 'COMPANY_HANDLE_TAKEN')
   const takenByUser = await newWorld({ users: [{ id: 'u1', handle: 'meurestaurante' }] })
   assertEquals((await run(takenByUser, validBody())).data.code, 'COMPANY_HANDLE_TAKEN')
-  const reservedByOther = await newWorld({ handle_reservations: [{ handle: 'meurestaurante', owner_ref: OTHER_OWNER_REF }] })
-  assertEquals((await run(reservedByOther, validBody())).data.code, 'COMPANY_HANDLE_TAKEN')
-  const reservedByMe = await newWorld({ handle_reservations: [{ handle: 'meurestaurante', owner_ref: OWNER_REF }] })
-  assertEquals((await run(reservedByMe, validBody())).status, 201)
 })
 
 Deno.test('CNPJ já cadastrado e aprovado por outro: 409 CNPJ_DUPLICATE; pendente de outro dono: 409 CNPJ_UNDER_REVIEW; nada vai ao Asaas', async () => {

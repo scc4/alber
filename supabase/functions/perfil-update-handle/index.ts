@@ -1,7 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
-import { isReservedByOther } from '../_shared/handle-reservation.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -123,7 +122,7 @@ Deno.serve(async (req: Request) => {
     .select('id', { count: 'exact', head: true })
     .eq('handle', newHandleWithAt)
 
-  if ((taken ?? 0) > 0 || (await isReservedByOther(supabaseAdmin, handleClean))) {
+  if ((taken ?? 0) > 0) {
     return err('HANDLE_TAKEN', 'Handle indisponível. Escolha outro.', 422)
   }
 

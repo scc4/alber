@@ -106,14 +106,6 @@ Deno.test('empresa apagada não conta (consulta filtra deleted_at)', async () =>
   }
 })
 
-Deno.test('@ reservado pelo Alber Food → { available: false }', async () => {
-  const res = await withMock(
-    [RATE_OK, AUDIT_INSERT, USERS([]), COMPANIES([]), { pattern: '/rest/v1/handle_reservations', method: 'GET', status: 200, body: [{ owner_ref: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' }] }],
-    () => handleRequest(makeReq('chocolateria')),
-  )
-  assertEquals((await res.json()).available, false)
-})
-
 Deno.test('consulta o @ de usuário nas duas formas gravadas (com e sem "@")', async () => {
   let usersUrl = ''
   const orig = globalThis.fetch

@@ -46,3 +46,14 @@ Deno.test('contrato com o Food: CPF e CNPJ aceitam e recusam os mesmos documento
   for (const v of ['11222333000181', '11.222.333/0001-81']) assertEquals(validateCnpj(v), true, v)
   for (const v of ['11111111111111', '11222333000182', '1122233300018', '']) assertEquals(validateCnpj(v), false, v)
 })
+
+// Guarda de saque: os MESMOS literais estão em alber-food/tests/contract-vectors.test.ts (o cliente falso do Food reimplementa estas regras
+// para os testes dele; se uma regra mudar aqui, o teste de lá quebra e lembra de atualizar o falso).
+import { LIMIT_REQUEST_CAPS, WITHDRAW_RULES } from './withdraw-guard.ts'
+
+Deno.test('contrato: regras da guarda de saque (limite de empresa nova, tetos de aumento e espera da chave aleatória)', () => {
+  assertEquals(
+    [WITHDRAW_RULES.newPerTxBrl, WITHDRAW_RULES.newPerDayBrl, WITHDRAW_RULES.pixKeyWaitHours, LIMIT_REQUEST_CAPS.perTxBrl, LIMIT_REQUEST_CAPS.perDayBrl],
+    [1000, 2000, 48, 500_000, 2_000_000],
+  )
+})

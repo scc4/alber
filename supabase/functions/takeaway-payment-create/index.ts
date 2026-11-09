@@ -22,6 +22,25 @@ import { validateCpf } from '../_shared/cpf.ts'
 const MIN_CENTS = 500
 const MAX_CENTS = 500_000
 
+/**
+ * Teto da taxa que o Alber Food pode reter no split (defesa em profundidade: o Alber é o cofre e não confia só no Food para decidir quanto
+ * do pagamento sai da subconta do restaurante). O valor padrão cobre o MÁXIMO que o Admin consegue configurar (takeaway.admin_set_fees:
+ * taxa Alber até 30% + gateway até 30% + parte fixa até R$ 10,00) com folga de arredondamento. Se esses limites do Admin subirem, suba
+ * este teto junto (ou use FOOD_MAX_FEE_BPS / FOOD_MAX_FEE_FIXED_CENTS). Ver specs/09_responsabilidades_sistemas.md (regra 2).
+ */
+const DEFAULT_MAX_FEE_BPS = 6000
+const DEFAULT_MAX_FEE_FIXED_CENTS = 1000
+function envInt(name: string, fallback: number): number {
+  const raw = Deno.env.get(name)
+  if (raw === undefined || raw === '') return fallback
+  const n = Number(raw)
+  return Number.isInteger(n) && n >= 0 ? n : fallback
+}
+/** Maior taxa total aceita para um pagamento de `amountCents`. */
+export function maxFeeCents(amountCents: number): number {
+  return Math.floor((amountCents * envInt('FOOD_MAX_FEE_BPS', DEFAULT_MAX_FEE_BPS)) / 10_000) + envInt('FOOD_MAX_FEE_FIXED_CENTS', DEFAULT_MAX_FEE_FIXED_CENTS) + 2
+}
+
 interface CreateBody {
   company_id?: unknown
   external_reference?: unknown
@@ -65,6 +84,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!isInt(body.amount_cents) || body.amount_cents < MIN_CENTS || body.amount_cents > MAX_CENTS) return err('INVALID_AMOUNT', 'amount_cents fora do limite', 422)
   // A taxa precisa deixar algo para o restaurante: sem isso o split não existe.
   if (!isInt(body.fee_total_cents) || body.fee_total_cents < 0 || body.fee_total_cents >= body.amount_cents) return err('INVALID_FEE', 'fee_total_cents inválido', 422)
+  if (body.fee_total_cents > maxFeeCents(body.amount_cents)) return err('FEE_ABOVE_CAP', 'fee_total_cents acima do teto do Alber', 422)
   if (name.length < 2 || name.length > 60) return err('INVALID_CUSTOMER', 'customer.name inválido', 422)
   if (phoneDigits && !/^\d{10,11}$/.test(phoneDigits)) return err('INVALID_CUSTOMER', 'customer.phone inválido', 422)
   if (body.customer?.cpf_cnpj !== undefined && body.customer.cpf_cnpj !== null && body.customer.cpf_cnpj !== '' && !(cpfCnpjDigits.length === 11 ? validateCpf(cpfCnpjDigits) : cpfCnpjDigits.length === 14 && validateCnpj(cpfCnpjDigits))) {

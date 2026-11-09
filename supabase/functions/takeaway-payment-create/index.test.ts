@@ -138,6 +138,31 @@ Deno.test('empresa inexistente, apagada ou sem KYC aprovado/carteira/ativa não 
   }
 })
 
+Deno.test('teto de taxa: a maior configuração do Admin (30% + 30% + R$ 10) passa; acima disso o Alber recusa antes de falar com o Asaas', async () => {
+  // 60% de 8600 = 5160, mais R$ 10 fixos = 6160 (e 2 centavos de folga): passa.
+  const ok = await run({ ...good, fee_total_cents: 5160 + 1000 })
+  assertEquals(ok.status, 201)
+  for (const fee of [5160 + 1000 + 3, 8000]) {
+    const r = await run({ ...good, fee_total_cents: fee })
+    assertEquals([r.status, r.json.error], [422, 'FEE_ABOVE_CAP'], String(fee))
+  }
+})
+
+Deno.test('teto de taxa configurável por FOOD_MAX_FEE_BPS / FOOD_MAX_FEE_FIXED_CENTS (valor inválido volta ao padrão)', async () => {
+  Deno.env.set('FOOD_MAX_FEE_BPS', '1000')
+  Deno.env.set('FOOD_MAX_FEE_FIXED_CENTS', '0')
+  try {
+    assertEquals((await run({ ...good, fee_total_cents: 862 })).status, 201) // 10% de 8600 = 860, +2 de folga
+    assertEquals((await run({ ...good, fee_total_cents: 863 })).json.error, 'FEE_ABOVE_CAP')
+    Deno.env.set('FOOD_MAX_FEE_BPS', 'abc')
+    Deno.env.set('FOOD_MAX_FEE_FIXED_CENTS', '')
+    assertEquals((await run({ ...good, fee_total_cents: 6162 })).status, 201) // padrão: 60% + R$ 10
+  } finally {
+    Deno.env.delete('FOOD_MAX_FEE_BPS')
+    Deno.env.delete('FOOD_MAX_FEE_FIXED_CENTS')
+  }
+})
+
 Deno.test('valida o corpo: empresa, referência, método, valores, taxa, cliente e prazo', async () => {
   const bad: [string, Record<string, unknown>][] = [
     ['INVALID_COMPANY', { company_id: 'x' }],

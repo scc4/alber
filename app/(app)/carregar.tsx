@@ -249,17 +249,19 @@ export default function CarregarScreen() {
 
   const handleKycVerify = async () => {
     if (!token) return
-    const table = companyId ? 'companies' : 'users'
-    const idValue = companyId ?? user?.id
-    if (!idValue) return
+    if (!companyId && !user?.id) return
     try {
+      // Leitura direta de users/companies foi fechada (migration 062): o link vem por função, só o do próprio usuário/empresa.
       const res = await fetch(
-        `${SUPABASE_URL}/rest/v1/${table}?id=eq.${idValue}&select=onboarding_url`,
-        { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
+        `${SUPABASE_URL}/rest/v1/rpc/${companyId ? 'get_my_company_onboarding_url' : 'get_my_onboarding_url'}`,
+        {
+          method: 'POST',
+          headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(companyId ? { p_company_id: companyId } : {}),
+        },
       )
       if (res.ok) {
-        const rows: { onboarding_url: string | null }[] = await res.json()
-        const kycUrl = rows?.[0]?.onboarding_url
+        const kycUrl: string | null = await res.json()
         if (kycUrl) {
           setKycWebViewUrl(kycUrl)
           setKycWebViewVisible(true)

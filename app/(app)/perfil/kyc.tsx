@@ -322,13 +322,15 @@ export default function KycScreen() {
     if (!token || !user?.id) return
     ;(async () => {
       try {
-        const res = await fetch(
-          `${SUPABASE_URL}/rest/v1/users?id=eq.${user.id}&select=onboarding_url`,
-          { headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` } },
-        )
+        // Leitura direta de users foi fechada (migration 062): o link do próprio usuário vem por função.
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/get_my_onboarding_url`, {
+          method: 'POST',
+          headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: '{}',
+        })
         if (!res.ok) return
-        const rows: { onboarding_url: string | null }[] = await res.json()
-        setOnboardingUrl(rows?.[0]?.onboarding_url ?? null)
+        const url: string | null = await res.json()
+        setOnboardingUrl(url ?? null)
       } catch { /* silencioso — fluxo de câmera como fallback */ }
     })()
   }, [token, user?.id])

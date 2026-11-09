@@ -37,6 +37,7 @@ Mapa de specs por domínio:
 - /specs/06_modules/ → spec detalhado de cada módulo
 - /specs/07_open_decisions.md → o que está fora do MVP
 - /specs/08_admin_panel.md → painel admin (pós-MVP)
+- /specs/09_responsabilidades_sistemas.md → o que é de cada sistema (Alber, Alber Food, Alber Admin) e o que se sincroniza (LER antes de qualquer trabalho que cruze sistemas)
 
 ## Regras obrigatórias — NUNCA violar
 - NUNCA expor chaves Asaas no app mobile

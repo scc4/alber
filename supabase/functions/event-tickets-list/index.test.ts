@@ -86,7 +86,9 @@ Deno.test('CORS preflight retorna 200 com headers corretos', async () => {
   const req = new Request('http://localhost/event-tickets-list', { method: 'OPTIONS' })
   const res = await withMock([], () => handleRequest(req))
   assertEquals(res.status, 200)
-  assertEquals(res.headers.get('Access-Control-Allow-Origin'), '*')
+  // Sem ALBER_CORS_ORIGIN nenhuma origem é liberada (auditoria de 09/11/2026); os demais cabeçalhos do preflight continuam.
+  assertEquals(res.headers.get('Access-Control-Allow-Origin'), null)
+  assertEquals(res.headers.get('Access-Control-Allow-Methods'), 'POST, GET, OPTIONS')
 })
 
 Deno.test('método GET retorna 405', async () => {

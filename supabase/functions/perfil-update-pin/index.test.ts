@@ -17,6 +17,7 @@ Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
 
 import { handleRequest } from './index.ts'
 import { bcryptHash, pinGuard, hashAnswerForStorage } from '../_shared/crypto.ts'
+import { smsCodeHash } from '../_shared/sms-code.ts'
 
 type MockRoute = { pattern: string; method?: string; status: number; body: unknown }
 
@@ -97,8 +98,8 @@ Deno.test('fluxo completo com sucesso: revoga sessão com o JWT da requisição,
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: [{ id: 'db-user-1', auth_id: AUTH_UUID }] },
     { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: currentPinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
-    { pattern: '/rest/v1/sms_codes', method: 'GET', status: 200, body: [{ id: 'sms-1', code: '123456', expires_at: nowIso, used_at: null }] },
-    { pattern: '/rest/v1/sms_codes', method: 'PATCH', status: 200, body: [] },
+    { pattern: '/rest/v1/sms_codes', method: 'GET', status: 200, body: [{ id: 'sms-1', code_hash: await smsCodeHash('db-user-1', 'pin_change', '123456'), attempts: 0 }] },
+    { pattern: '/rest/v1/sms_codes', method: 'PATCH', status: 200, body: [{ id: 'sms-1' }] },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
     { pattern: '/functions/v1/push-send', method: 'POST', status: 200, body: {} },
   ]

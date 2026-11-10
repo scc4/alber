@@ -30,7 +30,7 @@ function pepperBytes(): Uint8Array<ArrayBuffer> {
 }
 
 /** HMAC-SHA256(pepper, `${domain}:${valueHex}`) em hexadecimal. `domain` separa PIN, resposta e senha de sessão. */
-export async function pepperHex(domain: 'pin' | 'answer' | 'session' | 'cpf', valueHex: string): Promise<string> {
+export async function pepperHex(domain: 'pin' | 'answer' | 'session' | 'cpf' | 'sms', valueHex: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', pepperBytes(), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const sig = await crypto.subtle.sign('HMAC', key, enc.encode(`${domain}:${valueHex}`))
   return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('')

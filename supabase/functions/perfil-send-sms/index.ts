@@ -1,5 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
+import { newSmsCode, smsCodeHash, SMS_TTL_MS } from '../_shared/sms-code.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -110,12 +111,12 @@ Deno.serve(async (req: Request) => {
 
   // ── Gerar e persistir código ──────────────────────────────────────────────
 
-  const code      = String(Math.floor(100000 + Math.random() * 900000))
-  const expiresAt = new Date(Date.now() + 10 * 60_000).toISOString()
+  const code      = newSmsCode()
+  const expiresAt = new Date(Date.now() + SMS_TTL_MS).toISOString()
 
   await supabaseAdmin.from('sms_codes').insert({
     user_id:    user.id,
-    code,
+    code_hash:  await smsCodeHash(user.id, purpose, code),
     purpose,
     expires_at: expiresAt,
   })

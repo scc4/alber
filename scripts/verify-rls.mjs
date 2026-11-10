@@ -1,7 +1,7 @@
 // Verifica o RLS e os privilégios das migrations do Alber em Postgres em memória (PGlite), com stubs do Supabase.
 //
 // Uso:  node scripts/verify-rls.mjs [pasta-das-migrations] [all|pre]
-//   all (padrão) aplica TODAS as migrations e roda as 42 verificações (A1/M2/M3/W/063 da auditoria de 09/11/2026)
+//   all (padrão) aplica TODAS as migrations e roda as verificações (A1/M2/M3/W/063 da auditoria de 09/11/2026)
 //   pre          aplica tudo MENOS a 062 e mostra o comportamento antigo (recursão, CPF legível, etc.)
 // PGlite: a pasta node_modules do repositório alber-food (PGLITE_DIST sobrescreve o caminho do index.js).
 // Sai com código 1 se alguma verificação falhar.
@@ -88,7 +88,7 @@ if (only === 'all') {
   check('A1 security_questions: resposta nunca legivel', denied(await run('authenticated', AA, `select answer_hash from public.security_questions`)) && denied(await run('authenticated', AA, `select answer_enc from public.security_questions`)))
   r = await run('authenticated', AA, `select id, question from public.security_questions`)
   check('A1 security_questions: pergunta continua legivel', r.ok, r.ok ? '' : r.err)
-  check('A1 sms_codes / pending_registrations / error_logs fechadas', denied(await run('authenticated', AA, `select code from public.sms_codes`)) && denied(await run('authenticated', AA, `select cpf_hash from public.pending_registrations`)) && denied(await run('anon', '', `select id from public.error_logs`)))
+  check('A1 sms_codes / pending_registrations / error_logs fechadas', denied(await run('authenticated', AA, `select code_hash from public.sms_codes`)) && denied(await run('authenticated', AA, `select cpf_hash from public.pending_registrations`)) && denied(await run('anon', '', `select id from public.error_logs`)))
   // M3: recursao
   r = await run('authenticated', BA, `select id, owner_id from public.companies`)
   check('M3 operador (B) le companies SEM recursao infinita', r.ok && r.n === 1, r.ok ? `linhas=${r.n}` : r.err)
@@ -145,6 +145,8 @@ if (only === 'all') {
   await db.exec(`DELETE FROM public.users WHERE id = '${C}'`)
   r = await db.query(`select count(*)::int as n from public.user_credentials where user_id = '${C}'`)
   check('063 apagar o usuario apaga as credenciais (cascade)', r.rows[0].n === 0)
+  r = await run('service_role', '', `select column_name from information_schema.columns where table_schema='public' and table_name='sms_codes' and column_name in ('code','code_hash','attempts') order by 1`)
+  check('064 sms_codes: so code_hash e attempts (sem codigo em texto puro)', r.ok && r.rows.map((x) => x.column_name).join() === 'attempts,code_hash', r.ok ? r.rows.map((x) => x.column_name).join() : r.err)
   console.log(`\nresultado: ${pass} ok, ${fail} falhas`)
 } else {
   let r = await run('authenticated', BA, `select cpf from public.users`)

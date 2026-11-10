@@ -2,6 +2,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, savePinCreds, pinMatches, pinGuard, verifyAnswerHash } from '../_shared/crypto.ts'
 import { sendPush } from '../_shared/push.ts'
+import { checkSmsCode } from '../_shared/sms-code.ts'
 
 // SHA-256 de PINs óbvios para comparação com o hash recebido
 const BLOCKED_PIN_HASHES = new Set([
@@ -129,32 +130,10 @@ export async function handleRequest(req: Request): Promise<Response> {
     return err('INVALID_CREDENTIALS', 'Resposta de segurança incorreta', 401)
   }
 
-  // Verificar SMS code
-  const now = new Date().toISOString()
-  const { data: smsRow } = await supabaseAdmin
-    .from('sms_codes')
-    .select('id, code, expires_at, used_at')
-    .eq('user_id', user.id)
-    .eq('purpose', 'pin_change')
-    .is('used_at', null)
-    .gt('expires_at', now)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (!smsRow) {
-    return err('SMS_EXPIRED', 'Código SMS expirado ou inválido. Solicite um novo.', 401)
-  }
-
-  if (smsRow.code !== sms_code.trim()) {
-    return err('SMS_INVALID', 'Código SMS incorreto', 401)
-  }
-
-  // Marcar SMS como usado
-  await supabaseAdmin
-    .from('sms_codes')
-    .update({ used_at: now })
-    .eq('id', smsRow.id)
+  // Verificar SMS code (HMAC, tempo constante, no máximo 5 erros por código, uso único)
+  const smsCheck = await checkSmsCode(supabaseAdmin, user.id, 'pin_change', sms_code)
+  if (smsCheck === 'expired') return err('SMS_EXPIRED', 'Código SMS expirado ou inválido. Solicite um novo.', 401)
+  if (smsCheck === 'invalid') return err('SMS_INVALID', 'Código SMS incorreto', 401)
 
   // Novo PIN: HMAC com pepper + bcrypt do valor com pepper, na tabela privada user_credentials (nunca em app_metadata/JWT).
   // A senha do Supabase Auth é derivada no servidor e não depende do PIN: não há o que trocar lá.

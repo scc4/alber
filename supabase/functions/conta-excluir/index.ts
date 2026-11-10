@@ -17,6 +17,7 @@ import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, p
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
+import { checkSmsCode } from '../_shared/sms-code.ts'
 
 interface ConfirmBody {
   action:                'confirm'
@@ -188,21 +189,9 @@ export async function handleRequest(req: Request): Promise<Response> {
   // ── Verificar SMS code ────────────────────────────────────────────────────
 
   const now = new Date().toISOString()
-  const { data: smsRow } = await supabaseAdmin
-    .from('sms_codes')
-    .select('id, code, expires_at, used_at')
-    .eq('user_id', user.id)
-    .eq('purpose', 'account_delete')
-    .is('used_at', null)
-    .gt('expires_at', now)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (!smsRow) return err('SMS_EXPIRED', 'Código SMS expirado ou inválido. Solicite um novo.', 401)
-  if (smsRow.code !== sms_code.trim()) return err('SMS_INVALID', 'Código SMS incorreto', 401)
-
-  await supabaseAdmin.from('sms_codes').update({ used_at: now }).eq('id', smsRow.id)
+  const smsCheck = await checkSmsCode(supabaseAdmin, user.id, 'account_delete', sms_code)
+  if (smsCheck === 'expired') return err('SMS_EXPIRED', 'Código SMS expirado ou inválido. Solicite um novo.', 401)
+  if (smsCheck === 'invalid') return err('SMS_INVALID', 'Código SMS incorreto', 401)
 
   // ── Efetivar soft delete ─────────────────────────────────────────────────────
   // name/handle/email sobrescritos com placeholder único (handle/email têm

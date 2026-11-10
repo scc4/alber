@@ -29,6 +29,11 @@ const MAX_CENTS = 500_000
  * este teto junto (ou use FOOD_MAX_FEE_BPS / FOOD_MAX_FEE_FIXED_CENTS). Ver specs/09_responsabilidades_sistemas.md (regra 2).
  */
 const DEFAULT_MAX_FEE_BPS = 6000
+/**
+ * Split percentual sobre o líquido (Alber Food, specs/phases/7 do Food, 10/11/2026): o restaurante recebe `restaurant_bps` do líquido. A parte da
+ * Alber é o resto; o teto acompanha o máximo da taxa Alber no Admin (30%), ou FOOD_MAX_ALBER_NET_BPS.
+ */
+const DEFAULT_MAX_ALBER_NET_BPS = 3000
 const DEFAULT_MAX_FEE_FIXED_CENTS = 1000
 function envInt(name: string, fallback: number): number {
   const raw = Deno.env.get(name)
@@ -46,6 +51,9 @@ interface CreateBody {
   external_reference?: unknown
   amount_cents?: unknown
   fee_total_cents?: unknown
+  /** Ausente = split por valor fixo (amount − fee_total). */
+  split_mode?: unknown
+  restaurant_bps?: unknown
   method?: unknown
   customer?: { name?: unknown; phone?: unknown; cpf_cnpj?: unknown }
   description?: unknown
@@ -82,9 +90,19 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!FOOD_REFERENCE.test(reference)) return err('INVALID_REFERENCE', 'external_reference inválida', 422)
   if (method !== 'pix' && method !== 'credit_card') return err('INVALID_METHOD', 'method inválido', 422)
   if (!isInt(body.amount_cents) || body.amount_cents < MIN_CENTS || body.amount_cents > MAX_CENTS) return err('INVALID_AMOUNT', 'amount_cents fora do limite', 422)
-  // A taxa precisa deixar algo para o restaurante: sem isso o split não existe.
-  if (!isInt(body.fee_total_cents) || body.fee_total_cents < 0 || body.fee_total_cents >= body.amount_cents) return err('INVALID_FEE', 'fee_total_cents inválido', 422)
-  if (body.fee_total_cents > maxFeeCents(body.amount_cents)) return err('FEE_ABOVE_CAP', 'fee_total_cents acima do teto do Alber', 422)
+  // Modo do split: valor fixo (padrão) ou percentual sobre o líquido.
+  const percentOfNet = body.split_mode === 'percent_of_net'
+  if (body.split_mode !== undefined && body.split_mode !== null && !percentOfNet) return err('INVALID_SPLIT_MODE', 'split_mode inválido', 422)
+  if (percentOfNet) {
+    // O restaurante precisa receber a maior parte do líquido: a Alber não retém mais que o teto.
+    const minRestaurantBps = 10_000 - envInt('FOOD_MAX_ALBER_NET_BPS', DEFAULT_MAX_ALBER_NET_BPS)
+    if (!isInt(body.restaurant_bps) || body.restaurant_bps < 1 || body.restaurant_bps > 10_000) return err('INVALID_SPLIT', 'restaurant_bps inválido', 422)
+    if (body.restaurant_bps < minRestaurantBps) return err('FEE_ABOVE_CAP', 'restaurant_bps abaixo do mínimo do Alber', 422)
+  } else {
+    // A taxa precisa deixar algo para o restaurante: sem isso o split não existe.
+    if (!isInt(body.fee_total_cents) || body.fee_total_cents < 0 || body.fee_total_cents >= body.amount_cents) return err('INVALID_FEE', 'fee_total_cents inválido', 422)
+    if (body.fee_total_cents > maxFeeCents(body.amount_cents)) return err('FEE_ABOVE_CAP', 'fee_total_cents acima do teto do Alber', 422)
+  }
   if (name.length < 2 || name.length > 60) return err('INVALID_CUSTOMER', 'customer.name inválido', 422)
   if (phoneDigits && !/^\d{10,11}$/.test(phoneDigits)) return err('INVALID_CUSTOMER', 'customer.phone inválido', 422)
   if (body.customer?.cpf_cnpj !== undefined && body.customer.cpf_cnpj !== null && body.customer.cpf_cnpj !== '' && !(cpfCnpjDigits.length === 11 ? validateCpf(cpfCnpjDigits) : cpfCnpjDigits.length === 14 && validateCnpj(cpfCnpjDigits))) {
@@ -108,7 +126,10 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!c || c.deleted_at) return err('COMPANY_NOT_FOUND', 'Empresa não encontrada', 404)
   if (c.kyc_status !== 'approved' || c.account_status === 'blocked' || !c.asaas_wallet_id) return err('COMPANY_NOT_APPROVED', 'Empresa sem conta aprovada', 409)
 
-  const restaurantCents = body.amount_cents - body.fee_total_cents
+  // Percentual: o Asaas desconta a tarifa do meio que o cliente usou (Pix, crédito ou débito) e repassa `restaurant_bps` do líquido.
+  const split = percentOfNet
+    ? [{ walletId: c.asaas_wallet_id, percentualValue: (body.restaurant_bps as number) / 100 }]
+    : [{ walletId: c.asaas_wallet_id, fixedValue: toReais((body.amount_cents as number) - (body.fee_total_cents as number)) }]
   try {
     // Repetição depois de um timeout: devolve a cobrança que já existe em vez de criar outra.
     let existing = await findPaymentByReference(reference, parentKey)
@@ -127,7 +148,7 @@ export async function handleRequest(req: Request): Promise<Response> {
           dueDate: todayBr(),
           description,
           externalReference: reference,
-          split: [{ walletId: c.asaas_wallet_id, fixedValue: toReais(restaurantCents) }],
+          split,
         },
         parentKey,
       )
@@ -138,7 +159,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     await supabaseAdmin.from('audit_logs').insert({
       user_id: null,
       event_type: 'takeaway_payment_created',
-      metadata: { company_id: c.id, reference, amount_cents: body.amount_cents, fee_total_cents: body.fee_total_cents, method, repeated: Boolean(existing) },
+      metadata: { company_id: c.id, reference, amount_cents: body.amount_cents, fee_total_cents: percentOfNet ? null : body.fee_total_cents, split_mode: percentOfNet ? 'percent_of_net' : 'fixed', restaurant_bps: percentOfNet ? body.restaurant_bps : null, method, repeated: Boolean(existing) },
     })
 
     if (method === 'pix') {

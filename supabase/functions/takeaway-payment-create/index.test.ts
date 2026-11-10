@@ -192,3 +192,24 @@ Deno.test('o Asaas recusando vira 502 sem repassar a mensagem do provedor', asyn
   assertEquals([r.status, r.json.error], [502, 'PAYMENT_PROVIDER_ERROR'])
   assertEquals(JSON.stringify(r.json).includes('cpfCnpj'), false)
 })
+
+Deno.test('split percentual sobre o líquido: manda percentualValue ao Asaas (o Asaas desconta a tarifa do meio antes) e dispensa fee_total', async () => {
+  const { fee_total_cents: _drop, ...rest } = good as Record<string, unknown>
+  const r = await run({ ...rest, split_mode: 'percent_of_net', restaurant_bps: 9700 })
+  assertEquals(r.status, 201)
+  const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/payments'))!.body as Record<string, unknown>
+  assertEquals(create.split, [{ walletId: 'wallet-1', percentualValue: 97 }])
+})
+
+Deno.test('split percentual: restaurant_bps inválido ou abaixo do teto da Alber é recusado antes do Asaas; modo desconhecido também', async () => {
+  for (const bps of [undefined, 0, 10_001, 97.5, '9700']) {
+    const r = await run({ ...good, split_mode: 'percent_of_net', restaurant_bps: bps })
+    assertEquals([r.status, (r.json as { error?: string }).error], [422, 'INVALID_SPLIT'])
+  }
+  // Teto padrão: a Alber fica com no máximo 30% do líquido (restaurante >= 70%).
+  const capped = await run({ ...good, split_mode: 'percent_of_net', restaurant_bps: 6999 })
+  assertEquals([capped.status, (capped.json as { error?: string }).error], [422, 'FEE_ABOVE_CAP'])
+  const mode = await run({ ...good, split_mode: 'por-cento' })
+  assertEquals([mode.status, (mode.json as { error?: string }).error], [422, 'INVALID_SPLIT_MODE'])
+  assertEquals(calls.some((c) => c.url.endsWith('/payments') && c.method === 'POST'), false)
+})

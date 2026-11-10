@@ -14,7 +14,7 @@ Deno.test('só referências food_ são do Alber Food', () => {
 })
 
 Deno.test('o corpo vai em centavos inteiros, com o custo real do Asaas', () => {
-  assertEquals(JSON.parse(foodEventBody(evt)), { id: 'evt_1', event: 'PAYMENT_CONFIRMED', payment_id: 'pay_1', external_reference: REF, amount_cents: 8600, gateway_cost_cents: 349, estimated_credit_date: null, credit_date: null })
+  assertEquals(JSON.parse(foodEventBody(evt)), { id: 'evt_1', event: 'PAYMENT_CONFIRMED', payment_id: 'pay_1', external_reference: REF, amount_cents: 8600, gateway_cost_cents: 349, billing_type: null, estimated_credit_date: null, credit_date: null })
   // Sem id no evento, o id é derivado (estável: a reentrega cai na mesma chave).
   assertEquals(JSON.parse(foodEventBody({ event: 'PAYMENT_RECEIVED', payment: { id: 'pay_1', value: 5, externalReference: REF } })).id, 'PAYMENT_RECEIVED:pay_1')
   assertEquals(JSON.parse(foodEventBody({ event: 'X', payment: { id: 'p', externalReference: REF } })).amount_cents, null)
@@ -64,4 +64,11 @@ Deno.test('foodEventBody repassa as datas de compensação só no formato AAAA-M
   assertEquals(body({ estimatedCreditDate: '2026-11-03', creditDate: '2026-11-02' }).estimated_credit_date, '2026-11-03')
   assertEquals(body({ estimatedCreditDate: '2026-11-03', creditDate: '2026-11-02' }).credit_date, '2026-11-02')
   assertEquals(body({ estimatedCreditDate: '03/11/2026; DROP' }).estimated_credit_date, null)
+})
+
+Deno.test('o meio que o cliente usou vai ao Alber Food (crédito, débito ou Pix); outro valor vira null', () => {
+  const debit = JSON.parse(foodEventBody({ ...evt, payment: { ...evt.payment, billingType: 'DEBIT_CARD' } }))
+  assertEquals(debit.billing_type, 'DEBIT_CARD')
+  assertEquals(JSON.parse(foodEventBody({ ...evt, payment: { ...evt.payment, billingType: 'BOLETO' } })).billing_type, null)
+  assertEquals(JSON.parse(foodEventBody(evt)).billing_type, null)
 })

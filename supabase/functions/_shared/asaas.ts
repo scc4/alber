@@ -384,7 +384,8 @@ export interface CreateTakeawayPaymentInput {
   dueDate: string          // YYYY-MM-DD
   description: string
   externalReference: string
-  split: { walletId: string; fixedValue: number }[]
+  /** fixedValue = valor fixo em reais; percentualValue = % do LÍQUIDO (valor − tarifa do meio que o cliente usou), ver docs.asaas.com/docs/split-faq. */
+  split: ({ walletId: string; fixedValue: number } | { walletId: string; percentualValue: number })[]
 }
 
 export async function createTakeawayPayment(

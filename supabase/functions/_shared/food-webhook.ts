@@ -1,13 +1,14 @@
 // Repasse dos eventos de pagamento de pedidos do Alber Food. O Asaas avisa o Alber (webhooks-asaas-pix); quando a
 // referência começa com 'food_' o evento NÃO é do Alber: segue para o Alber Food, assinado.
 //   POST FOOD_WEBHOOK_URL   x-alber-timestamp: <segundos>   x-alber-signature: hex(HMAC-SHA256(segredo, "<ts>.<corpo>"))
-// Corpo: { id, event, payment_id, external_reference, amount_cents, gateway_cost_cents, estimated_credit_date, credit_date }
+// Corpo: { id, event, payment_id, external_reference, amount_cents, gateway_cost_cents, billing_type, estimated_credit_date, credit_date }
+// billing_type: o meio que o cliente usou (PIX, CREDIT_CARD ou DEBIT_CARD); no cartão, crédito ou débito é escolhido na página do Asaas.
 // (valores em centavos; datas AAAA-MM-DD ou null).
 
 export interface AsaasPaymentEvent {
   id?: string
   event: string
-  payment?: { id: string; value?: number; netValue?: number; externalReference?: string; estimatedCreditDate?: string; creditDate?: string }
+  payment?: { id: string; value?: number; netValue?: number; billingType?: string; externalReference?: string; estimatedCreditDate?: string; creditDate?: string }
 }
 
 export const isFoodReference = (ref: string | undefined): boolean => typeof ref === 'string' && ref.startsWith('food_')
@@ -33,6 +34,7 @@ export function foodEventBody(e: AsaasPaymentEvent): string {
     external_reference: p.externalReference,
     amount_cents: value,
     gateway_cost_cents: value !== null && net !== null && value >= net ? value - net : null,
+    billing_type: p.billingType === 'PIX' || p.billingType === 'CREDIT_CARD' || p.billingType === 'DEBIT_CARD' ? p.billingType : null,
     estimated_credit_date: day(p.estimatedCreditDate),
     credit_date: day(p.creditDate),
   })

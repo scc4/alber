@@ -1,5 +1,5 @@
 # Alber — Responsabilidades dos três sistemas (Alber, Alber Food, Alber Admin)
-**Versão:** 1.6 (09/11/2026: corte executado e tudo publicado, §13.2; v1.5: P2b concluído, funções apagadas do projeto; v1.4: P2b no código; v1.3: P2a e P4 aplicados; v1.2: P1 aplicado no código, @ da empresa pela função de serviço e sem reserva no Alber; v1.1: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
+**Versão:** 1.7 (09/11/2026: auditoria de segurança, §13.3; v1.6: corte executado e tudo publicado, §13.2; v1.5: P2b concluído, funções apagadas do projeto; v1.4: P2b no código; v1.3: P2a e P4 aplicados; v1.2: P1 aplicado no código, @ da empresa pela função de serviço e sem reserva no Alber; v1.1: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
 **Data:** 05/11/2026
 **Status:** Documento de referência. Vale para os três repositórios; cada um deve apontar para ele (ou copiá-lo) no seu `CLAUDE.md`.
 **Depende de:** `00_architecture.md` §4.1, `06_modules/food_company_service.md`, e, nos outros repositórios, `alber-food/rules.md` e `alber-admin/rules.md`.
@@ -281,6 +281,7 @@ Notas sobre as funções do Food que não são óbvias:
 | Segredo do evento Alber → Food (HMAC `timestamp.corpo`) | ✅ | ✅ | ❌ | Janela de 5 min. |
 | `FOOD_BFF_SECRET` (site ↔ `food-api`) | ❌ | ✅ | ❌ | Só site e função do Food. |
 | `APP_PIN_PEPPER`, `APP_ENCRYPTION_KEY` | ❌ | ✅ | ❌ | A `APP_ENCRYPTION_KEY` precisa de backup: sem ela não se decifra o CNPJ. |
+| `ALBER_CREDENTIAL_PEPPER` (≥ 32 caracteres) | ✅ | ❌ | ❌ | **Nunca trocar nem perder sem refazer os hashes**: é o pepper de PIN, resposta de segurança, CPF e senha de sessão do app Alber. Falha fechada se ausente. |
 | `ALBER_ADMIN_KEY` (= `x-alber-admin-key`) | ✅ (confere) | ❌ | ✅ (envia) | Canal C9, ≥ 32 caracteres. |
 | `ADMIN_BFF_SECRET`, `ADMIN_ENCRYPTION_KEY`, segredo Google | ❌ | ❌ | ✅ | Só site e função do Admin. |
 
@@ -369,6 +370,31 @@ Verificado em produção por consulta só de leitura e por listagem de funções
 - **Dados:** `public.users` = 0 (nenhuma conta pessoa física). Restam dados de teste já no modelo novo (2 empresas, 2 contas do Food, 2 restaurantes, 4 pedidos, 1 operação de saque); **não foram zerados** por serem posteriores ao corte de identidade e estarem ligados a subcontas do Asaas.
 - **Segredos:** todos os que o código novo exige existem no projeto (`FOOD_OP_SIGNING_KEY`, `APP_PIN_PEPPER`, `ALBER_SERVICE_KEY`, `ALBER_FOOD_SERVICE_KEY`, `ALBER_WEBHOOK_SECRET`, `FOOD_WEBHOOK_SECRET`, `ALBER_ADMIN_KEY`, entre outros). Os valores não são legíveis; a igualdade entre `ALBER_SERVICE_KEY` (Food) e `ALBER_FOOD_SERVICE_KEY` (Alber) foi inferida dos pedidos já criados em produção.
 - **Não verificado de ponta a ponta:** o cadastro novo de restaurante (abertura de empresa, KYC e saque reais no Asaas) não foi exercitado depois do corte; a fumaça cobriu saúde dos sites, início do cadastro e conferência de @.
+
+### 13.3 Auditoria de segurança (09/11/2026)
+
+Escopo: segredos, RLS e privilégios do banco, funções, cabeçalhos, SSRF, logs e dependências, nos três repositórios e no banco de produção. Análise por leitura de código e consultas só de leitura; poucas chamadas de prova.
+
+| # | Achado | Estado |
+|---|---|---|
+| A1 | Colunas sensíveis (CPF, chave cifrada do Asaas, carteira, chave Pix, código SMS) legíveis por `anon`/`authenticated` via REST; o RLS é por linha e as políticas de pares entregavam a linha inteira | **Corrigido e aplicado** (migration 062: acesso por coluna; link de KYC por `get_my_onboarding_url()` / `get_my_company_onboarding_url()`) |
+| A2 | PIN em SHA-256 puro em `app_metadata` (vai no JWT), senha do Supabase Auth = SHA-256 do PIN; resposta de segurança com SHA-256 puro **e texto em claro** (`answer_normalized`) | **Corrigido e publicado** (migration 063, `user_credentials` com HMAC + pepper, senha de sessão derivada no servidor, resposta só cifrada). A resposta cifrada continua decifrável pelo servidor: é inerente a mostrar as opções mascaradas no login |
+| M1 | CPF com SHA-256 puro (`users.cpf`) | **Corrigido** (HMAC com pepper, `cpfHash`). **Não alterado:** CNPJ (dado público de registro) e o `cpf_hash`/`cnpj_hash` do Alber Food, que fazem parte do contrato assinado do atestado com o Alber (`food-release`); trocar exige mudar os dois lados juntos |
+| M2 | `get_user_space_ids` / `get_user_split_ids` executáveis por `anon` com `uid` arbitrário | **Corrigido** (só respondem para o próprio usuário; `anon` sem acesso) |
+| M3 | Recursão infinita nas políticas de `companies`/`company_operators` (`42P17`) | **Corrigido** (funções `SECURITY DEFINER` sem argumento). O harness mostrou que o banco reconstruído só das migrations também tinha recursão em splits/lounges: as políticas de produção (ajustadas à mão) entraram na migration 062 |
+| M4 | Todas as funções do Alber usam `service_role` (o RLS não as protege) | **Aceito, arquitetural**: a autorização é do código de cada função |
+| M5 | CPF cru no log do `auth-login`; `apiKey` da subconta gravável em `error_logs.asaas_response` | **Corrigido** |
+| W | Escrita direta pela API para `anon`/`authenticated` em todas as tabelas | **Corrigido** (revogada, exceto `push_tokens`; privilégios padrão futuros também) |
+| — | `hmacVerify` comparava com `===` | **Corrigido** (tempo constante) |
+| — | Deriva de esquema: funções e políticas existentes só em produção | **Fechada** pela migration 062 (o resto do esquema não foi comparado) |
+| — | `supabase-js@2` flutuante em 86 funções | **Fixado** em `@2.119.0` (a versão que já resolvia) |
+| — | `.claude/settings.local.json` versionado | **Removido do git** |
+
+**Aberto / sem alteração:** CORS `*` nas funções do Alber; CSP com `unsafe-inline` em script (Food e Admin, documentado); SSRF sem checagem de DNS rebinding nos conectores do Food (documentado e mitigado); 33 vulnerabilidades de ferramentas de build no app Expo (`npm audit`); código SMS (`sms_codes.code`) em texto puro e comparado sem tempo constante (curta duração); `alber-admin/owner-setup-link.txt` (arquivo local, fora do git: apagar após o uso); isolamento entre restaurantes do Alber Food e a lógica de saque/step-up **não foram revisados a fundo**.
+
+**Verificado sem problema:** nenhum segredo real no código nem no histórico; `takeaway` e `admin` fora da API REST; nenhuma função de `takeaway`/`admin` executável por `anon`; todas as `SECURITY DEFINER` com `search_path` fixo; o `x-forwarded-for` forjado não é aceito (IP gravado é o real); cookies `httpOnly`/`secure`/`lax`, CSRF por `Origin`, HSTS e CSP nos sites; `npm audit` de produção limpo no Food e no Admin.
+
+Teste de RLS: harness em Postgres em memória (62 migrations reais + stubs do Supabase), 42 verificações; fica nesta sessão e não está no repositório.
 
 ### 13.1 Desvios conhecidos (auditoria de 07/11/2026)
 

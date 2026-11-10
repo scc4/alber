@@ -394,7 +394,7 @@ Escopo: segredos, RLS e privilégios do banco, funções, cabeçalhos, SSRF, log
 
 **Verificado sem problema:** nenhum segredo real no código nem no histórico; `takeaway` e `admin` fora da API REST; nenhuma função de `takeaway`/`admin` executável por `anon`; todas as `SECURITY DEFINER` com `search_path` fixo; o `x-forwarded-for` forjado não é aceito (IP gravado é o real); cookies `httpOnly`/`secure`/`lax`, CSRF por `Origin`, HSTS e CSP nos sites; `npm audit` de produção limpo no Food e no Admin.
 
-Teste de RLS: harness em Postgres em memória (62 migrations reais + stubs do Supabase), 42 verificações; fica nesta sessão e não está no repositório.
+Teste de RLS: `node scripts/verify-rls.mjs` (Postgres em memória com as migrations reais + stubs do Supabase, 42 verificações; usa o PGlite do `alber-food`).
 
 ### 13.1 Desvios conhecidos (auditoria de 07/11/2026)
 

@@ -1,7 +1,7 @@
 # Alber — Plano: Alber Food em projeto Supabase próprio
-**Versão:** 1.1 (D1 decidida em 10/11/2026: começar do zero)
+**Versão:** 1.2 (10/11/2026: D1 = começar do zero; D2 = API HTTP administrativa no Food)
 **Data:** 09/11/2026
-**Status:** Plano. Nada foi implementado. **D1 decidida: começar do zero** (§3.1); D2 a D5 em aberto.
+**Status:** Plano. Nada foi implementado. D1 e D2 decididas; D3 a D5 em aberto (§3).
 **Depende de:** `09_responsabilidades_sistemas.md` (fronteiras e segredos), `06_modules/food_company_service.md` (contrato Food → Alber).
 
 ---
@@ -14,7 +14,7 @@ Hoje Alber, Alber Food e Alber Admin são três produtos no **mesmo projeto Supa
 - **Banco compartilhado.** O papel `takeaway_app` (menor privilégio) protege o acesso normal, mas o ambiente da função também tem a URL de superusuário.
 - **Acoplamento do Admin por SQL.** O Admin lê o Food por views e escreve por funções SQL dentro do mesmo banco (§2.2).
 
-**Objetivo:** depois da separação, comprometer o backend do Food dá acesso **só aos dados e segredos do Food** e à capacidade de pedir operações ao Alber, que continua aplicando os controles dele (destino único do saque, limites, carência de 48 h, vínculo do responsável com o quadro societário, revisão da equipe). Comprometer o Alber deixa de entregar o Food, e vice-versa.
+**Objetivo:** depois da separação, comprometer o backend do Food dá acesso **só aos dados e segredos do Food** e à capacidade de pedir operações ao Alber, que continua aplicando os controles dele (destino único do saque, limites, carência de 48 h, vínculo do responsável com o quadro societário, revisão da equipe). Comprometer o Alber deixa de entregar o Food, e vice-versa. E o **Admin deixa de ter credencial de banco no Food**.
 
 **Por que agora:** não há restaurantes reais (2 empresas, 2 contas, 2 restaurantes e 4 pedidos, todos de teste) e `public.users` está vazio. Migrar com dados reais, depois, custa muito mais.
 
@@ -29,7 +29,7 @@ Hoje Alber, Alber Food e Alber Admin são três produtos no **mesmo projeto Supa
 | Banco | schema `takeaway` no mesmo Postgres; papel `takeaway_app` (RLS, sem `UPDATE/DELETE` em `audit_logs` e `ledger_entries`) via pooler (`FOOD_DATABASE_URL`) | Banco próprio; o papel e as migrations se repetem lá |
 | Função | `food-api` (Deno), `verify_jwt` desligado, protegida por `FOOD_BFF_SECRET` | Publicar no projeto novo |
 | Site | Railway (`food.usealber.com.br`), só conhece `FOOD_API_URL` e `FOOD_BFF_SECRET` | Trocar `FOOD_API_URL` e o segredo |
-| Storage | bucket público `menu-images` (escrita com `service_role` na `SupabaseImageStore`); caminhos relativos no banco | Recriar o bucket, copiar os arquivos; ajustar a CSP `img-src` (o host vem de variável) |
+| Storage | bucket público `menu-images` (escrita com `service_role` na `SupabaseImageStore`); caminhos relativos no banco | Recriar o bucket (vazio); ajustar a CSP `img-src` (o host vem de variável) |
 | Alber | HTTP: `ALBER_FUNCTIONS_URL` (hoje o **padrão é a URL do próprio projeto**), `ALBER_ANON_KEY` (padrão: a anon do próprio projeto), `ALBER_SERVICE_KEY` | Passam a ser **explícitos**, apontando para o projeto do Alber |
 | Pagamento | Alber → Food: webhook assinado para o site (`FOOD_WEBHOOK_URL`), HMAC `ALBER_WEBHOOK_SECRET` | Sem mudança (já é HTTP, entre projetos) |
 | Extensões, cron, realtime | Nenhum no Food (sem `pg_cron`, sem publicação realtime) | Nada a recriar |
@@ -42,37 +42,34 @@ O Alber **não lê** `takeaway` e o Food **não lê** `public` (regras já verif
 
 O Admin vive no banco compartilhado (`admin`, papel `admin_app`) e acessa o Food **por SQL**:
 
-- **30 views** do Admin leem `takeaway.*` (restaurantes, membros, pedidos, pagamentos, livro-razão, estornos, saques, Spaces, pedidos de recebimento, trocas de titular, taxas…), e algumas **juntam `takeaway` com `public`** (migrations `0005_finance_views`, `0010_platform_views`, `0017_food_origin_companies`).
+- **28 views** do Admin leem `takeaway.*` (inventário no Anexo A). **25 são só do Food**; **3 juntam também dados do Alber** (`v_fee_revenue`, `v_fin_fees`, `v_subaccounts`).
 - **14 funções `takeaway.admin_*`** são chamadas por SQL (taxas, destravar login, revogar sessão/convite, suspender restaurante, decisões de recebimento, troca de titular, Spaces).
-- **11 módulos do Admin** tocam dados do Food: `b1-food`, `b2-alber`, `b3-finance`, `c2-fees`, `c3-unlock`, `c4-contain`, `d1-overview`, `e1-platform`, `e4-receiving-requests`, `e5-food-spaces`, `f1-search`.
-- A regra do Admin é gravar a **auditoria na mesma transação da ação**. Com dois bancos isso deixa de ser possível (§4, fase 4).
+- **11 módulos do Admin** tocam dados do Food: `b1-food`, `b2-alber`, `b3-finance`, `c2-fees`, `c3-unlock`, `c4-contain`, `d1-overview`, `e1-platform`, `e4-receiving-requests`, `e5-food-spaces`, `f1-search`. As listas montam `WHERE` dinâmico sobre as views.
+- A regra do Admin é gravar a **auditoria na mesma transação da ação**. Com dois bancos isso deixa de ser possível (fase 2).
 
 ---
 
-## 3. Decisões necessárias
+## 3. Decisões
 
-| # | Decisão | Opções | Recomendação |
-|---|---|---|---|
-| **D1** | O que fazer com os dados de teste do Food | **A)** começar do zero (zerar também as 2 empresas de teste do Alber); **B)** migrar preservando ids | **DECIDIDO em 10/11/2026: A.** Os valores de `APP_ENCRYPTION_KEY` e dos peppers não estão guardados fora do Supabase, então os dados atuais não são migráveis (ver §3.1) |
-| **D2** | Como o Admin acessa o Food | **A)** segunda conexão de banco do Admin ao banco do Food, com papel somente-leitura nas views e `EXECUTE` nas funções `admin_*`; **B)** o Food expõe uma API HTTP de administração (como o Alber expõe `food-company-*`) | **A** no curto prazo (reaproveita as 30 views e as 14 funções sem reescrever); **B** só se quiser eliminar de vez a credencial de banco do Admin no Food |
-| **D3** | Região e plano do projeto novo | mesma região do Alber (`sa-east-1`) | Mesma região; plano de produção (cópia/recuperação pontual). O custo de um segundo projeto entra na conta |
-| **D4** | O Admin também sai do projeto do Alber | agora / depois | **Depois.** O Admin segue no projeto do Alber nesta fase; separá-lo é o mesmo exercício e fica fora deste plano |
-| **D5** | Janela de corte | fora do horário, sem usuários | Como não há usuários, uma janela curta de indisponibilidade é aceitável |
+| # | Decisão | Estado |
+|---|---|---|
+| **D1** | O que fazer com os dados de teste do Food | **DECIDIDA (10/11/2026): começar do zero.** Ver §3.1 |
+| **D2** | Como o Admin acessa o Food depois da separação | **DECIDIDA (10/11/2026): API HTTP administrativa no Food.** O Admin não terá credencial de banco no Food. Desenho no Anexo B |
+| **D3** | Região e plano do projeto novo | Em aberto. Recomendação: mesma região do Alber (`sa-east-1`) e plano de produção (cópia/recuperação pontual). O custo de um segundo projeto entra na conta |
+| **D4** | O Admin também sai do projeto do Alber | Em aberto. Recomendação: **depois**; o Admin segue no projeto do Alber nesta fase |
+| **D5** | Janela de corte | Em aberto. Como não há usuários, uma janela curta de indisponibilidade é aceitável |
 
 ### 3.1 Restrição que decidiu a D1: os segredos do Supabase são só de escrita
 
-O Supabase não devolve o valor de um segredo depois de gravado. Para **preservar** os dados do Food, você precisa ter guardados, fora do Supabase, os valores de `APP_ENCRYPTION_KEY` (cifra de CNPJ/CPF e das credenciais das integrações), `APP_PIN_PEPPER` e `APP_PASSWORD_PEPPER`.
+O Supabase não devolve o valor de um segredo depois de gravado. Para **preservar** os dados do Food seria preciso ter guardados fora do Supabase os valores de `APP_ENCRYPTION_KEY` (cifra de CNPJ/CPF e das credenciais das integrações), `APP_PIN_PEPPER` e `APP_PASSWORD_PEPPER`. **Não estão guardados** (confirmado em 10/11/2026): os dados atuais ficariam ilegíveis e os PINs deixariam de conferir. Por isso a opção de começar do zero.
 
-- Se **você tem** os valores: a opção B é possível (copiar os segredos e restaurar os dados).
-- Se **não tem** (**é o caso, confirmado em 10/11/2026**): os CNPJs, CPFs e credenciais já gravados ficam ilegíveis, e os PINs deixam de conferir (o dono recuperaria o PIN pelo fluxo de e-mail + pergunta). Por isso a opção A.
-- `FOOD_OP_SIGNING_KEY`, `ALBER_SERVICE_KEY` (= `ALBER_FOOD_SERVICE_KEY` no Alber) e `ALBER_WEBHOOK_SECRET` (= `FOOD_WEBHOOK_SECRET`) podem simplesmente ser **trocados**: gere um valor novo e grave o mesmo valor nos dois projetos.
+**Consequências da D1 = começar do zero**
 
-**Consequências da D1 = A**
-
-- Nenhum dado do Food é migrado: o banco do projeto novo nasce **vazio** (só as migrations), sem dump nem restauração, e o bucket `menu-images` não precisa de cópia. Isso **simplifica as fases 1, 2 e 5**.
-- As **2 empresas de teste do Alber** (origem `food`) e a operação de saque de teste (`food_ops`) ficam órfãs, porque apontam para contas do Food que deixam de existir. Devem ser **zeradas no corte** (com a nota de que as subcontas correspondentes ficam órfãs no Asaas; se o ambiente for sandbox, sem custo).
-- Os 4 pedidos, os 2 restaurantes e as 2 contas de teste do Food são descartados. O cadastro e a abertura de empresa serão refeitos no projeto novo.
-- **Todos os segredos do Food são gerados novos** (`APP_ENCRYPTION_KEY`, `APP_PIN_PEPPER`, `APP_PASSWORD_PEPPER`, `FOOD_BFF_SECRET`, `FOOD_OP_SIGNING_KEY`, chaves de serviço e do webhook). **Desta vez cada valor é guardado num gerenciador de senhas no momento em que é gerado**, antes de gravar no Supabase.
+- Nenhum dado do Food é migrado: o banco do projeto novo nasce **vazio** (só as migrations), sem dump nem restauração, e o bucket `menu-images` não precisa de cópia.
+- As **2 empresas de teste do Alber** (origem `food`) e a operação de saque de teste (`food_ops`) ficam órfãs e devem ser **zeradas no corte** (as subcontas correspondentes ficam órfãs no Asaas; em sandbox, sem custo).
+- Os 4 pedidos, os 2 restaurantes e as 2 contas de teste do Food são descartados; cadastro e abertura de empresa serão refeitos no projeto novo.
+- **Todos os segredos do Food são gerados novos**, e **cada valor é guardado num gerenciador de senhas no momento em que é gerado**, antes de gravar no Supabase.
+- `FOOD_OP_SIGNING_KEY`, `ALBER_SERVICE_KEY` (= `ALBER_FOOD_SERVICE_KEY`) e `ALBER_WEBHOOK_SECRET` (= `FOOD_WEBHOOK_SECRET`) também são trocados: valor novo, o **mesmo** nos dois projetos.
 
 > **Alerta operacional (vale já, antes da separação):** os valores atuais desses segredos existem **só** dentro do Supabase. Se algum for sobrescrito por engano, os dados que ele protege ficam perdidos sem volta. Sempre que um segredo novo for criado, guarde o valor fora do Supabase na mesma hora.
 
@@ -83,97 +80,99 @@ O Supabase não devolve o valor de um segredo depois de gravado. Para **preserva
 ```
  Projeto Supabase "alber" (public, admin)              Projeto Supabase "alber-food" (takeaway)
  ┌──────────────────────────────────────┐              ┌───────────────────────────────────────┐
- │ Edge Functions do Alber              │  HTTP        │ Edge Function food-api                │
- │  food-company-*, takeaway-*          │◀────────────│  (x-alber-food-key + op assinada)     │
- │  webhooks-asaas-*                    │              │ Postgres: schema takeaway             │
- │ admin-api  ───────────────┐          │──webhook────▶│ Storage: menu-images                  │
- │ Postgres: public, admin   │          │ (via site)   │ Segredos: SÓ os do Food               │
- │ Segredos: Asaas, Alber…   │          │              └───────────────▲───────────────────────┘
- └───────────────────────────┼──────────┘                              │
-                             │ conexão 2 (somente leitura nas views +  │
-                             └──── EXECUTE nas funções admin_*) ───────┘
+ │ Edge Functions do Alber              │  HTTP        │ food-api    (site: x-food-bff-secret) │
+ │  food-company-*, takeaway-*          │◀────────────│  chama o Alber: chave de serviço +    │
+ │  webhooks-asaas-*                    │              │  operação assinada                    │
+ │                                      │──webhook────▶│ food-admin  (Admin: chave + assinatura)│
+ │ admin-api ───────────────────────────┼──── HTTP ───▶│  leituras tipadas + 14 ações          │
+ │ Postgres: public, admin              │              │ Postgres: schema takeaway             │
+ │ Segredos: Asaas, Alber, Admin        │              │ Storage: menu-images                  │
+ └──────────────────────────────────────┘              │ Segredos: SÓ os do Food               │
+                                                       └───────────────▲───────────────────────┘
  Site do Food (Railway) ──▶ food-api do projeto novo (FOOD_API_URL, FOOD_BFF_SECRET)
 ```
 
-Fronteiras que **não mudam** (spec 09): dinheiro só no Alber; identidade só no Food; o Admin não move dinheiro; canais C1 a C9 continuam os mesmos.
+Fronteiras que **não mudam** (spec 09): dinheiro só no Alber; identidade só no Food; o Admin não move dinheiro. Muda o **canal do Admin com o Food**: deixa de ser SQL (funções e views) e passa a ser HTTP (novo canal C11, §Anexo B).
 
 ---
 
 ## 5. Inventário de segredos
 
-Marque a origem do valor antes do corte. Nenhum valor deve passar por chat; use a CLI e o seu gerenciador de senhas.
+Nenhum valor deve passar por chat; use a CLI e o seu gerenciador de senhas.
 
-| Segredo | Fica no projeto Food | Fica no projeto Alber | Como obter o valor novo |
+| Segredo | Projeto Food | Projeto Alber | Como obter o valor novo |
 |---|---|---|---|
-| `FOOD_BFF_SECRET` | ✅ | ❌ (remover) | Mesmo valor do Railway (ou trocar nos dois) |
-| `APP_ENCRYPTION_KEY`, `APP_ENCRYPTION_KEY_V` | ✅ | ❌ (remover) | **Só a opção B** (valor guardado por você); na A, gerar novo |
-| `APP_PIN_PEPPER`, `APP_PASSWORD_PEPPER` | ✅ | ❌ (remover) | Idem |
-| `FOOD_OP_SIGNING_KEY` | ✅ | ✅ | Gerar novo; gravar o **mesmo** valor nos dois |
+| `FOOD_BFF_SECRET` | ✅ | ❌ (remover) | Gerar novo; gravar no Railway |
+| `APP_ENCRYPTION_KEY`, `APP_ENCRYPTION_KEY_V` | ✅ | ❌ (remover) | Gerar novo (D1 = A) |
+| `APP_PIN_PEPPER`, `APP_PASSWORD_PEPPER` | ✅ | ❌ (remover) | Gerar novo |
+| `FOOD_OP_SIGNING_KEY` | ✅ | ✅ | Gerar novo; mesmo valor nos dois |
 | `ALBER_SERVICE_KEY` (Food) = `ALBER_FOOD_SERVICE_KEY` (Alber) | ✅ | ✅ | Gerar novo; mesmo valor nos dois |
 | `ALBER_WEBHOOK_SECRET` (Food) = `FOOD_WEBHOOK_SECRET` (Alber) | ✅ | ✅ | Gerar novo; mesmo valor nos dois |
+| `FOOD_ADMIN_KEY` e `FOOD_ADMIN_SIGNING_KEY` (novos, canal C11) | ✅ (confere) | ✅ (o Admin envia) | Gerar novos; mesmo valor nos dois |
 | `ALBER_FUNCTIONS_URL`, `ALBER_ANON_KEY` | ✅ (**explícitos**) | — | URL e anon key do projeto do Alber |
+| `FOOD_ADMIN_URL` (novo) | — | ✅ | URL da função `food-admin` |
 | `FOOD_DATABASE_URL`, `FOOD_DB_ROLE` | ✅ | ❌ (remover) | Novo pooler do projeto do Food |
 | `RESEND_API_KEY`, `EMAIL_FROM` | ✅ | ✅ (o Admin, que fica nesse projeto, também envia e-mail) | Preferir chave própria para o Food |
 | `WEB_PUSH_*`, `IFOOD_*`, `CARDAPIOWEB_PARTNER_KEY`, `CNPJ_LOOKUP`, `OWNER_LINK_LOOKUP` | ✅ | ❌ (remover) | Mesmos valores |
 | `ASAAS_API_KEY`, `ALBER_KEYS_ENCRYPTION_KEY`, `ALBER_CREDENTIAL_PEPPER`, demais do Alber/Admin | ❌ | ✅ | **Nunca** no projeto do Food |
 
-O projeto do Food passa a ter só o que o Food precisa (mais o `SUPABASE_SERVICE_ROLE_KEY` e a URL de banco **do próprio projeto**, que agora só enxergam dados do Food).
-
 ---
 
 ## 6. Fases
 
-Cada fase tem passos, como verificar e como voltar. As fases 1 a 3 não afetam o que está no ar.
+**Ideia central da D2:** a API administrativa do Food é construída e adotada **antes** de o Food mudar de projeto. Assim o trabalho pesado (fases 1 e 2) acontece com tudo ainda no projeto atual, onde se testa paridade com o comportamento de hoje; a mudança de projeto (fases 3 a 7) fica quase só configuração.
 
 ### Fase 0 — Preparação (sem risco)
-1. Decidir D1 a D5. Se D1 = B, confirmar que você tem os segredos (§3).
-2. Criar o projeto `alber-food` (mesma região, plano de produção), ativar a cópia/recuperação pontual e a verificação em dois fatores na conta.
-3. Registrar o `project-ref`, a URL, a anon key, o pooler e a senha do banco **fora do repositório**.
-- **Verificar:** projeto criado, vazio, acessível pela CLI.
+1. D3 a D5 decididas. Regra de guarda de segredos (§3.1) combinada.
+2. Contrato da API administrativa revisado (Anexo B).
+3. Criar o projeto `alber-food` (mesma região, plano de produção), ativar a cópia/recuperação pontual e a verificação em dois fatores; guardar `project-ref`, URL, anon key, pooler e senha **fora do repositório**.
 
-### Fase 1 — Banco do Food
-1. Aplicar as migrations do Food (`db/migrations`, 0001 a 0039+) no projeto novo, com o runner apontado para ele. **Banco vazio**: não há dump nem restauração (D1 = A).
+### Fase 1 — API administrativa do Food (no projeto atual)
+1. Nova função `food-admin` no repositório do Food, com a lógica das 28 views movida para consultas internas (acessadas como `takeaway_app`) e as 14 ações chamando as funções `takeaway.admin_*` já existentes (ou o equivalente em SQL do próprio Food).
+2. Autenticação, assinatura, idempotência e auditoria própria do Food (Anexo B).
+3. Testes do Food (vitest + PGlite) por endpoint, com paridade: a mesma massa de dados deve produzir o que as views produzem hoje.
+- **Verificar:** suíte do Food; contrato publicado em `docs/food-admin-api.md`.
+- **Voltar:** a função é nova e não é chamada por ninguém ainda; apagá-la.
+
+### Fase 2 — Admin passa a usar a API (ainda no projeto atual)
+1. Cliente HTTP tipado no Admin (`lib/food-admin-client.ts`), com os mesmos tipos de resposta do contrato.
+2. Nos 11 módulos, trocar a origem dos dados do Food (views e funções SQL) pelo cliente. As 3 views mistas passam a ser **duas consultas combinadas no código do Admin**: a parte do Alber vem do banco do Admin, a do Food vem da API.
+3. **Auditoria sem transação única.** Gravar a auditoria **antes**, com situação `pendente` (já confirmada), chamar a ação do Food (idempotente pelo `action_id`) e então gravar o desfecho (`aplicada` ou `falhou`). Garantia mantida: **nenhuma ação existe sem registro de auditoria**; o pior caso é um registro `pendente` sem ação, visível e conciliável. O padrão já existe nas taxas (`fee_changes`) e nas contenções (`containment_actions`).
+4. Dado pessoal: o Admin passa a receber do Food **mascarado por padrão**; revelar um campo vira uma chamada própria, com permissão, 2FA recente e motivo (e o Food grava o motivo e o autor).
+5. Depois de estável: **apagar as views do Admin sobre o Food** e o acesso do Admin ao schema `takeaway`; trocar `product-contract.test.ts` (funções SQL) por um **teste de contrato HTTP** (vetores de assinatura + esquemas das respostas, iguais nos dois repositórios).
+- **Verificar:** suíte do Admin (hoje 463 testes); uma ação de teste por módulo (taxa, destravar, suspender) conferindo auditoria e efeito; comparação lado a lado das telas com os dados atuais.
+- **Voltar:** reverter o Admin para as views (as views só são apagadas ao fim da fase).
+
+### Fase 3 — Banco do Food no projeto novo
+1. Aplicar as migrations do Food no projeto novo. **Banco vazio** (D1 = A).
 2. Criar o papel `takeaway_app` e o pooler; conferir RLS e `REVOKE` nas tabelas imutáveis (`audit_logs`, `ledger_entries`).
-3. Criar o papel somente-leitura do Admin para o Food (D2 = A): `SELECT` só nas views `admin_v` do Food e `EXECUTE` só nas funções `admin_*`.
-- **Verificar:** `npm test` do Food contra o banco novo; consulta de privilégios (nenhum acesso de `anon`/`authenticated` ao schema `takeaway`); schema idêntico ao do banco antigo (mesmas tabelas, políticas e funções).
-- **Voltar:** apagar o projeto novo; nada no ar mudou.
+- **Verificar:** `npm test` do Food contra o banco novo; nenhum acesso de `anon`/`authenticated` ao schema `takeaway`; schema idêntico ao do banco antigo.
+- **Voltar:** apagar o projeto novo.
 
-### Fase 2 — Função, Storage e segredos do Food
-1. **Gerar** os segredos do Food (§5), **guardar cada valor no gerenciador de senhas** e só então gravá-los no projeto novo, com `ALBER_FUNCTIONS_URL` e `ALBER_ANON_KEY` **explícitos**.
-2. Publicar a `food-api` (sem `--verify-jwt`, como hoje) com a região correta (`x-region` já é tratado pelo cliente do site).
+### Fase 4 — Funções, Storage e segredos no projeto novo
+1. **Gerar** os segredos do Food (§5), **guardar cada valor no gerenciador de senhas** e só então gravá-los, com `ALBER_FUNCTIONS_URL` e `ALBER_ANON_KEY` **explícitos**.
+2. Publicar `food-api` e `food-admin` (sem `--verify-jwt`, como hoje).
 3. Criar o bucket `menu-images` (vazio) com as mesmas regras; a CSP `img-src` passa a usar o host novo (variável existente).
 4. Ajustar o workflow "Deploy backend (Supabase)" e o `migrate-remote` para o novo `project-ref`.
-- **Verificar:** `GET /api/health` do site de teste contra a função nova; chamada direta sem segredo devolve 401.
-- **Voltar:** apagar a função nova; o site continua apontando para a antiga.
+- **Verificar:** saúde do site de teste contra a função nova; chamada direta sem segredo devolve 401 nas duas funções.
 
-### Fase 3 — Alber (só configuração)
-1. Gravar no projeto do Alber os valores **novos** de `ALBER_FOOD_SERVICE_KEY`, `FOOD_OP_SIGNING_KEY` e `FOOD_WEBHOOK_SECRET`/`FOOD_WEBHOOK_URL` (mesmos valores do Food).
-2. Nenhuma função do Alber muda de código: `food-company-*` e `takeaway-*` já falam HTTP com chave de serviço.
-- **Verificar:** conferência cruzada Food ↔ Alber (assinatura, vetores de `contract-vectors.test`), chamada de `food-company-handle-check` e `food-company-status` do projeto novo.
+### Fase 5 — Alber (só configuração)
+1. Gravar no projeto do Alber os valores **novos** de `ALBER_FOOD_SERVICE_KEY`, `FOOD_OP_SIGNING_KEY`, `FOOD_WEBHOOK_SECRET`/`FOOD_WEBHOOK_URL`, `FOOD_ADMIN_KEY`, `FOOD_ADMIN_SIGNING_KEY` e `FOOD_ADMIN_URL` (mesmos valores do Food).
+2. Nenhuma função do Alber muda de código.
+- **Verificar:** conferência cruzada Food ↔ Alber (assinatura, vetores de `contract-vectors.test`); `food-company-handle-check` e `food-company-status` com o projeto novo; teste de contrato do canal C11.
 
-### Fase 4 — Alber Admin com duas conexões (a fase pesada)
-1. Acrescentar a conexão ao banco do Food (D2 = A): variável nova, pool próprio, papel somente-leitura (fase 1).
-2. Mover as **30 views do Admin sobre o Food** para o banco do Food (schema `admin_v` lá) e as migrations delas para o repositório do Food ou para uma pasta do Admin aplicada nesse banco. Reescrever as **junções entre `takeaway` e `public`** (`0005`, `0010`, `0017`) como **duas consultas combinadas no código** do Admin (os volumes são pequenos).
-3. Trocar nos 11 módulos a origem dos dados do Food para o pool novo.
-4. **Auditoria sem transação única.** Hoje a auditoria entra "na mesma transação da ação". Com dois bancos: gravar a auditoria **antes** com situação `pendente` (já confirmada), chamar a função `takeaway.admin_*` (idempotente, com `expected`), e então gravar o desfecho (`aplicada` ou `falhou`). Garantia mantida: **nenhuma ação existe sem registro de auditoria**; o pior caso é um registro `pendente` sem ação, visível e conciliável. O padrão já existe nas taxas (`fee_changes`) e nas contenções (`containment_actions`).
-5. Atualizar `product-contract.test.ts` para checar as funções do Food nas migrations do repositório do Food **e** seu `GRANT` ao novo papel.
-- **Verificar:** suíte do Admin (hoje 463 testes) com os dois bancos em PGlite; ação de teste por módulo (taxa, destravar, suspender) conferindo auditoria e efeito.
-- **Voltar:** a conexão nova é aditiva; sem ela o Admin continua lendo o banco antigo até o corte.
+### Fase 6 — Corte (janela curta, sem usuários)
+1. Pausar pedidos no Food antigo.
+2. Confirmar que o banco novo está vazio; zerar no Alber as 2 empresas de teste de origem `food` e a operação de saque de teste (`food_ops`).
+3. No Railway: trocar `FOOD_API_URL` e `FOOD_BFF_SECRET`; publicar. No Admin: trocar `FOOD_ADMIN_URL` (e as chaves).
+4. Fumaça: cadastro de restaurante, abertura de empresa (sandbox), saque de R$ 10, pedido pago e uma ação do Admin (taxa).
+- **Voltar:** devolver os valores antigos no Railway e no Admin (a função e o banco antigos seguem intactos durante o período de observação).
 
-### Fase 5 — Corte (janela curta, sem usuários)
-1. Congelar escrita no Food antigo (pausar pedidos / manter a função antiga só leitura).
-2. Confirmar que o banco novo está vazio (D1 = A: nada é migrado).
-3. Zerar no Alber as 2 empresas de teste de origem `food` e a operação de saque de teste (`food_ops`), que ficam órfãs.
-4. No Railway: trocar `FOOD_API_URL` e `FOOD_BFF_SECRET` para o projeto novo; publicar.
-5. No Admin: ligar a conexão nova como padrão para os dados do Food.
-6. Fumaça: cadastro de restaurante, abertura de empresa (sandbox), saque de R$ 10, pedido pago, ação do Admin (taxa).
-- **Voltar:** devolver `FOOD_API_URL` e o segredo antigos no Railway (a função antiga continua publicada e o banco antigo intacto durante o período de observação).
-
-### Fase 6 — Limpeza (depois de alguns dias estável)
-1. No projeto do Alber: apagar o schema `takeaway`, o papel `takeaway_app`, a função `food-api` e **todos os segredos exclusivos do Food** (§5, coluna "Alber ❌").
+### Fase 7 — Limpeza (depois de alguns dias estável)
+1. No projeto do Alber: apagar o schema `takeaway`, o papel `takeaway_app`, as funções `food-api` e `food-admin` e **todos os segredos exclusivos do Food** (§5, coluna "Alber ❌").
 2. Revogar o token de deploy antigo do Food; cada projeto com o seu.
-3. Atualizar `09_responsabilidades_sistemas.md` (§8 banco compartilhado, §9 segredos, §10 deploy), o `CLAUDE.md` dos três repositórios e a nota de memória.
-- **Verificar:** `supabase secrets list` do Alber sem nomes do Food; consulta de catálogo sem `takeaway`; o teste de contrato do Admin passando.
+3. Atualizar `09_responsabilidades_sistemas.md` (canal C11, §8 banco, §9 segredos, §10 deploy), os `CLAUDE.md` dos três repositórios e a nota de memória.
+- **Verificar:** `supabase secrets list` do Alber sem nomes do Food; catálogo sem `takeaway`; testes de contrato passando.
 
 ---
 
@@ -181,32 +180,77 @@ Cada fase tem passos, como verificar e como voltar. As fases 1 a 3 não afetam o
 
 | Risco | Mitigação |
 |---|---|
-| Segredo perdido (`APP_ENCRYPTION_KEY`) impede preservar os dados | **Resolvido pela D1 = A** (dados de teste descartados). Daqui em diante, todo segredo novo é guardado fora do Supabase ao ser gerado |
-| Auditoria do Admin sem transação única | Auditar antes (`pendente`), agir com função idempotente, registrar o desfecho (fase 4, item 4) |
-| Junções `takeaway` × `public` das views do Admin | Duas consultas combinadas no código (volumes pequenos); testes de paridade com o resultado atual |
-| Latência Food → Alber entre projetos | Mesma região; o Food já chama o Alber por HTTP hoje (a diferença é só o host) |
-| URLs de imagem e CSP | Caminhos relativos no banco; host na variável da CSP; cópia do bucket antes do corte |
-| Chaves trocadas fora de sincronia (assinatura, serviço, webhook) | Gravar os mesmos valores nos dois projetos no mesmo passo; conferência cruzada e vetores de contrato antes do corte |
+| Segredo perdido impede preservar dados | **Resolvido pela D1 = A.** Daqui em diante, todo segredo novo é guardado fora do Supabase ao ser gerado |
+| Auditoria do Admin sem transação única | Auditar antes (`pendente`), agir com ação idempotente (`action_id`), registrar o desfecho |
+| A API administrativa vira um canal poderoso | Lista **fechada** de ações (as 14 de hoje, sem nenhuma financeira), chave e assinatura próprias, validade curta e nonce, limites por ação, auditoria própria no Food; compromisso do Admin **não** move dinheiro (o Food não expõe nada disso) |
+| Paridade de dados entre a API e as views | Testes lado a lado na fase 1 e comparação das telas na fase 2, antes de apagar as views |
+| Filtros dinâmicos das listas do Admin | Filtros **tipados e fechados** por endpoint; sem `WHERE` livre, sem SQL no contrato |
+| Latência e falhas de rede Admin → Food | Leituras repetíveis; ações idempotentes (repetir é seguro); tempo limite e mensagem clara; fila `pendente` conciliável |
+| Mais dado pessoal viajando pela rede | Mascarado por padrão no Food; revelar é chamada própria, auditada nos dois lados |
+| URLs de imagem e CSP | Caminhos relativos no banco; host na variável da CSP; bucket recriado antes do corte |
+| Chaves trocadas fora de sincronia (assinatura, serviço, webhook, administrativa) | Mesmos valores nos dois projetos no mesmo passo; testes de contrato antes do corte |
 | Custo e operação de dois projetos | Aceito: é o preço da contenção do risco; documentar dono e rotina de cada projeto |
-| Admin continua no projeto do Alber | Fora do escopo (D4); o ganho principal (Food isolado do Asaas) já vem |
+| Admin continua no projeto do Alber | Fora do escopo (D4); o ganho principal (Food isolado do Asaas e do banco do Alber) já vem |
 
 ---
 
 ## 8. O que muda em cada repositório
 
-- **Alber Food:** `.env.example` e `docs/deploy.md` (novo projeto, variáveis explícitas), workflow de deploy e `migrate-remote` com o novo `project-ref`, `rules.md`/`CLAUDE.md`, views `admin_v` do Food (fase 4) e o papel somente-leitura do Admin.
-- **Alber:** apenas configuração (segredos) e, na limpeza, remoção do schema/segredos do Food; atualizar a spec 09.
-- **Alber Admin:** conexão ao banco do Food, 11 módulos, migrations das views movidas, junções reescritas, auditoria em duas fases e o teste de contrato.
+- **Alber Food:** função `food-admin` (consultas, 14 ações, assinatura, idempotência, auditoria), tabela de operações administrativas, `docs/food-admin-api.md`, `.env.example` e `docs/deploy.md` (novo projeto, variáveis explícitas e as do canal C11), workflow de deploy e `migrate-remote` com o novo `project-ref`, `rules.md`/`CLAUDE.md`.
+- **Alber:** só configuração (segredos) e, na limpeza, remoção do schema/segredos do Food; spec 09 (canal C11) e spec 10.
+- **Alber Admin:** cliente HTTP do Food, 11 módulos, junções reescritas (duas consultas), auditoria em duas fases, remoção das views e funções SQL do Food, teste de contrato HTTP.
 
 ---
 
 ## 9. Critério de pronto
 
-- O projeto do Alber não contém schema, função nem segredo do Food; o projeto do Food não contém segredo do Alber (nem `ASAAS_API_KEY`).
+- O projeto do Alber não contém schema, função nem segredo do Food; o projeto do Food não contém segredo do Alber (nem `ASAAS_API_KEY`); **o Admin não tem credencial de banco no Food**.
 - Saque de teste, pedido pago e ação do Admin funcionando ponta a ponta.
-- Conferência cruzada Food ↔ Alber e vetores de contrato passando.
+- Conferência cruzada Food ↔ Alber, vetores de contrato e teste de contrato do canal C11 passando.
 - Spec 09 e os `CLAUDE.md` descrevendo a nova fronteira.
 
 ## 10. Ordem de grandeza
 
-As fases 0 a 3 e 5 a 6 são operação e configuração, com pouco código. O esforço de código está concentrado na **fase 4** (Admin com duas conexões, 30 views, 11 módulos e a auditoria em duas fases). É a que decide o prazo.
+As fases 0, 3, 4, 5, 6 e 7 são operação e configuração, com pouco código. O esforço de código está nas **fases 1 e 2** (a API administrativa no Food e o Admin passando a usá-la): é o trabalho que decide o prazo, e é maior do que seria com uma segunda conexão de banco, em troca de o Admin não ter credencial de banco no Food. Vantagem de ordem: como as fases 1 e 2 rodam no projeto atual, o risco de paridade é tratado **antes** de qualquer mudança de projeto.
+
+---
+
+## Anexo A — Inventário do que a API substitui
+
+**28 views do Admin sobre o Food** (25 só do Food, 3 mistas):
+
+| Grupo | Views | Endpoints de leitura previstos |
+|---|---|---|
+| Restaurantes | `v_food_restaurants`, `v_food_members`, `v_food_invites`, `v_food_accounts`, `v_food_asaas_accounts`, `v_food_onboarding`, `v_food_consents`, `v_food_integrations` | `restaurants.list` (filtros: situação, KYC, origem, busca por nome/@/e-mail), `restaurants.get` e abas (`members`, `invites`, `asaas`, `onboarding`, `integrations`, `consents`), `accounts.get` |
+| Financeiro | `v_fin_orders`, `v_fin_order_items`, `v_fin_payments`, `v_fin_refunds`, `v_fin_ledger`, `v_fin_ledger_balance`, `v_fin_payouts`, `v_fin_outbox`, `v_fin_webhook_events` | `orders.list/get`, `refunds.queue`, `ledger.list/balance`, `payouts.list`, `outbox.list`, `webhook_events.list` |
+| Taxas e receita | `v_fin_fees`\*, `v_fee_revenue`\* | `fees.get` (parte do Food: taxa global e overrides), `revenue.summary` (parte do Food); o Admin soma a parte do Alber |
+| Recebimento e titular | `v_food_receiving_requests`, `v_food_receiving_request_secrets`, `v_food_owner_transfers` | `receiving.list/get`, `receiving.reveal` (campos sensíveis, só com motivo), `owner_transfers.list` |
+| Spaces | `v_food_spaces`, `v_food_space_owners`, `v_food_space_owner_documents`, `v_food_restaurant_spaces`, `v_food_restaurant_locations` | `spaces.list/get`, `space_owners.list`, `restaurant_space.get`, `restaurant_location.get` |
+| Subcontas | `v_subaccounts`\* | `subaccounts.food` (parte do Food); o Admin junta com as empresas do Alber |
+| Busca e visão geral | (consultas de `f1-search`, `d1-overview`, `e1-platform`) | `search`, `overview.counts` |
+
+\* mistas: a parte do Alber continua vindo do banco do Admin (que lê o `public`).
+
+**14 ações (escrita)** hoje chamadas por SQL: `admin_set_fees`, `admin_unlock_account`, `admin_revoke_sessions`, `admin_revoke_invite`, `admin_reset_onboarding_code`, `admin_set_restaurant_status`, `admin_review_owner_link`, `admin_decide_receiving_request`, `admin_set_owner_transfer`, `admin_save_space`, `admin_save_space_owner`, `admin_set_space_status`, `admin_set_restaurant_space`, `admin_set_restaurant_location`.
+
+## Anexo B — Desenho da API administrativa do Food (canal C11)
+
+**Função própria.** `food-admin`, separada da `food-api` (que serve o site público): chave e superfície diferentes, nenhuma rota compartilhada. `verify_jwt` desligado, como a `food-api`; a proteção é a chave e a assinatura.
+
+**Autenticação (duas camadas).**
+1. Cabeçalho `x-food-admin-key` = `FOOD_ADMIN_KEY` (≥ 32 caracteres, comparação em tempo constante; sem o segredo configurado a função recusa tudo, `503`).
+2. **Escritas** exigem também `x-admin-signature: v1=<HMAC-SHA256 do JSON canônico>` com `FOOD_ADMIN_SIGNING_KEY` (chave **separada**, a mesma regra de bytes decodificados do `FOOD_OP_SIGNING_KEY`), cobrindo: `action`, parâmetros, `actor`, `action_id`, `nonce`, `issued_at`, `expires_at` (vida máxima de 120 s). Leituras usam só a chave.
+
+**Quem agiu.** Toda chamada leva `actor = { staff_id, role }` (e, nas escritas, `reason` e `case_id`). O Admin continua sendo quem confere papel, 2FA recente, motivo e caso; o Food **não** reconfere papel, mas **registra** tudo no seu próprio livro append-only (`takeaway.admin_ops`), independente da auditoria do Admin.
+
+**Idempotência e repetição.** `action_id` (o id do registro de auditoria do Admin) e `nonce` são únicos em `takeaway.admin_ops`: repetir a mesma ação devolve o desfecho original; reaproveitar o `action_id` com outro conteúdo é recusado; falha passageira antes de qualquer efeito desfaz a reserva e permite repetir. É o mesmo padrão de `food_ops` no Alber.
+
+**Lista fechada.** Só as 14 ações do Anexo A existem, mais as leituras. **Nenhuma ação financeira** (sem saque, estorno, transferência ou ajuste de saldo): o Food não oferece ao Admin nada que o Admin hoje não possa fazer.
+
+**Leituras.** `POST` com filtros **tipados** e fechados por endpoint, ordenação fixa, página com teto (ex.: 100). Nada de `WHERE` livre nem de SQL no contrato.
+
+**Dado pessoal.** Respostas saem **mascaradas por padrão** (as regras de `lib/mask.ts` do Admin passam a valer no Food para o que sai dele). Revelar é uma chamada própria (`*.reveal`) para **um campo de um registro**, com `reason` obrigatório; o Food grava autor, motivo e campo (nunca o valor) em `takeaway.admin_ops`. Segredos (token de convite, hashes, chaves cifradas, CNPJ/CPF completos) **nunca** saem.
+
+**Erros.** Mesma forma de hoje: `{ error, code, message }`, com `403` (chave/assinatura), `404`, `409` (estado mudou: o Admin já manda `expected`), `422`. O Admin traduz para os seus códigos (`ACTION_APPLY_FAILED`, `CONTAIN_STALE` etc.).
+
+**Contrato.** Fonte única em `docs/food-admin-api.md` (Food), com esquemas de resposta e **vetores de assinatura** repetidos nos dois repositórios (como `contract-vectors.test`); o Admin tem um cliente tipado e um teste que quebra se o contrato mudar. Substitui o `product-contract.test.ts` para o Food.

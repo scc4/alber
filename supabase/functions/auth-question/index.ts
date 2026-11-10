@@ -2,10 +2,10 @@
 // Não retorna a resposta em texto — apenas sha256 hash + exibição mascarada de cada opção.
 // O hash da opção selecionada é enviado diretamente ao auth-login para validação bcrypt.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
-import { sha256hex, tryParsePairsPayload, verifyPinWithPairs, bcryptVerify } from '../_shared/crypto.ts'
+import { sha256hex, tryParsePairsPayload, verifyPinWithPairs, bcryptVerify, loadPinCreds, pinMatches, pinGuard, aesDecrypt, cpfHash } from '../_shared/crypto.ts'
 import { isCurrentlyBlocked, recordFailureAndMaybeBlock, PIN_FAILURE_THRESHOLD } from '../_shared/login-lockout.ts'
 import { maskText as maskAnswer } from '../_shared/mask.ts'
 import { isCompanyMember } from '../_shared/operator-login.ts'
@@ -98,11 +98,11 @@ export async function handleRequest(req: Request): Promise<Response> {
       authId = data?.auth_id ?? null
       loginBlockedUntil = data?.login_blocked_until ?? null
     } else {
-      const cpfHash = await sha256hex(cpfClean)
+      const cpfHashValue = await cpfHash(cpfClean)
       const { data } = await supabaseAdmin
         .from('users')
         .select('id, auth_id, login_blocked_until')
-        .eq('cpf', cpfHash)
+        .eq('cpf', cpfHashValue)
         .maybeSingle()
       userId = data?.id ?? null
       authId = data?.auth_id ?? null
@@ -122,9 +122,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   // ── Verificar PIN (falha é logada e contada aqui — este costuma ser o único
   //    lugar onde um PIN errado é de fato detectado no fluxo real de login) ───
 
-  const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(authId)
-  const pinBcrypt: string | undefined = authUser?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = authUser?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, userId)
 
   if (!pinBcrypt) return json({ question: '', options: [] })
 
@@ -146,11 +144,11 @@ export async function handleRequest(req: Request): Promise<Response> {
       if (p?.sha256 && p?.legacy) dualPayload = p
     } catch { /* plain SHA-256 */ }
 
+    // Sem contas legadas (nenhum usuário criado antes do pepper): só o hash "sha256" do payload duplo vale.
     if (dualPayload) {
-      pinOk = await bcryptVerify(dualPayload.sha256, pinBcrypt)
-      if (!pinOk) pinOk = await bcryptVerify(dualPayload.legacy, pinBcrypt)
+      pinOk = pinSha256 ? await pinMatches(dualPayload.sha256, pinSha256) : await bcryptVerify(await pinGuard(dualPayload.sha256), pinBcrypt)
     } else {
-      pinOk = await bcryptVerify(pin_hash, pinBcrypt)
+      pinOk = pinSha256 ? await pinMatches(pin_hash, pinSha256) : await bcryptVerify(await pinGuard(pin_hash), pinBcrypt)
     }
   }
 
@@ -164,16 +162,16 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   const { data: questions } = await supabaseAdmin
     .from('security_questions')
-    .select('id, position, question, answer_sha256, answer_normalized')
+    .select('id, position, question, answer_enc')
     .eq('user_id', userId)
     .order('position')
 
   if (!questions || questions.length === 0) return json({ question: '', options: [] })
 
-  // Sorteia aleatoriamente entre as perguntas que têm answer_sha256 — evita
+  // Sorteia aleatoriamente entre as perguntas que têm answer_enc — evita
   // repetir exclude_question_id (pergunta que acabou de ser respondida
   // errado), a menos que seja a única opção elegível.
-  let eligible = questions.filter(q => q.answer_sha256)
+  let eligible = questions.filter(q => q.answer_enc)
   if (exclude_question_id && eligible.length > 1) {
     const withoutExcluded = eligible.filter(q => q.id !== exclude_question_id)
     if (withoutExcluded.length > 0) eligible = withoutExcluded
@@ -184,8 +182,10 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
   const row = eligible[Math.floor(Math.random() * eligible.length)]
 
-  const realSha256    = row.answer_sha256    as string
-  const answerNorm    = (row.answer_normalized as string | null) ?? ''
+  // A resposta normalizada só existe CIFRADA no banco (AES-GCM, ENCRYPTION_KEY): decifra aqui só para montar as opções.
+  let answerNorm = ''
+  try { answerNorm = await aesDecrypt(row.answer_enc as string, Deno.env.get('ENCRYPTION_KEY') ?? '') } catch { return json({ question: '', options: [] }) }
+  const realSha256 = await sha256hex(answerNorm)
 
   // ── Gerar opções: hash real do banco + decoys com sha256 próprio ─────────────
 

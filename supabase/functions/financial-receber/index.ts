@@ -3,9 +3,9 @@
 // Fluxo: recebedor autenticado → localiza pagador → valida PIN+segurança do pagador
 //        → calcula taxa → Asaas pagador→recebedor + pagador→pai → 3 TXs → push → audit
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { sha256hex, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, pinMatches, pinGuard, verifyAnswerHash, cpfHash } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
@@ -52,11 +52,11 @@ async function findPayer(identifier: string): Promise<UserRow | null> {
 
   // CPF — 11 dígitos e não é e-mail
   if (digits.length === 11 && !clean.includes('@')) {
-    const cpfHash = await sha256hex(normalizeCpf(digits))
+    const cpfHashValue = await cpfHash(normalizeCpf(digits))
     const { data } = await supabaseAdmin
       .from('users')
       .select('id, auth_id, name, handle, asaas_api_key_enc, asaas_wallet_id')
-      .eq('cpf', cpfHash)
+      .eq('cpf', cpfHashValue)
       .maybeSingle()
     return data
   }
@@ -181,9 +181,7 @@ Deno.serve(async (req: Request) => {
 
   // ── Verificar PIN do pagador ─────────────────────────────────────────────────
 
-  const { data: payerAuth } = await supabaseAdmin.auth.admin.getUserById(payer.auth_id)
-  const pinBcrypt: string | undefined = payerAuth?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = payerAuth?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, payer.id)
 
   if (!pinBcrypt) {
     console.error('pin_bcrypt not found for payer:', payer.id)
@@ -197,7 +195,7 @@ Deno.serve(async (req: Request) => {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = pinSha256 ? payer_pin_hash === pinSha256 : await bcryptVerify(payer_pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? await pinMatches(payer_pin_hash, pinSha256) : await bcryptVerify(await pinGuard(payer_pin_hash), pinBcrypt)
   }
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({
@@ -221,7 +219,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const answerOk = (await Promise.all(
-    questions.map(q => bcryptVerify(payer_security_answer_hash, q.answer_hash))
+    questions.map(q => verifyAnswerHash(payer_security_answer_hash, q.answer_hash))
   )).some(Boolean)
 
   if (!answerOk) {

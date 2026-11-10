@@ -8,6 +8,7 @@
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 

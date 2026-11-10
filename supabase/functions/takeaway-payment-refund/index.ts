@@ -4,7 +4,7 @@
 // Só o Alber Food chama (x-alber-food-key). O Asaas devolve também a parte do split (proporcional). A chave de
 // idempotência vai na descrição do estorno: repetir a chamada depois de um timeout NÃO devolve duas vezes.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { requireFoodKey, FOOD_REFERENCE, ASAAS_PAYMENT_ID, toReais } from '../_shared/food-service.ts'
 import { getPaymentWithRefunds, refundPayment, AsaasError } from '../_shared/asaas.ts'

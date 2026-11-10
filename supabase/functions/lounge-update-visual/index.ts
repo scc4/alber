@@ -2,7 +2,7 @@
 // PATCH /lounge-update-visual
 // Atualiza image_url e skin.accent do lounge — apenas owner ou manager.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 
 interface UpdateVisualRequest {

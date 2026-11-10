@@ -2,7 +2,7 @@
 // POST /event-tickets-list { event_id }
 // Retorna lista de ingressos confirmados (owner/manager apenas)
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 

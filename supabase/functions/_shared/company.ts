@@ -12,7 +12,7 @@
 // subconta existente" (mesmo catch de duplicata que auth-register usa) — mais
 // simples e suficiente pro volume esperado de aberturas de conta PJ no MVP.
 
-import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { validateCnpj, normalizeCnpj, maskCnpjForDisplay } from './cnpj.ts'
 import { sha256hex, aesEncrypt } from './crypto.ts'
 import { encryptSubaccountKey } from './subaccount-key.ts'

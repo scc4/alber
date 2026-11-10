@@ -4,7 +4,7 @@
 // caller). Aprovar dispara a transferência Asaas real (participante → dono) e
 // promove a linha para 'accepted'. Recusar remove a linha.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance, transferToWallet, AsaasError } from '../_shared/asaas.ts'

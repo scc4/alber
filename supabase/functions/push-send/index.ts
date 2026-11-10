@@ -5,7 +5,7 @@
 // Busca tokens ativos do usuário e envia via Expo Push API.
 // Marca tokens inválidos como inactive (DeviceNotRegistered).
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { json, err } from '../_shared/cors.ts'
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send'

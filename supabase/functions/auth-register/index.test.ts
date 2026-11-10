@@ -11,6 +11,7 @@
 
 import { assertEquals, assertNotEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
@@ -20,7 +21,11 @@ Deno.env.set('ASAAS_WEBHOOK_SECRET', 'test-webhook-secret')
 Deno.env.set('ENCRYPTION_KEY', 'test-encryption-key') // secret diferente de ASAAS_API_KEY, de propósito
 
 import { handleRequest } from './index.ts'
-import { aesDecrypt, sha256hex } from '../_shared/crypto.ts'
+import { aesDecrypt, sha256hex, pinGuard, sessionPassword, cpfHash } from '../_shared/crypto.ts'
+
+// Respostas de segurança do cadastro: o hash enviado pelo app tem de ser o SHA-256 do texto normalizado (validado pelo servidor).
+const ANSWER_TEXTS = ['resp1', 'resp2', 'resp3', 'resp4']
+const ANSWER_HASHES = await Promise.all(ANSWER_TEXTS.map((t) => sha256hex(t)))
 
 // ── Mock factory ──────────────────────────────────────────────────────────────
 // Suporta rotas estáticas (mesma resposta sempre) e rotas em sequência
@@ -93,6 +98,7 @@ const BASE_ROUTES: MockRoute[] = [
   { pattern: '/auth/v1/admin/users',               method: 'POST', status: 200, body: NEW_AUTH_USER },
   { pattern: '/rest/v1/users',                     method: 'POST', status: 201, body: NEW_DB_USER },
   { pattern: '/rest/v1/security_questions',        method: 'POST', status: 201, body: {} },
+  { pattern: '/rest/v1/user_credentials',          method: 'POST', status: 201, body: {} },
   { pattern: '/auth/v1/admin/users',                method: 'PUT',  status: 200, body: NEW_AUTH_USER },
   { pattern: '/rest/v1/audit_logs',                method: 'POST', status: 201, body: {} },
 ]
@@ -111,10 +117,10 @@ function makeReq(overrides: Record<string, unknown> = {}): Request {
     handle:   'fulano',
     pin_hash: 'a'.repeat(64), // formato de sha256hex — conteúdo não importa para o mock
     security_questions: [
-      { question: 'q1', answer_hash: 'h1', answer_text: 'resp1' },
-      { question: 'q2', answer_hash: 'h2', answer_text: 'resp2' },
-      { question: 'q3', answer_hash: 'h3', answer_text: 'resp3' },
-      { question: 'q4', answer_hash: 'h4', answer_text: 'resp4' },
+      { question: 'q1', answer_hash: ANSWER_HASHES[0], answer_text: 'resp1' },
+      { question: 'q2', answer_hash: ANSWER_HASHES[1], answer_text: 'resp2' },
+      { question: 'q3', answer_hash: ANSWER_HASHES[2], answer_text: 'resp3' },
+      { question: 'q4', answer_hash: ANSWER_HASHES[3], answer_text: 'resp4' },
     ],
     pix_key:        VALID_CPF,
     pix_key_type:   'cpf',
@@ -737,7 +743,7 @@ Deno.test('cadastro de empresa com pix_key_type "cnpj" → companies insert grav
     // handle, que também batem em /rest/v1/users mas devem continuar vazias (BASE_ROUTES).
     if (method === 'GET' && url.includes('/rest/v1/users') && url.includes('id=eq.')) {
       // O CPF do usuário recém-criado (hash), que a conferência do vínculo compara com o CPF digitado no cadastro.
-      return new Response(JSON.stringify({ ...NEW_DB_USER, cpf: await sha256hex(VALID_CPF) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify({ ...NEW_DB_USER, cpf: await cpfHash(VALID_CPF) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
     for (const r of BASE_ROUTES) {
       const methodOk = !r.method || r.method.toUpperCase() === method
@@ -806,4 +812,73 @@ Deno.test('buildConsentRows: hash inválido ou tipo faltando cai em legacy-clien
   assertEquals(byType.terms_of_use.document_hash, null)
   assertEquals(byType.privacy_policy.document_hash, HASH)
   assertEquals(byType.majority.document_version, 'legacy-client')
+})
+
+// ── A2 (auditoria de 09/11/2026): credenciais fora do Supabase Auth / JWT e sem texto puro ──────────────────────────
+
+Deno.test('A2: PIN vira HMAC com pepper na tabela privada; o Supabase Auth NÃO recebe o PIN (senha derivada) e a resposta fica cifrada', async () => {
+  const PIN = 'a'.repeat(64)
+  const sent: { url: string; method: string; body: unknown }[] = []
+  const routes: MockRoute[] = [
+    ...BASE_ROUTES,
+    { pattern: '/rest/v1/users', method: 'POST', status: 201, body: NEW_DB_USER },
+    { pattern: '/auth/v1/token', method: 'POST', status: 200, body: SIGN_IN_OK },
+  ]
+  const res = await withMock(routes, [], async () => {
+    const inner = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (method !== 'GET' && init?.body) { try { sent.push({ url, method, body: JSON.parse(String(init.body)) }) } catch { /* corpo não JSON */ } }
+      return inner(input, init)
+    }) as typeof fetch
+    try { return await handleRequest(makeReq()) } finally { globalThis.fetch = inner }
+  })
+  assertEquals(res.status, 201)
+  const find = (frag: string, method: string) => sent.find((x) => x.url.includes(frag) && x.method === method)?.body as Record<string, unknown> | Record<string, unknown>[] | undefined
+
+  // 1) PIN: HMAC com pepper, nunca o SHA-256 puro
+  const cred = find('/rest/v1/user_credentials', 'POST') as Record<string, unknown>
+  assertEquals(cred.pin_hmac, await pinGuard(PIN))
+  assertNotEquals(cred.pin_hmac, PIN)
+  assertEquals(typeof cred.pin_bcrypt, 'string')
+
+  // 2) Supabase Auth: criado sem app_metadata e sem o PIN como senha; senha trocada para a derivada; login com a derivada
+  const created = sent.find((x) => x.url.endsWith('/auth/v1/admin/users') && x.method === 'POST')?.body as Record<string, unknown>
+  assertEquals('app_metadata' in created, false)
+  assertNotEquals(created.password, PIN)
+  const derived = await sessionPassword(NEW_AUTH_USER.id)
+  assertEquals((find('/auth/v1/admin/users/', 'PUT') as Record<string, unknown>).password, derived)
+  assertEquals((find('/auth/v1/token', 'POST') as Record<string, unknown>).password, derived)
+  assertNotEquals(derived, PIN)
+  assertEquals(sent.some((x) => JSON.stringify(x.body).includes(PIN) && x.url.includes('/auth/')), false) // o SHA-256 do PIN nunca chega ao Supabase Auth
+
+  // 3) Respostas: bcrypt do hash com pepper + texto cifrado; nunca texto puro nem SHA-256 puro
+  const rows = find('/rest/v1/security_questions', 'POST') as Record<string, unknown>[]
+  assertEquals(rows.length, 4)
+  for (let i = 0; i < 4; i++) {
+    assertEquals('answer_normalized' in rows[i], false)
+    assertEquals('answer_sha256' in rows[i], false)
+    assertNotEquals(rows[i].answer_hash, ANSWER_HASHES[i])
+    assertEquals(await aesDecrypt(rows[i].answer_enc as string, 'test-encryption-key'), ANSWER_TEXTS[i])
+    assertEquals(JSON.stringify(rows[i]).includes(ANSWER_TEXTS[i] + '"'), false) // o texto não aparece em claro
+  }
+})
+
+Deno.test('A2: resposta cujo hash não é o SHA-256 do texto → 400 antes de criar qualquer coisa (nenhuma chamada externa)', async () => {
+  const bad = ANSWER_TEXTS.map((t, i) => ({ question: `q${i + 1}`, answer_hash: ANSWER_HASHES[i], answer_text: i === 2 ? 'texto-diferente' : t }))
+  const res = await withMock([], [], () => handleRequest(makeReq({ security_questions: bad })))
+  assertEquals([res.status, (await res.json()).error], [400, 'INVALID_SECURITY_QUESTIONS'])
+  const semTexto = ANSWER_TEXTS.map((_, i) => ({ question: `q${i + 1}`, answer_hash: ANSWER_HASHES[i] }))
+  assertEquals((await withMock([], [], () => handleRequest(makeReq({ security_questions: semTexto })))).status, 400)
+})
+
+Deno.test('A2: sem o pepper das credenciais o cadastro falha FECHADO (503) antes de qualquer efeito', async () => {
+  Deno.env.delete('ALBER_CREDENTIAL_PEPPER')
+  try {
+    const res = await withMock([], [], () => handleRequest(makeReq()))
+    assertEquals([res.status, (await res.json()).error], [503, 'SERVICE_NOT_CONFIGURED'])
+  } finally {
+    Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
+  }
 })

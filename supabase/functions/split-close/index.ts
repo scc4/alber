@@ -8,9 +8,9 @@
 //   - final_amount registrado em split_participants por participante
 //   - excedente (blocked_amount − final_amount) devolvido ao participante via Asaas
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify } from '../_shared/crypto.ts'
+import { bcryptVerify, loadPinCreds, pinMatches, pinGuard } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { transferToWallet, AsaasError } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -73,9 +73,7 @@ Deno.serve(async (req: Request) => {
   // Fast path: SHA-256 comparison quando disponível (evita bcryptjs lento em Edge)
   // Bcrypt via npm:bcryptjs (pure JS, cost 12) excede CPU budget — usar SHA-256 stored
 
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
-  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, user.id)
 
   if (!pinBcrypt && !pinSha256) {
     console.error('[split-close] credenciais ausentes para user:', user.id)
@@ -83,8 +81,8 @@ Deno.serve(async (req: Request) => {
   }
 
   const pinOk = pinSha256
-    ? pin_hash === pinSha256
-    : await bcryptVerify(pin_hash, pinBcrypt!)
+    ? await pinMatches(pin_hash, pinSha256)
+    : await bcryptVerify(await pinGuard(pin_hash), pinBcrypt!)
   if (!pinOk) {
     try {
       await supabaseAdmin.from('audit_logs').insert({

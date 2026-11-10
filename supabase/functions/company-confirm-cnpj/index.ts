@@ -9,7 +9,7 @@
 // — master OU operador com linha ativa, sem exigir uma permission key
 // específica (não é uma ação financeira nem sensível o suficiente pra isso).
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCnpj, normalizeCnpj, maskCnpjForDisplay } from '../_shared/cnpj.ts'
 import { sha256hex } from '../_shared/crypto.ts'

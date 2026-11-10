@@ -1,7 +1,8 @@
 // Roda com: deno test supabase/functions/_shared/owner-link.test.ts --allow-env --allow-net
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 import { evaluateOwnerCpf, fetchCnpjRegistry, isAdminQualification, reviewFor, verifyOwnerCpfHash, type CnpjRegistry } from './owner-link.ts'
-import { sha256hex } from './crypto.ts'
+import { sha256hex, cpfHash } from './crypto.ts'
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 
 const CPF = '12345678909' // dígitos 4 a 9: 456789
 const reg = (over: Partial<CnpjRegistry> = {}): CnpjRegistry => ({
@@ -65,7 +66,7 @@ Deno.test('só match libera sozinho; tudo o mais vai para a revisão', () => {
 })
 
 Deno.test('o CPF digitado tem de ser o da conta (hash), válido e completo', async () => {
-  const hash = await sha256hex(CPF)
+  const hash = await cpfHash(CPF)
   assertEquals(await verifyOwnerCpfHash('123.456.789-09', hash), { ok: true, cpf: CPF })
   assertEquals(await verifyOwnerCpfHash('529.982.247-25', hash), { ok: false, code: 'OWNER_CPF_MISMATCH' }) // válido, mas de outra pessoa
   assertEquals(await verifyOwnerCpfHash('111.111.111-11', hash), { ok: false, code: 'CPF_INVALID' })

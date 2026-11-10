@@ -12,8 +12,11 @@
 //   respondida errado
 
 import { assertEquals, assertNotEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
-import { bcryptHash, sha256hex } from '../_shared/crypto.ts'
+import { bcryptHash, sha256hex, pinGuard, aesEncrypt } from '../_shared/crypto.ts'
 
+const TEST_ENC_KEY = 'test-encryption-key-test-encryption-key'
+Deno.env.set('ENCRYPTION_KEY', TEST_ENC_KEY)
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
@@ -100,7 +103,7 @@ Deno.test('conta já bloqueada (login_blocked_until no futuro) → blocked:true,
 Deno.test('PIN errado (1ª vez) → pin_invalid:true, sem bloquear ainda', async () => {
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('correct-pin') } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: await bcryptHash(await pinGuard('correct-pin'), 4) }] },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
     { pattern: '/rest/v1/audit_logs', method: 'GET', status: 200, body: [{ id: 'a' }] }, // só esta falha até agora
   ]
@@ -114,7 +117,7 @@ Deno.test('PIN errado (1ª vez) → pin_invalid:true, sem bloquear ainda', async
 Deno.test('PIN errado pela 3ª vez na janela → blocked:true e grava login_blocked_until', async () => {
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('correct-pin') } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: await bcryptHash(await pinGuard('correct-pin'), 4) }] },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
     { pattern: '/rest/v1/audit_logs', method: 'GET', status: 200, body: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] },
   ]
@@ -147,10 +150,10 @@ Deno.test('PIN correto — gera challenge com question_id e 5 opções (1 real +
   const answerSha = await sha256hex('rex')
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('right-pin-hash') } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: await bcryptHash(await pinGuard('right-pin-hash'), 4) }] },
     {
       pattern: '/rest/v1/security_questions', method: 'GET', status: 200,
-      body: [{ id: 'q1', position: 1, question: 'Nome do pet?', answer_sha256: answerSha, answer_normalized: 'rex' }],
+      body: [{ id: 'q1', position: 1, question: 'Nome do pet?', answer_enc: await aesEncrypt('rex', TEST_ENC_KEY) }],
     },
   ]
   const res  = await withMock(routes, () => handleRequest(makeReq({ pin_hash: 'right-pin-hash' })))
@@ -167,12 +170,12 @@ Deno.test('exclude_question_id evita repetir a pergunta recém-errada quando há
   const answer2 = await sha256hex('luna')
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('right-pin-hash') } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: await bcryptHash(await pinGuard('right-pin-hash'), 4) }] },
     {
       pattern: '/rest/v1/security_questions', method: 'GET', status: 200,
       body: [
-        { id: 'q1', position: 1, question: 'Nome do pet?',    answer_sha256: answer1, answer_normalized: 'rex' },
-        { id: 'q2', position: 2, question: 'Cidade natal?',   answer_sha256: answer2, answer_normalized: 'luna' },
+        { id: 'q1', position: 1, question: 'Nome do pet?',    answer_enc: await aesEncrypt('rex', TEST_ENC_KEY) },
+        { id: 'q2', position: 2, question: 'Cidade natal?',   answer_enc: await aesEncrypt('luna', TEST_ENC_KEY) },
       ],
     },
   ]
@@ -189,10 +192,10 @@ Deno.test('exclude_question_id ignorado se for a única pergunta elegível (evit
   const answer1 = await sha256hex('rex')
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('right-pin-hash') } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: await bcryptHash(await pinGuard('right-pin-hash'), 4) }] },
     {
       pattern: '/rest/v1/security_questions', method: 'GET', status: 200,
-      body: [{ id: 'q1', position: 1, question: 'Nome do pet?', answer_sha256: answer1, answer_normalized: 'rex' }],
+      body: [{ id: 'q1', position: 1, question: 'Nome do pet?', answer_enc: await aesEncrypt('rex', TEST_ENC_KEY) }],
     },
   ]
   const res  = await withMock(routes, () =>
@@ -206,7 +209,7 @@ Deno.test('exclude_question_id ignorado se for a única pergunta elegível (evit
 Deno.test('PIN em pares sem pin_sha256 cadastrado → pin_setup_required:true', async () => {
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('x') } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: await bcryptHash(await pinGuard('x'), 4) }] },
   ]
   const pairsPayload = JSON.stringify([[1,2],[3,4],[5,6],[7,8],[9,0],[1,3]])
   const res  = await withMock(routes, () => handleRequest(makeReq({ pin_hash: pairsPayload })))

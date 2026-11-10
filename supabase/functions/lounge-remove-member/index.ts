@@ -2,7 +2,7 @@
 // POST /lounge-remove-member
 // Dono ou admin remove membro ativo do Lounge
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 

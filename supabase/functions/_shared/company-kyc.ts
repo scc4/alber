@@ -2,7 +2,7 @@
 // Usado pelo webhook (webhooks-asaas-kyc) e pela consulta de situação (company-list), para o Alber Food e o app verem a
 // aprovação mesmo quando o webhook não chega (ou no sandbox, onde a aprovação é automática).
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { aesEncrypt } from './crypto.ts'
 import { decryptSubaccountKey } from './subaccount-key.ts'
 import { createPixAddressKey, getAccountDocuments, getAccountGeneralStatus, type KycDocumentGroup } from './asaas.ts'

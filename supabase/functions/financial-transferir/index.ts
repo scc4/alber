@@ -4,9 +4,9 @@
 //        → verifica saldo → Asaas remetente→destinatário → 2 TXs → push → audit
 // Nota: transferir interno não tem taxa (spec §4.6: "sem taxa")
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { sha256hex, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { sha256hex, bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, pinMatches, pinGuard, verifyAnswerHash, cpfHash } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
@@ -61,11 +61,11 @@ async function findRecipient(identifier: string): Promise<Recipient | null> {
 
   // CPF — 11 dígitos e não é e-mail → só pessoa física
   if (digits.length === 11 && !clean.includes('@')) {
-    const cpfHash = await sha256hex(normalizeCpf(digits))
+    const cpfHashValue = await cpfHash(normalizeCpf(digits))
     const { data } = await supabaseAdmin
       .from('users')
       .select('id, name, handle, asaas_api_key_enc, asaas_wallet_id')
-      .eq('cpf', cpfHash)
+      .eq('cpf', cpfHashValue)
       .maybeSingle()
     return data ? { kind: 'user', ...data } : null
   }
@@ -234,9 +234,7 @@ Deno.serve(async (req: Request) => {
 
   // ── Verificar PIN do remetente ───────────────────────────────────────────────
 
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(sender.auth_id)
-  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, sender.id)
 
   if (!pinBcrypt) {
     console.error('pin_bcrypt not found for sender:', sender.id)
@@ -251,7 +249,7 @@ Deno.serve(async (req: Request) => {
     pinOk = result.ok
   } else {
     // Fast path: SHA-256 direct comparison (avoids slow bcryptjs at cost 12)
-    pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? await pinMatches(pin_hash, pinSha256) : await bcryptVerify(await pinGuard(pin_hash), pinBcrypt)
   }
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({
@@ -275,7 +273,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const answerOk = (await Promise.all(
-    questions.map(q => bcryptVerify(security_answer_hash, q.answer_hash))
+    questions.map(q => verifyAnswerHash(security_answer_hash, q.answer_hash))
   )).some(Boolean)
 
   if (!answerOk) {

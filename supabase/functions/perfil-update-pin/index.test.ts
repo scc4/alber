@@ -10,12 +10,13 @@
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
 
 import { handleRequest } from './index.ts'
-import { bcryptHash } from '../_shared/crypto.ts'
+import { bcryptHash, pinGuard, hashAnswerForStorage } from '../_shared/crypto.ts'
 
 type MockRoute = { pattern: string; method?: string; status: number; body: unknown }
 
@@ -83,16 +84,18 @@ Deno.test('novo PIN igual ao atual → 422 PIN_SAME (checagem local, antes de ba
 
 Deno.test('fluxo completo com sucesso: revoga sessão com o JWT da requisição, não com o user id', async () => {
   const nowIso = new Date(Date.now() + 5 * 60_000).toISOString()
-  const currentPinBcrypt = await bcryptHash(CURRENT_PIN)
-  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const currentPinBcrypt = await bcryptHash(await pinGuard(CURRENT_PIN))
+  const secBcrypt = await hashAnswerForStorage(SEC_HASH)
 
   let signOutJwtUsed: string | null = null
   let signOutScopeUsed: string | null = null
+  let credentialsUpsert: Record<string, unknown> | null = null
+  let authAdminPutCalled = false
 
   const routes: MockRoute[] = [
     { pattern: '/auth/v1/user',  method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: [{ id: 'db-user-1', auth_id: AUTH_UUID }] },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: currentPinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: currentPinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
     { pattern: '/rest/v1/sms_codes', method: 'GET', status: 200, body: [{ id: 'sms-1', code: '123456', expires_at: nowIso, used_at: null }] },
     { pattern: '/rest/v1/sms_codes', method: 'PATCH', status: 200, body: [] },
@@ -104,7 +107,12 @@ Deno.test('fluxo completo com sucesso: revoga sessão com o JWT da requisição,
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url    = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
     const method = (init?.method ?? 'GET').toUpperCase()
+    if (method === 'POST' && url.includes('/rest/v1/user_credentials')) {
+      credentialsUpsert = JSON.parse(String(init?.body ?? '{}'))
+      return new Response('{}', { status: 201, headers: { 'Content-Type': 'application/json' } })
+    }
     if (method === 'PUT' && url.includes('/auth/v1/admin/users/')) {
+      authAdminPutCalled = true
       return new Response(JSON.stringify({ id: AUTH_UUID }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
     if (method === 'POST' && url.includes('/auth/v1/logout')) {
@@ -129,4 +137,9 @@ Deno.test('fluxo completo com sucesso: revoga sessão com o JWT da requisição,
   // A prova do fix: o header Authorization enviado ao /logout deve conter o
   // JWT real da requisição (não o UUID auth-uid-1 usado antes da correção).
   assertEquals(signOutJwtUsed, 'Bearer this-is-the-real-jwt-abc123')
+  // A2: o novo PIN vai para a tabela privada como HMAC com pepper (nunca o SHA-256 puro), e NADA vai para app_metadata/Supabase Auth.
+  assertEquals(credentialsUpsert?.user_id, 'db-user-1')
+  assertEquals(credentialsUpsert?.pin_hmac, await pinGuard(NEW_PIN))
+  assertEquals(credentialsUpsert?.pin_hmac === NEW_PIN, false)
+  assertEquals(authAdminPutCalled, false)
 })

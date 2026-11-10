@@ -5,7 +5,7 @@
 // + login normal no app). Reaproveita a mesma lógica de auth-register para
 // abrir a subconta PJ, mas sem tocar em nenhum dado pessoal: o dono já existe.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { createCompanyForOwner, CreateCompanyInput } from '../_shared/company.ts'
 import { logError } from '../_shared/error-log.ts'

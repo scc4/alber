@@ -9,12 +9,9 @@
 // gerou no banco real dela, fora da Alber — só valida o formato e guarda
 // criptografada, também sem chamada à Asaas).
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import {
-  aesEncrypt, sha256hex,
-  bcryptVerify, tryParsePairsPayload, verifyPinWithPairs,
-} from '../_shared/crypto.ts'
+import { aesEncrypt, sha256hex, bcryptVerify, tryParsePairsPayload, verifyPinWithPairs, loadPinCreds, pinMatches, pinGuard, verifyAnswerHash } from '../_shared/crypto.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { isValidEvpKey } from '../_shared/pix-key.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -98,9 +95,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   // exige PIN + confirmação de segurança) — PIN e pergunta são sempre do
   // master autenticado, nunca da empresa. Mesmo padrão de perfil-update-pix.
 
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(caller.auth_id)
-  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, caller.id)
 
   if (!pinBcrypt) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
 
@@ -111,7 +106,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = pinSha256 ? body.pin_hash === pinSha256 : await bcryptVerify(body.pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? await pinMatches(body.pin_hash, pinSha256) : await bcryptVerify(await pinGuard(body.pin_hash), pinBcrypt)
   }
   if (!pinOk) {
     await logAudit(supabaseAdmin, caller.id, 'company_pix_key_pin_failed', { company_id: company.id })
@@ -126,7 +121,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!questions?.length) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
 
   const answerOk = (await Promise.all(
-    questions.map(q => bcryptVerify(body.security_answer_hash, q.answer_hash))
+    questions.map(q => verifyAnswerHash(body.security_answer_hash, q.answer_hash))
   )).some(Boolean)
 
   if (!answerOk) {

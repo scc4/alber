@@ -5,10 +5,10 @@
 // que já está cadastrado, calcula e persiste a versão mascarada — nunca o
 // CPF em texto puro.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf, maskCpfForDisplay } from '../_shared/cpf.ts'
-import { sha256hex } from '../_shared/crypto.ts'
+import { cpfHash } from '../_shared/crypto.ts'
 
 interface ConfirmCpfRequest {
   cpf: string
@@ -69,8 +69,8 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   if (userErr || !user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
 
-  const cpfHash = await sha256hex(cpfClean)
-  if (cpfHash !== user.cpf) return err('CPF_MISMATCH', 'CPF não confere com o cadastrado', 422)
+  const cpfHashValue = await cpfHash(cpfClean)
+  if (cpfHashValue !== user.cpf) return err('CPF_MISMATCH', 'CPF não confere com o cadastrado', 422)
 
   const cpfMasked = maskCpfForDisplay(cpfClean)
   const { error: updateErr } = await supabaseAdmin

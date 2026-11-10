@@ -11,9 +11,9 @@
 //   Efetiva a exclusão. Revalida as mesmas precondições no servidor (nunca
 //   confia só na checagem que o client já fez antes).
 
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, pinMatches, pinGuard, verifyAnswerHash } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -140,9 +140,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // ── Verificar PIN ────────────────────────────────────────────────────────────
 
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
-  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, user.id)
 
   if (!pinBcrypt) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
 
@@ -153,7 +151,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? await pinMatches(pin_hash, pinSha256) : await bcryptVerify(await pinGuard(pin_hash), pinBcrypt)
   }
 
   if (!pinOk) {
@@ -176,7 +174,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   let securityOk = false
   for (const q of questions) {
-    if (await bcryptVerify(security_answer_hash, q.answer_hash)) { securityOk = true; break }
+    if (await verifyAnswerHash(security_answer_hash, q.answer_hash)) { securityOk = true; break }
   }
   if (!securityOk) {
     try {

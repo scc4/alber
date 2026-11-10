@@ -1,6 +1,6 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify, aesEncrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { bcryptVerify, aesEncrypt, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, pinMatches, pinGuard, verifyAnswerHash } from '../_shared/crypto.ts'
 import { isValidEvpKey } from '../_shared/pix-key.ts'
 
 const supabaseAdmin = createClient(
@@ -68,9 +68,7 @@ Deno.serve(async (req: Request) => {
   if (!user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
 
   // Verificar PIN
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
-  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, user.id)
 
   if (!pinBcrypt) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
 
@@ -81,7 +79,7 @@ Deno.serve(async (req: Request) => {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? await pinMatches(pin_hash, pinSha256) : await bcryptVerify(await pinGuard(pin_hash), pinBcrypt)
   }
   if (!pinOk) {
     try {
@@ -104,7 +102,7 @@ Deno.serve(async (req: Request) => {
 
   let securityOk = false
   for (const q of questions) {
-    if (await bcryptVerify(security_answer_hash, q.answer_hash)) {
+    if (await verifyAnswerHash(security_answer_hash, q.answer_hash)) {
       securityOk = true
       break
     }

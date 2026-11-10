@@ -2,7 +2,7 @@
 // POST /lounge-set-primary
 // Membro ou gestor define um Lounge como seu principal (role != 'owner')
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 

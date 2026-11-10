@@ -3,7 +3,7 @@
 // push-send). Aceita qualquer subconjunto das colunas — só atualiza o que
 // veio no body, não sobrescreve o resto.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 
 const VALID_COLUMNS = [

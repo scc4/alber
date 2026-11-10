@@ -4,7 +4,7 @@
 // operar a empresa (status='active'). Não existe fluxo de "pedir para
 // entrar" em empresas — diferente do Lounge, aqui só o master convida.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 

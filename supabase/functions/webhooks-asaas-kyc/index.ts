@@ -14,7 +14,7 @@
 // companies quando não encontra. Rejeição de empresa também marca
 // deleted_at, liberando o CNPJ/handle automaticamente (migration 044).
 
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
 import { aesEncrypt } from '../_shared/crypto.ts'

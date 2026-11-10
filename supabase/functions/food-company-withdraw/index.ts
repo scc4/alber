@@ -20,7 +20,7 @@ import {
   adminClient, decryptPixKey, destinationDigest, foodWithdrawFeeBrl, isInt, isObject, isOperational, loadOwnedCompany, maskPixKey, readIds,
   readServiceBody, refusal, runFoodOp,
 } from '../_shared/food-company.ts'
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 /** Mínimo de um saque (R$ 10, o mesmo de financial-descarregar) e teto de segurança (o maior limite que a equipe pode aprovar). */
 export const MIN_WITHDRAW_CENTS = 1_000

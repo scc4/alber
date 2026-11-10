@@ -1,7 +1,7 @@
 // Cria chave Pix EVP (aleatória) na subconta do usuário autenticado.
 // Pré-condições: kyc_status = 'approved' e pix_key ausente.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesEncrypt } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'

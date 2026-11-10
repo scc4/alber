@@ -11,7 +11,7 @@
 // conferência detecta erro e uso casual; quem prova a identidade é o KYC (documento e selfie) e, no caso de quem já tem conta
 // Alber, o CPF confirmado pelo hash da conta (verifyOwnerCpfHash). Ver docs/plano-conferencia-cnpj-administrador.md (Alber Food).
 
-import { sha256hex } from './crypto.ts'
+import { cpfHash } from './crypto.ts'
 import { normalizeCpf, validateCpf } from './cpf.ts'
 
 export type OwnerLinkCheck = 'match' | 'partner' | 'mismatch' | 'inactive' | 'unavailable'
@@ -96,12 +96,12 @@ export const reviewFor = (check: OwnerLinkCheck | 'unchecked'): 'not_needed' | '
 export type CpfProof = { ok: true; cpf: string } | { ok: false; code: 'CPF_INVALID' | 'OWNER_CPF_MISMATCH' }
 
 /**
- * O CPF digitado é o da conta de quem está logado? Compara o hash (users.cpf guarda só SHA-256). Sem isto, bastaria digitar o CPF de
+ * O CPF digitado é o da conta de quem está logado? Compara o hash (users.cpf guarda só o HMAC com pepper do CPF). Sem isto, bastaria digitar o CPF de
  * um sócio para "casar" com o quadro societário: o CPF tem de ser o da conta, que o dono provou com PIN e pergunta de segurança.
  */
 export async function verifyOwnerCpfHash(rawCpf: unknown, accountCpfHash: string | null | undefined): Promise<CpfProof> {
   const cpf = normalizeCpf(typeof rawCpf === 'string' ? rawCpf : '')
   if (!validateCpf(cpf)) return { ok: false, code: 'CPF_INVALID' }
-  if (!accountCpfHash || (await sha256hex(cpf)) !== accountCpfHash) return { ok: false, code: 'OWNER_CPF_MISMATCH' }
+  if (!accountCpfHash || (await cpfHash(cpf)) !== accountCpfHash) return { ok: false, code: 'OWNER_CPF_MISMATCH' }
   return { ok: true, cpf }
 }

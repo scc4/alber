@@ -3,7 +3,7 @@
 // Cancela evento, reembolsa ingressos pagos via transferência Asaas e notifica participantes.
 // Reembolso best-effort: falhas individuais são logadas, restantes prosseguem.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { transferToWallet } from '../_shared/asaas.ts'

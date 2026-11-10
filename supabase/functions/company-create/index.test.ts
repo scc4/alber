@@ -8,6 +8,7 @@
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
@@ -245,7 +246,7 @@ Deno.test('loginEmail é sempre o sintético, com ou sem e-mail de contato real 
 })
 
 // ── Conferência do vínculo do responsável (owner_cpf) ───────────────────────────────────────────────────────────────────────────
-import { sha256hex } from '../_shared/crypto.ts'
+import { sha256hex, cpfHash } from '../_shared/crypto.ts'
 
 const OWNER_CPF = '12345678909' // dígitos 4 a 9: 456789
 const qsa = (role: string, mask = '***456789**') => new Response(JSON.stringify({ descricao_situacao_cadastral: 'ATIVA', razao_social: 'MINHA EMPRESA LTDA', qsa: [{ nome_socio: 'FULANO', cnpj_cpf_do_socio: mask, qualificacao_socio: role }] }), { status: 200 })
@@ -273,7 +274,7 @@ function linkHandler(opts: { registry?: Response; ownerCpfHash?: string; ownerEx
 const withCpf = (over: Record<string, unknown> = {}) => ({ ...VALID_COMPANY, owner_cpf: OWNER_CPF, ...over })
 
 Deno.test('CPF do responsável consta como sócio-administrador: veredito match, sem revisão, e vai para a empresa', async () => {
-  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const t = linkHandler({ ownerCpfHash: await cpfHash(OWNER_CPF) })
   const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf())))
   const data = await res.json()
   assertEquals(res.status, 201)
@@ -286,7 +287,7 @@ Deno.test('CPF do responsável consta como sócio-administrador: veredito match,
 })
 
 Deno.test('não confere, só sócio, CNPJ inativo ou consulta fora do ar: a empresa é criada e vai para a revisão da equipe', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   const cases: [string, Response][] = [
     ['mismatch', qsa('Sócio-Administrador', '***111111**')],
     ['partner', qsa('Sócio')],
@@ -303,7 +304,7 @@ Deno.test('não confere, só sócio, CNPJ inativo ou consulta fora do ar: a empr
 })
 
 Deno.test('CPF de outra pessoa (válido, mas não é o da conta): 422 e nada é criado no Asaas', async () => {
-  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const t = linkHandler({ ownerCpfHash: await cpfHash(OWNER_CPF) })
   const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf({ owner_cpf: '529.982.247-25' }))))
   assertEquals(res.status, 422)
   assertEquals((await res.json()).error?.code ?? 'OWNER_CPF_MISMATCH', 'OWNER_CPF_MISMATCH')
@@ -312,14 +313,14 @@ Deno.test('CPF de outra pessoa (válido, mas não é o da conta): 422 e nada é 
 })
 
 Deno.test('CPF inválido: 422 CPF_INVALID', async () => {
-  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const t = linkHandler({ ownerCpfHash: await cpfHash(OWNER_CPF) })
   const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf({ owner_cpf: '11111111111' }))))
   assertEquals(res.status, 422)
   assertEquals(t.asaasPosts.length, 0)
 })
 
 Deno.test('sem CPF (como o app faz hoje): empresa "não conferida" e em revisão', async () => {
-  const t = linkHandler({ ownerCpfHash: await sha256hex(OWNER_CPF) })
+  const t = linkHandler({ ownerCpfHash: await cpfHash(OWNER_CPF) })
   const res = await withMock(t.handler, () => handleRequest(makeReq()))
   const data = await res.json()
   assertEquals(res.status, 201)
@@ -329,7 +330,7 @@ Deno.test('sem CPF (como o app faz hoje): empresa "não conferida" e em revisão
 
 // Fase 3: estado da conta do dono. Conta bloqueada ou com a verificação pessoal recusada não abre empresa (nada é criado no Asaas).
 Deno.test('conta bloqueada ou com KYC pessoal recusado não abre empresa: 403 e nada é criado no Asaas', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   for (const [ownerExtra, code] of [[{ account_status: 'blocked' }, 'OWNER_ACCOUNT_BLOCKED'], [{ kyc_status: 'rejected' }, 'PERSONAL_KYC_REJECTED']] as const) {
     const t = linkHandler({ ownerCpfHash: hash, ownerExtra })
     const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf())))
@@ -341,7 +342,7 @@ Deno.test('conta bloqueada ou com KYC pessoal recusado não abre empresa: 403 e 
 })
 
 Deno.test('conta em avaliação, com KYC pendente, enviado ou aprovado abre empresa normalmente', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   for (const ownerExtra of [{ account_status: 'evaluation', kyc_status: 'pending' }, { account_status: 'evaluation', kyc_status: 'submitted' }, { account_status: 'active', kyc_status: 'approved' }]) {
     const t = linkHandler({ ownerCpfHash: hash, ownerExtra })
     const res = await withMock(t.handler, () => handleRequest(makeReq(withCpf())))
@@ -350,7 +351,7 @@ Deno.test('conta em avaliação, com KYC pendente, enviado ou aprovado abre empr
 })
 
 Deno.test('CNPJ já tem subconta no Asaas: só reaproveita com o vínculo conferido (match); senão recusa sem tocar nela', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   const dup = () => new Response(JSON.stringify({ errors: [{ description: 'O CNPJ 11222333000181 já está em uso por outra conta.' }] }), { status: 400 })
   const existing = [{ id: 'asaas-old', walletId: 'wallet-old', apiKey: 'sub-key-old' }]
   const keyless = [{ id: 'asaas-orphan', walletId: 'wallet-orphan', apiKey: null }]
@@ -399,7 +400,7 @@ function disputeHandler(row: unknown, hash: string, over: { asaasAccount?: (n: n
 }
 
 Deno.test('vínculo verificado assume o CNPJ de pendente que não conferiu: a outra sai, o dono antigo é avisado e a nova nasce', async () => {
-  const d = disputeHandler(contestedRow(), await sha256hex(OWNER_CPF))
+  const d = disputeHandler(contestedRow(), await cpfHash(OWNER_CPF))
   const res = await withMock(d.handler, () => handleRequest(makeReq(withCpf())))
   assertEquals(res.status, 201)
   assertEquals(d.cancelled.length, 1)
@@ -411,7 +412,7 @@ Deno.test('vínculo verificado assume o CNPJ de pendente que não conferiu: a ou
 })
 
 Deno.test('pendente com documento enviado ou que conferiu não é desbancada: 409 CNPJ_UNDER_REVIEW e nada muda', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   for (const row of [contestedRow({ kyc_evidence: { groups: [{ status: 'PENDING' }] } }), contestedRow({ owner_link_check: 'match' }), contestedRow({ owner_link_check: 'partner' })]) {
     const d = disputeHandler(row, hash)
     const res = await withMock(d.handler, () => handleRequest(makeReq(withCpf())))
@@ -422,14 +423,14 @@ Deno.test('pendente com documento enviado ou que conferiu não é desbancada: 40
 })
 
 Deno.test('quem não confere (ou abre sem CPF) não assume o CNPJ de pendente recente', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   const d = disputeHandler(contestedRow(), hash)
   assertEquals((await withMock(d.handler, () => handleRequest(makeReq()))).status, 409) // sem CPF = unchecked
   assertEquals(d.cancelled.length, 0)
 })
 
 Deno.test('pendente há mais de 14 dias sem documentos vence: o CNPJ é liberado mesmo para quem não conferiu', async () => {
-  const d = disputeHandler(contestedRow({ created_at: daysAgoIso(15), owner_link_check: 'match' }), await sha256hex(OWNER_CPF))
+  const d = disputeHandler(contestedRow({ created_at: daysAgoIso(15), owner_link_check: 'match' }), await cpfHash(OWNER_CPF))
   const res = await withMock(d.handler, () => handleRequest(makeReq()))
   assertEquals(res.status, 201)
   assertEquals(d.cancelled[0]?.deleted_reason, 'expired')
@@ -437,7 +438,7 @@ Deno.test('pendente há mais de 14 dias sem documentos vence: o CNPJ é liberado
 })
 
 Deno.test('CNPJ já aprovado ou em análise nunca entra em disputa: 409 CNPJ_DUPLICATE', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   for (const kyc of ['approved', 'submitted']) {
     const d = disputeHandler(contestedRow({ kyc_status: kyc, created_at: daysAgoIso(60) }), hash)
     const res = await withMock(d.handler, () => handleRequest(makeReq(withCpf())))
@@ -447,7 +448,7 @@ Deno.test('CNPJ já aprovado ou em análise nunca entra em disputa: 409 CNPJ_DUP
 })
 
 Deno.test('a chave Pix de saque gravada na criação leva o hash (para achar a mesma chave em empresas diferentes)', async () => {
-  const hash = await sha256hex(OWNER_CPF)
+  const hash = await cpfHash(OWNER_CPF)
   const cnpjKey = linkHandler({ ownerCpfHash: hash })
   await withMock(cnpjKey.handler, () => handleRequest(makeReq(withCpf({ pix_key_type: 'cnpj' }))))
   assertEquals(cnpjKey.inserted[0]?.pix_key_hash, await sha256hex(VALID_COMPANY.cnpj))

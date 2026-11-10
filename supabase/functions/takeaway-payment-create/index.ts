@@ -8,7 +8,7 @@
 // split: a carteira da empresa recebe `amount - fee_total` e o resto (taxa Alber + gateway) fica na conta pai.
 // Nunca devolve chave nem wallet. Repetir a chamada com a mesma referência devolve a cobrança já criada.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { requireFoodKey, UUID, FOOD_REFERENCE, toReais } from '../_shared/food-service.ts'
 import {

@@ -3,7 +3,7 @@
 // (LGPD exige que o consentimento seja revogável). Preferência de baixo risco
 // — não precisa de PIN/pergunta de segurança como handle/pix/PIN mudam.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 
 interface UpdateMarketingRequest {

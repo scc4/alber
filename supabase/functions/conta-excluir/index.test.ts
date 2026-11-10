@@ -3,6 +3,7 @@
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
@@ -10,7 +11,7 @@ Deno.env.set('ASAAS_API_KEY', 'test-asaas-parent-key')
 Deno.env.set('ASAAS_ENVIRONMENT', 'sandbox')
 
 import { handleRequest } from './index.ts'
-import { aesEncrypt, bcryptHash } from '../_shared/crypto.ts'
+import { aesEncrypt, bcryptHash, pinGuard, hashAnswerForStorage } from '../_shared/crypto.ts'
 
 type MockRoute = { pattern: string; method?: string; status: number; body: unknown }
 
@@ -148,14 +149,14 @@ Deno.test('confirm — revalida elegibilidade no servidor, bloqueia mesmo sem ch
 })
 
 Deno.test('confirm — PIN incorreto → 401, não avança', async () => {
-  const pinBcrypt = await bcryptHash('correct-pin-hash')
+  const pinBcrypt = await bcryptHash(await pinGuard('correct-pin-hash'))
   const routes: MockRoute[] = [
     { pattern: '/auth/v1/user',  method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
     { pattern: '/rest/v1/splits', method: 'GET', status: 200, body: [] },
     { pattern: '/rest/v1/spaces', method: 'GET', status: 200, body: [] },
     { pattern: '/rest/v1/split_participants', method: 'GET', status: 200, body: [] },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
   ]
   const res  = await withMock(routes, () =>
@@ -167,8 +168,8 @@ Deno.test('confirm — PIN incorreto → 401, não avança', async () => {
 })
 
 Deno.test('confirm — fluxo completo com sucesso: anonimiza, marca deleted_at, derruba sessões', async () => {
-  const pinBcrypt = await bcryptHash(PIN_HASH)
-  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const pinBcrypt = await bcryptHash(await pinGuard(PIN_HASH))
+  const secBcrypt = await hashAnswerForStorage(SEC_HASH)
   const nowIso = new Date(Date.now() + 5 * 60_000).toISOString()
 
   let patchedUserBody: Record<string, unknown> | null = null
@@ -180,7 +181,7 @@ Deno.test('confirm — fluxo completo com sucesso: anonimiza, marca deleted_at, 
     { pattern: '/rest/v1/splits', method: 'GET', status: 200, body: [] },
     { pattern: '/rest/v1/spaces', method: 'GET', status: 200, body: [] },
     { pattern: '/rest/v1/split_participants', method: 'GET', status: 200, body: [] },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
     { pattern: '/rest/v1/sms_codes', method: 'GET', status: 200, body: [{ id: 'sms-1', code: '123456', expires_at: nowIso, used_at: null }] },
     { pattern: '/rest/v1/sms_codes', method: 'PATCH', status: 200, body: [] },

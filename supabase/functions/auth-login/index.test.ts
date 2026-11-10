@@ -8,8 +8,9 @@
 // em pares/legado (fora do escopo desta mudança).
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
-import { bcryptHash } from '../_shared/crypto.ts'
+import { bcryptHash, pinGuard, hashAnswerForStorage, sessionPassword } from '../_shared/crypto.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
@@ -146,7 +147,7 @@ Deno.test('conta ativa (sem bloqueio) — passa dos gates, segue para checar PIN
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: {} } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [] },
   ]
   const res  = await withMock(routes, () => handleRequest(makeReq()))
   const data = await res.json()
@@ -187,7 +188,7 @@ Deno.test('login_blocked_until no passado → tratado como não-bloqueado, segue
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow({ login_blocked_until: past }) },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: {} } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [] },
   ]
   const res  = await withMock(routes, () => handleRequest(makeReq()))
   const data = await res.json()
@@ -200,7 +201,7 @@ Deno.test('3ª tentativa de PIN errado dentro da janela → bloqueia e retorna A
   // é a 3ª, deve bater o threshold e bloquear.
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: await bcryptHash('correct-pin') } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_hmac: await pinGuard('correct-pin'), pin_bcrypt: await bcryptHash(await pinGuard('correct-pin'), 4) }] },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
     { pattern: '/rest/v1/audit_logs', method: 'GET', status: 200, body: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }, // já 3 no total após esta inserção
   ]
@@ -230,11 +231,11 @@ Deno.test('3ª tentativa de PIN errado dentro da janela → bloqueia e retorna A
 })
 
 Deno.test('2ª resposta de segurança errada dentro da janela → bloqueia e retorna ACCOUNT_BLOCKED (não WRONG_SECURITY_ANSWER)', async () => {
-  const correctPin = await bcryptHash('right-pin-hash')
+  const correctPinBcrypt = await bcryptHash(await pinGuard('right-pin-hash'), 4)
   const routes: MockRoute[] = [
     { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
-    { pattern: '/auth/v1/admin/users/', method: 'GET', status: 200, body: { id: '1', app_metadata: { pin_bcrypt: correctPin, pin_sha256: 'right-pin-hash' } } },
-    { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ id: 'q1', answer_hash: await bcryptHash('resposta-certa') }] },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_hmac: await pinGuard('right-pin-hash'), pin_bcrypt: correctPinBcrypt }] },
+    { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ id: 'q1', answer_hash: await hashAnswerForStorage('resposta-certa') }] },
     { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
     { pattern: '/rest/v1/audit_logs', method: 'GET', status: 200, body: [{ id: 'a' }, { id: 'b' }] }, // já 2 no total após esta inserção
   ]
@@ -299,4 +300,49 @@ Deno.test('login via company_id + operator_ref: master da empresa → resolve o 
   // de pertencimento e chegou a resolver o usuário por operator_ref.
   assertEquals(res.status, 401)
   assertEquals(data.code, 'INVALID_CREDENTIALS')
+})
+
+// ── A2 (auditoria de 09/11/2026) ─────────────────────────────────────────────────────────────────────────────────
+
+Deno.test('A2: login correto emite a sessão com a senha DERIVADA no servidor (nunca o PIN) e não lê app_metadata', async () => {
+  const PIN = 'right-pin-hash'
+  const AUTH_ID = '11111111-1111-4111-8111-111111111111'
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_hmac: await pinGuard(PIN), pin_bcrypt: await bcryptHash(await pinGuard(PIN), 4) }] },
+    { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ id: 'q1', answer_hash: await hashAnswerForStorage('resposta-certa') }] },
+    { pattern: '/rest/v1/audit_logs', method: 'POST', status: 201, body: {} },
+    { pattern: '/rest/v1/audit_logs', method: 'GET', status: 200, body: [] },
+    { pattern: '/auth/v1/token', method: 'POST', status: 200, body: { access_token: 'access-1', refresh_token: 'refresh-1' } },
+  ]
+  let tokenBody: Record<string, unknown> | null = null
+  let adminUsersCalled = false
+  const orig = globalThis.fetch
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    if (url.includes('/auth/v1/admin/users')) adminUsersCalled = true
+    if (url.includes('/auth/v1/token')) tokenBody = JSON.parse(String(init?.body ?? '{}'))
+    return mockFetch(routes)(input, init)
+  }) as typeof fetch
+  let res: Response
+  try {
+    res = await handleRequest(makeReq({ pin_hash: PIN, security_answer_hash: 'resposta-certa' }))
+  } finally {
+    globalThis.fetch = orig
+  }
+  const data = await res.json()
+  assertEquals(res.status, 200)
+  assertEquals(data.token, 'access-1')
+  assertEquals(tokenBody?.password, await sessionPassword(AUTH_ID))
+  assertEquals(tokenBody?.password === PIN, false)
+  assertEquals(adminUsersCalled, false) // o PIN não vem mais do Supabase Auth (app_metadata/JWT)
+})
+
+Deno.test('A2: PIN certo mas sem credenciais na tabela privada (ex.: app_metadata antigo) → INVALID_CREDENTIALS, nunca entra', async () => {
+  const routes: MockRoute[] = [
+    { pattern: '/rest/v1/users', method: 'GET', status: 200, body: userRow() },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [] },
+  ]
+  const res = await withMock(routes, () => handleRequest(makeReq({ pin_hash: 'right-pin-hash' })))
+  assertEquals([res.status, (await res.json()).code], [401, 'INVALID_CREDENTIALS'])
 })

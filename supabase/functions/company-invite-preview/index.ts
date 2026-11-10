@@ -4,7 +4,7 @@
 // empresa antes da pessoa nova começar o cadastro enxuto de operador.
 // Não expõe nada sensível: só nome/nome fantasia e validade do convite.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 
 const supabaseAdmin = createClient(

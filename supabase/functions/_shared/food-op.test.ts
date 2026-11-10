@@ -5,7 +5,7 @@ import {
   type FoodOp, type FoodOpExpectation, type FoodOpRejection,
 } from './food-op.ts'
 import { FakeDb, installFakeFetch } from './fake-postgrest.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 const SECRET = 'c0ffee'.repeat(11).slice(0, 64) // hexadecimal de 64 caracteres = 32 bytes
 const NOW = new Date('2026-11-10T12:00:00.000Z')

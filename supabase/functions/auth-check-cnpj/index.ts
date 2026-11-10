@@ -7,7 +7,7 @@
 //
 // Não retorna nada além do booleano — mesmo raciocínio de auth-check-cpf.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { sha256hex } from '../_shared/crypto.ts'

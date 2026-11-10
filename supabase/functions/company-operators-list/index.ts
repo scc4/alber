@@ -4,7 +4,7 @@
 // de permissões de cada um. Só o master (ou operador com gerenciar_operadores)
 // pode ver essa lista.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { requireCompanyPermission } from '../_shared/company-permissions.ts'
 

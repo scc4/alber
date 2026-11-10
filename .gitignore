@@ -9,4 +9,4 @@ dist/
 *.mobileprovision
 *.orig.*
 web-build/
-.DS_Store
+.DS_Store.claude/settings.local.json

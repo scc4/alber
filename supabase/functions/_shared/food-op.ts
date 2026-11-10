@@ -13,7 +13,7 @@
 //
 // Este arquivo tem duas partes: funções puras (assinar/verificar) e o armazém de nonces/idempotência (tabela food_ops, migration 058).
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { sha256hex } from './crypto.ts'
 
 export type FoodOpKind = 'withdraw' | 'set_pix_key' | 'owner_transfer'

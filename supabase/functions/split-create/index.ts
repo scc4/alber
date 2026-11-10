@@ -4,7 +4,7 @@
 // aqui. Cada participante aprova (ou recusa) individualmente em split-invite-respond,
 // e é só na aprovação que a transferência Asaas real acontece.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'

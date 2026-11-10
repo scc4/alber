@@ -3,7 +3,7 @@
 // Retorna dados mascarados do perfil do usuário autenticado.
 // member_since, email_masked, phone_masked, birth_masked, pix_key_masked
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt } from '../_shared/crypto.ts'
 import { maskCpfForDisplay } from '../_shared/cpf.ts'

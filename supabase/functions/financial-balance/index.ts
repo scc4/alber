@@ -4,7 +4,7 @@
 //          blocked   = Σ split_participants.blocked_amount WHERE status='accepted'
 //          total     = available + blocked
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'

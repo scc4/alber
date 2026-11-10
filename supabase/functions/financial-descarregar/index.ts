@@ -3,9 +3,9 @@
 // Fluxo: auth → validar PIN+segurança → verificar KYC/Pix/saldo →
 //        Asaas cash out → taxa para conta pai → registrar TXs → audit
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { sha256hex, bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { bcryptVerify, aesDecrypt, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, pinMatches, pinGuard, verifyAnswerHash, cpfHash } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { cashoutPix, transferToWallet, getSubcontaBalance, AsaasError } from '../_shared/asaas.ts'
@@ -129,7 +129,7 @@ Deno.serve(async (req: Request) => {
   // Só se aplica à carteira pessoal — chave CNPJ de empresa não tem esse checo ainda.
 
   if (wallet.ownerType === 'personal' && wallet.pixKeyType === 'CPF') {
-    const pixCpfHash = await sha256hex(normalizeCpf(wallet.pixKey))
+    const pixCpfHash = await cpfHash(normalizeCpf(wallet.pixKey))
     if (pixCpfHash !== user.cpf) {
       return err('PIX_CPF_MISMATCH', 'Chave Pix CPF não corresponde ao titular da conta', 422)
     }
@@ -148,9 +148,7 @@ Deno.serve(async (req: Request) => {
 
   // ── Verificar PIN (spec §6: SHA-256 em trânsito, bcrypt no banco) ────────────
 
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
-  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
-  const pinSha256: string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, user.id)
 
   if (!pinBcrypt) {
     console.error('pin_bcrypt not found for user:', user.id)
@@ -164,7 +162,7 @@ Deno.serve(async (req: Request) => {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = pinSha256 ? pin_hash === pinSha256 : await bcryptVerify(pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? await pinMatches(pin_hash, pinSha256) : await bcryptVerify(await pinGuard(pin_hash), pinBcrypt)
   }
   if (!pinOk) {
     await supabaseAdmin.from('audit_logs').insert({
@@ -188,7 +186,7 @@ Deno.serve(async (req: Request) => {
   }
 
   const answerOk = (await Promise.all(
-    questions.map(q => bcryptVerify(security_answer_hash, q.answer_hash))
+    questions.map(q => verifyAnswerHash(security_answer_hash, q.answer_hash))
   )).some(Boolean)
 
   if (!answerOk) {

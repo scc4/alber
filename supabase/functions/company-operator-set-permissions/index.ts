@@ -4,7 +4,7 @@
 // chaves da matriz de permissões de um operador. Merge parcial — só as
 // chaves enviadas são alteradas, o resto permanece como estava.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 import { requireCompanyPermission, isValidCompanyPermissionKey } from '../_shared/company-permissions.ts'

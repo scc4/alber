@@ -8,10 +8,10 @@
 // Não retorna NADA além do booleano — nome, e-mail, handle etc. só aparecem
 // depois que a pessoa prova que é dona do CPF via auth-login.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
-import { sha256hex } from '../_shared/crypto.ts'
+import { cpfHash } from '../_shared/crypto.ts'
 
 interface CheckCpfRequest {
   cpf: string
@@ -54,11 +54,11 @@ export async function handleRequest(req: Request): Promise<Response> {
     ip_address: clientIp,
   })
 
-  const cpfHash = await sha256hex(cpfClean)
+  const cpfHashValue = await cpfHash(cpfClean)
   const { data: existing } = await supabaseAdmin
     .from('users')
     .select('id')
-    .eq('cpf', cpfHash)
+    .eq('cpf', cpfHashValue)
     .is('deleted_at', null)
     .maybeSingle()
 

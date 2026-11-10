@@ -8,13 +8,14 @@
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
 Deno.env.set('ENCRYPTION_KEY', 'test-encryption-key')
 
 import { handleRequest } from './index.ts'
-import { bcryptHash, sha256hex } from '../_shared/crypto.ts'
+import { bcryptHash, sha256hex, pinGuard, hashAnswerForStorage } from '../_shared/crypto.ts'
 
 type MockRoute = { pattern: string; method?: string; status: number; body: unknown }
 
@@ -115,14 +116,14 @@ Deno.test('empresa já tem chave Pix → 409 PIX_KEY_EXISTS (antes de checar PIN
 })
 
 Deno.test('PIN incorreto → 401 INVALID_CREDENTIALS e grava audit_logs company_pix_key_pin_failed', async () => {
-  const wrongPinBcrypt = await bcryptHash('not-the-pin', 6)
+  const wrongPinBcrypt = await bcryptHash(await pinGuard('not-the-pin'), 6)
   let auditEvent: string | null = null
 
   const routes: MockRoute[] = [
     { pattern: '/auth/v1/user',            method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users',           method: 'GET', status: 200, body: [CALLER] },
     { pattern: '/rest/v1/companies',       method: 'GET', status: 200, body: [company()] },
-    { pattern: '/auth/v1/admin/users/',    method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: wrongPinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: wrongPinBcrypt }] },
   ]
 
   const orig = globalThis.fetch
@@ -150,7 +151,7 @@ Deno.test('PIN incorreto → 401 INVALID_CREDENTIALS e grava audit_logs company_
 })
 
 Deno.test('resposta de segurança incorreta → 401 INVALID_CREDENTIALS e grava audit_logs company_pix_key_security_failed', async () => {
-  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
+  const pinBcrypt = await bcryptHash(await pinGuard(PIN_HASH), 6)
   const wrongSecBcrypt = await bcryptHash('not-the-answer', 6)
   let auditEvent: string | null = null
 
@@ -158,7 +159,7 @@ Deno.test('resposta de segurança incorreta → 401 INVALID_CREDENTIALS e grava 
     { pattern: '/auth/v1/user',             method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users',            method: 'GET', status: 200, body: [CALLER] },
     { pattern: '/rest/v1/companies',        method: 'GET', status: 200, body: [company()] },
-    { pattern: '/auth/v1/admin/users/',     method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: wrongSecBcrypt }] },
   ]
 
@@ -187,15 +188,15 @@ Deno.test('resposta de segurança incorreta → 401 INVALID_CREDENTIALS e grava 
 })
 
 Deno.test('PIN e segurança corretos, CNPJ não bate com o cadastrado → 422 CNPJ_MISMATCH', async () => {
-  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
-  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const pinBcrypt = await bcryptHash(await pinGuard(PIN_HASH), 6)
+  const secBcrypt = await hashAnswerForStorage(SEC_HASH)
   const differentCnpjHash = await sha256hex('00000000000191') // dígito verificador válido, mas outro CNPJ
 
   const routes: MockRoute[] = [
     { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
     { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company({ cnpj: differentCnpjHash })] },
-    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
   ]
   const res  = await withMock(routes, () => handleRequest(makeReq()))
@@ -205,8 +206,8 @@ Deno.test('PIN e segurança corretos, CNPJ não bate com o cadastrado → 422 CN
 })
 
 Deno.test('fluxo completo com sucesso: salva chave CNPJ e grava audit_logs company_pix_key_changed', async () => {
-  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
-  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const pinBcrypt = await bcryptHash(await pinGuard(PIN_HASH), 6)
+  const secBcrypt = await hashAnswerForStorage(SEC_HASH)
   const matchingCnpjHash = await sha256hex(VALID_CNPJ)
   let auditEvent: string | null = null
   let companyUpdated = false
@@ -215,7 +216,7 @@ Deno.test('fluxo completo com sucesso: salva chave CNPJ e grava audit_logs compa
     { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
     { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company({ cnpj: matchingCnpjHash })] },
-    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
   ]
 
@@ -249,14 +250,14 @@ Deno.test('fluxo completo com sucesso: salva chave CNPJ e grava audit_logs compa
 })
 
 Deno.test('tipo random com chave em formato inválido → 422 PIX_KEY_INVALID', async () => {
-  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
-  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const pinBcrypt = await bcryptHash(await pinGuard(PIN_HASH), 6)
+  const secBcrypt = await hashAnswerForStorage(SEC_HASH)
 
   const routes: MockRoute[] = [
     { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
     { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company()] },
-    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
   ]
 
@@ -267,8 +268,8 @@ Deno.test('tipo random com chave em formato inválido → 422 PIX_KEY_INVALID', 
 })
 
 Deno.test('tipo random com chave EVP válida → salva sem chamar Asaas e grava audit_logs company_pix_key_changed', async () => {
-  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
-  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const pinBcrypt = await bcryptHash(await pinGuard(PIN_HASH), 6)
+  const secBcrypt = await hashAnswerForStorage(SEC_HASH)
   const pastedEvp = '123e4567-e89b-12d3-a456-426614174000'
   let auditEvent: string | null = null
   let companyUpdated = false
@@ -277,7 +278,7 @@ Deno.test('tipo random com chave EVP válida → salva sem chamar Asaas e grava 
     { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
     { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company()] },
-    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
   ]
 
@@ -312,15 +313,15 @@ Deno.test('tipo random com chave EVP válida → salva sem chamar Asaas e grava 
 
 // ── Guarda de saque: chave ALEATÓRIA tranca os saques por 48 h e avisa o dono; chave do CNPJ não ───────────────────────────────────
 async function setKeyAndCapture(body: Record<string, unknown>) {
-  const pinBcrypt = await bcryptHash(PIN_HASH, 6)
-  const secBcrypt = await bcryptHash(SEC_HASH, 6)
+  const pinBcrypt = await bcryptHash(await pinGuard(PIN_HASH), 6)
+  const secBcrypt = await hashAnswerForStorage(SEC_HASH)
   const patches: Record<string, unknown>[] = []
   const pushes: Record<string, unknown>[] = []
   const routes: MockRoute[] = [
     { pattern: '/auth/v1/user',               method: 'GET', status: 200, body: AUTH_USER },
     { pattern: '/rest/v1/users',              method: 'GET', status: 200, body: [CALLER] },
     { pattern: '/rest/v1/companies',          method: 'GET', status: 200, body: [company({ cnpj: await sha256hex(VALID_CNPJ) })] },
-    { pattern: '/auth/v1/admin/users/',       method: 'GET', status: 200, body: { id: AUTH_UUID, app_metadata: { pin_bcrypt: pinBcrypt } } },
+    { pattern: '/rest/v1/user_credentials', method: 'GET', status: 200, body: [{ pin_bcrypt: pinBcrypt }] },
     { pattern: '/rest/v1/security_questions', method: 'GET', status: 200, body: [{ answer_hash: secBcrypt }] },
   ]
   const orig = globalThis.fetch

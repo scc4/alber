@@ -3,7 +3,7 @@
 // UPSERT do Expo Push Token na tabela push_tokens.
 // Chamado após login/splash com token do usuário autenticado.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 
 const supabaseAdmin = createClient(

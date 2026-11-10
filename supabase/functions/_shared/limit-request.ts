@@ -4,7 +4,7 @@
 // Só empresa aprovada no KYC e com o vínculo do responsável em ordem pede (vínculo em revisão ou recusado já bloqueia saque, então aumento de
 // limite não adianta). Um pedido aberto por empresa; 3 pedidos por dia. O aprovado substitui os limites padrão (withdraw-guard.ts).
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { effectiveLimits, LIMIT_REQUEST_CAPS } from './withdraw-guard.ts'
 
 export const MAX_LIMIT_REQUESTS_PER_DAY = 3

@@ -6,7 +6,7 @@
 // descrição (que traz nome de cliente): só id, tipo, valor, saldo, data e se há cobrança ligada. Cada consulta fica no
 // audit_logs do Alber com quem pediu. Não escreve em nada além do log e não movimenta dinheiro.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { requireAdminKey } from '../_shared/admin-service.ts'
 import { getParentBalanceCents, getPendingStatistics, listParentMovements } from '../_shared/asaas.ts'

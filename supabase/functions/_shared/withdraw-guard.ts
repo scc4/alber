@@ -14,7 +14,7 @@
 //      juntos) até a equipe voltar aos padrões. O aumento mexe SÓ nos limites de valor: vínculo em revisão ou recusado e a espera da chave Pix
 //      continuam valendo.
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 export const WITHDRAW_RULES = {
   newCompanyDays: 30,

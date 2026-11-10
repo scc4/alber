@@ -5,7 +5,7 @@
 // Usado por auth-question e auth-login para validar que operator_ref
 // realmente tem acesso a company_id antes de resolver o usuário por ele.
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 export async function isCompanyMember(
   supabaseAdmin: SupabaseClient,

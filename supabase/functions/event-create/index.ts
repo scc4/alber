@@ -2,7 +2,7 @@
 // POST /event-create
 // Dono ou admin cria evento com lotes. Primeiro lote sempre ativo.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 

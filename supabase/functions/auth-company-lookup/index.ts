@@ -10,7 +10,7 @@
 // §7 — a empresa não tem PIN/pergunta própria, quem autentica é sempre a
 // pessoa física (master ou operador), então esta tela só resolve QUEM.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { sha256hex } from '../_shared/crypto.ts'

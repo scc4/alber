@@ -1,6 +1,6 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify, bcryptHash, verifyPinWithPairs, tryParsePairsPayload } from '../_shared/crypto.ts'
+import { bcryptVerify, verifyPinWithPairs, tryParsePairsPayload, loadPinCreds, savePinCreds, pinMatches, pinGuard, verifyAnswerHash } from '../_shared/crypto.ts'
 import { sendPush } from '../_shared/push.ts'
 
 // SHA-256 de PINs óbvios para comparação com o hash recebido
@@ -74,9 +74,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!user) return err('USER_NOT_FOUND', 'Usuário não encontrado', 404)
 
   // Verificar PIN atual — suporta SHA-256 direto (setup) e JSON de pares (secure)
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
-  const pinBcrypt:  string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
-  const pinSha256:  string | undefined = authMeta?.user?.app_metadata?.pin_sha256
+  const { pinBcrypt, pinSha256 } = await loadPinCreds(supabaseAdmin, user.id)
 
   if (!pinBcrypt) return err('INVALID_CREDENTIALS', 'Credenciais inválidas', 401)
 
@@ -87,7 +85,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const result = await verifyPinWithPairs(pinSha256, pairs)
     pinOk = result.ok
   } else {
-    pinOk = pinSha256 ? current_pin_hash === pinSha256 : await bcryptVerify(current_pin_hash, pinBcrypt)
+    pinOk = pinSha256 ? await pinMatches(current_pin_hash, pinSha256) : await bcryptVerify(await pinGuard(current_pin_hash), pinBcrypt)
   }
 
   if (!pinOk) {
@@ -100,7 +98,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   // Verificar que o novo PIN não bate com o atual via bcrypt
-  const newMatchesCurrent = await bcryptVerify(new_pin_hash, pinBcrypt)
+  const newMatchesCurrent = await bcryptVerify(await pinGuard(new_pin_hash), pinBcrypt)
   if (newMatchesCurrent) {
     return err('PIN_SAME', 'O novo PIN deve ser diferente do PIN atual', 422)
   }
@@ -117,7 +115,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   let securityOk = false
   for (const q of questions) {
-    if (await bcryptVerify(security_answer_hash, q.answer_hash)) {
+    if (await verifyAnswerHash(security_answer_hash, q.answer_hash)) {
       securityOk = true
       break
     }
@@ -158,17 +156,12 @@ export async function handleRequest(req: Request): Promise<Response> {
     .update({ used_at: now })
     .eq('id', smsRow.id)
 
-  // Bcrypt novo PIN (custo 12)
-  const newPinBcrypt = await bcryptHash(new_pin_hash)
-
-  // Atualizar app_metadata com novo PIN bcrypt + sha256
-  const { error: updateAuthErr } = await supabaseAdmin.auth.admin.updateUserById(
-    user.auth_id,
-    { app_metadata: { ...authMeta?.user?.app_metadata, pin_bcrypt: newPinBcrypt, pin_sha256: new_pin_hash } },
-  )
+  // Novo PIN: HMAC com pepper + bcrypt do valor com pepper, na tabela privada user_credentials (nunca em app_metadata/JWT).
+  // A senha do Supabase Auth é derivada no servidor e não depende do PIN: não há o que trocar lá.
+  const { error: updateAuthErr } = await savePinCreds(supabaseAdmin, user.id, new_pin_hash)
 
   if (updateAuthErr) {
-    console.error('[perfil-update-pin] updateUserById error:', updateAuthErr)
+    console.error('[perfil-update-pin] savePinCreds error:', updateAuthErr.message)
     return err('DB_ERROR', 'Erro ao atualizar PIN', 500)
   }
 

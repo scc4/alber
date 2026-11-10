@@ -3,7 +3,7 @@
 // Qualquer usuário autenticado pode ver o preview do lounge via invite_token
 // Usa service role para ler espaços privados (RLS bloqueia não-membros)
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 
 interface PreviewRequest {

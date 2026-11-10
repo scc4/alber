@@ -1,4 +1,4 @@
-import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 interface ErrorExtras {
   asaas_account_id?: string

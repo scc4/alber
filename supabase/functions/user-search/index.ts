@@ -3,10 +3,10 @@
 // Busca usuários por @handle (ILIKE), nome (ILIKE) ou CPF (match exato via hash).
 // Exclui o próprio usuário. Mínimo 2 chars. Máximo 10 resultados.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf } from '../_shared/cpf.ts'
-import { sha256hex } from '../_shared/crypto.ts'
+import { cpfHash } from '../_shared/crypto.ts'
 
 const supabaseAdmin = createClient(
   Deno.env.get('SUPABASE_URL')!,
@@ -49,11 +49,11 @@ Deno.serve(async (req: Request) => {
 
   // CPF — 11 dígitos válidos → match exato via hash (CPF nunca é ILIKE-buscável)
   if (digits.length === 11 && validateCpf(digits)) {
-    const cpfHash = await sha256hex(normalizeCpf(digits))
+    const cpfHashValue = await cpfHash(normalizeCpf(digits))
     const { data: user, error: cpfErr } = await supabaseAdmin
       .from('users')
       .select('id, name, handle, kyc_status, created_at')
-      .eq('cpf', cpfHash)
+      .eq('cpf', cpfHashValue)
       .neq('id', caller.id)
       .maybeSingle()
 

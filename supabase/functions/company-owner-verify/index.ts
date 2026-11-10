@@ -6,7 +6,7 @@
 //
 // Autorização: só o master (owner_id). Empresa já aprovada/conferida só devolve a situação; revisão RECUSADA pela equipe não se refaz aqui.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
 import { sha256hex } from '../_shared/crypto.ts'

@@ -5,7 +5,7 @@
 // migration 044), sem precisar de suporte. Não mexe na subconta Asaas em si
 // (fica órfã, mesmo trade-off aceito da rejeição automática via webhook).
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 import { abandonPatch, abandonRefusal } from '../_shared/company-abandon.ts'

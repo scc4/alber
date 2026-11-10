@@ -7,12 +7,13 @@
 
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
 
 import { handleRequest } from './index.ts'
-import { sha256hex } from '../_shared/crypto.ts'
+import { sha256hex, cpfHash } from '../_shared/crypto.ts'
 
 type MockRoute = { pattern: string; method?: string; status: number; body: unknown }
 
@@ -96,11 +97,11 @@ Deno.test('CPF não confere com o hash salvo → 422 CPF_MISMATCH', async () => 
 })
 
 Deno.test('CPF confere → 200 com cpf_masked no formato ***.***.*XX-XX', async () => {
-  const cpfHash = await sha256hex(VALID_CPF)
+  const accountCpfHash = await cpfHash(VALID_CPF)
   const routes: MockRoute[] = [
     { pattern: '/auth/v1/user',  method: 'GET',   status: 200, body: AUTH_USER },
     RATE_OK, AUDIT_INSERT,
-    { pattern: '/rest/v1/users', method: 'GET',   status: 200, body: [{ id: 'u1', cpf: cpfHash }] },
+    { pattern: '/rest/v1/users', method: 'GET',   status: 200, body: [{ id: 'u1', cpf: accountCpfHash }] },
     { pattern: '/rest/v1/users', method: 'PATCH', status: 200, body: [] },
   ]
   const res  = await withMock(routes, () => handleRequest(makeReq(VALID_CPF)))

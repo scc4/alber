@@ -10,7 +10,7 @@ Deno.env.set('ASAAS_API_KEY', 'test-asaas-parent-key')
 Deno.env.set('ENCRYPTION_KEY', 'test-encryption-key')
 Deno.env.set('ASAAS_ENVIRONMENT', 'sandbox')
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { aesEncrypt } from './crypto.ts'
 import { applyCompanyKyc, pollCompanyKyc } from './company-kyc.ts'
 // company-list cria o cliente do Supabase ao carregar: só pode ser importado depois das variáveis acima.

@@ -2,7 +2,7 @@
 // Spec: /specs/04_api_asaas.md §4.2, §3 (período de avaliação)
 // Fluxo: garantir pix_key → QR Code estático → pending TX
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { aesDecrypt, aesEncrypt } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'

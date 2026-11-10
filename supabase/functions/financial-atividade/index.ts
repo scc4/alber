@@ -3,7 +3,7 @@
 // Retorna histórico paginado de transações do usuário autenticado.
 // Counterpart (name + handle) resolvido via batch query em users.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { requireCompanyPermission } from '../_shared/company-permissions.ts'
 

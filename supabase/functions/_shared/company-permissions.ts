@@ -9,7 +9,7 @@
 // que precisar de um controle de acesso próprio deve adicionar sua chave aqui
 // (e no espelho do app, ver store/company.store.ts).
 
-import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import type { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 export const COMPANY_PERMISSION_KEYS = [
   'ver_saldo',

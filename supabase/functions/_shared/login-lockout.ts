@@ -6,7 +6,7 @@
 //
 // Spec: /specs/05_security.md §2
 
-import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 export const LOGIN_BLOCK_MINUTES        = 60  // duração do bloqueio
 export const FAILURE_WINDOW_MINUTES     = 15  // janela em que as falhas são contadas

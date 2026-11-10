@@ -2,8 +2,8 @@
 // Spec: /specs/04_api_asaas.md §4.3 (PAYMENT_CONFIRMED), §5.4 (CPF validation)
 // Spec: /specs/04_api_asaas.md §4.6 (refund on CPF mismatch)
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { sha256hex } from '../_shared/crypto.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
+import { sha256hex, cpfHash } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { normalizeCpf } from '../_shared/cpf.ts'
 import { refundPayment } from '../_shared/asaas.ts'
@@ -190,7 +190,9 @@ export async function handleRequest(req: Request): Promise<Response> {
   const payerCpfRaw = payment.pixTransaction?.payer?.cpfCnpj
 
   if (payerCpfRaw) {
-    const payerCpfHash = await sha256hex(normalizeCpf(payerCpfRaw))
+    const payerDigits = normalizeCpf(payerCpfRaw)
+    // CPF: HMAC com pepper (users.cpf). CNPJ: SHA-256 puro (companies.cnpj, dado público de registro).
+    const payerCpfHash = payerDigits.length === 11 ? await cpfHash(payerDigits) : await sha256hex(payerDigits)
 
     if (payerCpfHash !== ownerData.doc) {
       // CPF/CNPJ do pagador difere do titular da conta — devolver automaticamente

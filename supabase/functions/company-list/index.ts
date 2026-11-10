@@ -3,7 +3,7 @@
 // Lista as empresas do usuário autenticado: onde é master (companies.owner_id)
 // e onde é operador ativo (company_operators).
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { pollCompanyKyc } from '../_shared/company-kyc.ts'
 import { effectiveLimits } from '../_shared/withdraw-guard.ts'

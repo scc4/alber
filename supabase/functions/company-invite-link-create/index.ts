@@ -4,7 +4,7 @@
 // alguém que nunca usou o Alber — diferente de company-operator-invite
 // (que exige @handle de quem já tem conta).
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { logError } from '../_shared/error-log.ts'
 import { requireCompanyPermission, isValidCompanyPermissionKey } from '../_shared/company-permissions.ts'

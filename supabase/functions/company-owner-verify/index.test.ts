@@ -1,12 +1,13 @@
 // Roda com: deno test supabase/functions/company-owner-verify/index.test.ts --allow-env --allow-net
 import { assertEquals } from 'https://deno.land/std@0.208.0/assert/mod.ts'
 
+Deno.env.set('ALBER_CREDENTIAL_PEPPER', 'test-pepper-test-pepper-test-pepper-0123')
 Deno.env.set('SUPABASE_URL', 'http://localhost-test')
 Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('SUPABASE_ANON_KEY', 'test-anon')
 
 import { handleRequest } from './index.ts'
-import { sha256hex } from '../_shared/crypto.ts'
+import { sha256hex, cpfHash } from '../_shared/crypto.ts'
 import type { CnpjRegistry } from '../_shared/owner-link.ts'
 
 const CPF = '12345678909'
@@ -25,7 +26,7 @@ async function run(world: World, body: Record<string, unknown>, registry: CnpjRe
     const j = init?.body ? JSON.parse(String(init.body)) : null
     const res = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s })
     if (url.includes('/auth/v1/user')) return res({ id: 'auth-1' })
-    if (url.includes('/rest/v1/users')) return res({ id: world.callerId ?? 'me', cpf: await sha256hex(CPF), deleted_at: null, account_status: 'active' })
+    if (url.includes('/rest/v1/users')) return res({ id: world.callerId ?? 'me', cpf: await cpfHash(CPF), deleted_at: null, account_status: 'active' })
     if (url.includes('/rest/v1/audit_logs') && method === 'HEAD') return new Response(null, { status: 200, headers: { 'content-range': `0-0/${world.audit ?? 0}` } })
     if (url.includes('/rest/v1/audit_logs') && method === 'POST') { audits.push(j); return res({}, 201) }
     if (url.includes('/rest/v1/companies') && method === 'GET') return res(company)

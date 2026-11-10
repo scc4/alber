@@ -3,7 +3,7 @@
 // Body: { doc_type: 'rg'|'cnh', front_base64, back_base64, selfie_base64 }
 // Faz upload dos documentos KYC para a Asaas e atualiza kyc_status → 'submitted'.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 

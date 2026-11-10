@@ -4,9 +4,9 @@
 // Pago: reserva atômica → PIN → saldo → debita Asaas → INSERT ticket.
 // Race condition tratada com UPDATE WHERE (optimistic lock) antes das ops financeiras.
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
-import { bcryptVerify } from '../_shared/crypto.ts'
+import { bcryptVerify, loadPinCreds, pinGuard } from '../_shared/crypto.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance, transferToWallet } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -223,15 +223,14 @@ Deno.serve(async (req: Request) => {
   const feeAmount = parseFloat((priceBrl * feeRate).toFixed(2))
 
   // Verificar PIN
-  const { data: authMeta } = await supabaseAdmin.auth.admin.getUserById(user.auth_id)
-  const pinBcrypt: string | undefined = authMeta?.user?.app_metadata?.pin_bcrypt
+  const { pinBcrypt } = await loadPinCreds(supabaseAdmin, user.id)
 
   if (!pinBcrypt) {
     await rollbackBatchSold()
     return err('INVALID_CREDENTIALS', 'PIN não configurado', 401)
   }
 
-  const pinOk = await bcryptVerify(body.pin_hash, pinBcrypt)
+  const pinOk = await bcryptVerify(await pinGuard(body.pin_hash), pinBcrypt)
   if (!pinOk) {
     await rollbackBatchSold()
     await supabaseAdmin.from('audit_logs').insert({

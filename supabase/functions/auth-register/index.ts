@@ -2,11 +2,11 @@
 // Spec: /specs/04_api_asaas.md §4.1
 // Spec: /specs/05_security.md §7
 
-import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
 import { validateCpf, normalizeCpf, maskCpfForDisplay } from '../_shared/cpf.ts'
 import { validateCnpj, normalizeCnpj } from '../_shared/cnpj.ts'
-import { sha256hex, bcryptHash, aesEncrypt } from '../_shared/crypto.ts'
+import { sha256hex, aesEncrypt, sessionPassword, savePinCreds, hashAnswerForStorage, normalizeAnswerText, pinGuard, cpfHash } from '../_shared/crypto.ts'
 import { encryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { createAsaasAccount, getAsaasAccountByCpf, createPixAddressKey } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
@@ -177,6 +177,18 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!security_questions || security_questions.length !== 4) {
     return err('INVALID_SECURITY_QUESTIONS', '4 perguntas de segurança são obrigatórias', 400)
   }
+  // O texto da resposta (normalizado) é guardado CIFRADO para montar as opções mascaradas do login, e o hash enviado pelo app tem de
+  // ser o SHA-256 desse mesmo texto: senão a opção "certa" do login nunca bateria. Validado AQUI, antes de criar a subconta no Asaas.
+  for (const q of security_questions) {
+    if (typeof q.answer_hash !== 'string' || !/^[0-9a-f]{64}$/i.test(q.answer_hash) || typeof q.answer_text !== 'string' || !q.answer_text.trim()) {
+      return err('INVALID_SECURITY_QUESTIONS', 'Pergunta de segurança sem resposta válida', 400)
+    }
+    if ((await sha256hex(normalizeAnswerText(q.answer_text))) !== q.answer_hash.toLowerCase()) {
+      return err('INVALID_SECURITY_QUESTIONS', 'Resposta de segurança inconsistente', 400)
+    }
+  }
+  // Pepper das credenciais: sem ele nenhuma conta nova pode ser criada com segurança (falha fechada, antes de qualquer efeito).
+  try { await pinGuard('0'.repeat(64)) } catch { return err('SERVICE_NOT_CONFIGURED', 'Serviço indisponível', 503) }
 
   const cpfClean = normalizeCpf(cpf)
   if (!validateCpf(cpfClean)) {
@@ -276,7 +288,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   })
 
   const handleNorm  = handle.toLowerCase().replace(/^@/, '')
-  const cpfHash     = await sha256hex(cpfClean)
+  const cpfHashValue = await cpfHash(cpfClean)
   const cpfMasked   = maskCpfForDisplay(cpfClean)
   const encSecret   = Deno.env.get('ASAAS_API_KEY')!  // Asaas parent API key (credencial). A chave da subconta é cifrada por _shared/subaccount-key.ts
   const pixKeySecret = Deno.env.get('ENCRYPTION_KEY')! // mesmo secret usado por todo o resto do sistema p/ pix_key
@@ -296,7 +308,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     const { data: byCpf } = await supabaseAdmin
       .from('pending_registrations')
       .select('id, asaas_account_id, asaas_api_key_enc, asaas_wallet_id, attempts')
-      .eq('cpf_hash', cpfHash)
+      .eq('cpf_hash', cpfHashValue)
       .eq('status', 'pending')
       .maybeSingle()
 
@@ -335,7 +347,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // asaasAccountId/asaasApiKeyEnc/asaasWalletId ficam null (users.
     // asaas_account_id agora é nullable — migration 041).
     const { data: existingCpf } = await supabaseAdmin
-      .from('users').select('id').eq('cpf', cpfHash).maybeSingle()
+      .from('users').select('id').eq('cpf', cpfHashValue).maybeSingle()
     if (existingCpf) return err('CPF_DUPLICATE', 'CPF já cadastrado', 409)
 
     const { data: existingEmail } = await supabaseAdmin
@@ -355,7 +367,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     // ── ETAPA 1: Verificações de duplicata (sem efeito colateral) ─────────────
 
     const { data: existingCpf } = await supabaseAdmin
-      .from('users').select('id').eq('cpf', cpfHash).maybeSingle()
+      .from('users').select('id').eq('cpf', cpfHashValue).maybeSingle()
     if (existingCpf) return err('CPF_DUPLICATE', 'CPF já cadastrado', 409)
 
     const { data: existingEmail } = await supabaseAdmin
@@ -456,7 +468,8 @@ export async function handleRequest(req: Request): Promise<Response> {
     asaasApiKeyEnc   = await encryptSubaccountKey(asaasAccount.apiKey)
     // Manter o response bruto disponível para error_logs nas etapas seguintes.
     // A apiKey em texto claro só existe aqui — após aesEncrypt ela é descartada.
-    asaasRawResponse = { id: asaasAccount.id, apiKey: asaasAccount.apiKey, walletId: asaasAccount.walletId }
+    // NUNCA a apiKey da subconta aqui: este objeto vai para error_logs.asaas_response em texto puro (auditoria de 09/11/2026).
+    asaasRawResponse = { id: asaasAccount.id, walletId: asaasAccount.walletId, has_api_key: Boolean(asaasAccount.apiKey) }
 
     console.log('[asaas] account created:', JSON.stringify({
       id:       asaasAccount.id,
@@ -512,17 +525,25 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // Campos computados a partir do request atual (mesmo em retomada)
   const pixKeyEnc = pix_key ? await aesEncrypt(pix_key, pixKeySecret) : null
-  const pinBcrypt = await bcryptHash(pin_hash)
 
   // ── ETAPA 3: Criar usuário Supabase Auth ─────────────────────────────────────
 
-  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
+  // A senha do Supabase Auth NÃO é o PIN: nasce aleatória e logo vira uma senha derivada no servidor (sessionPassword). O PIN fica só
+  // em public.user_credentials (HMAC com pepper). Nada de PIN em app_metadata, que o Supabase Auth inclui no JWT de todo usuário.
+  // deno-lint-ignore prefer-const
+  let { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
     email_confirm: true,
-    password:      pin_hash,   // SHA-256 do PIN — usado como senha para emitir JWT
+    password:      crypto.randomUUID() + crypto.randomUUID(),
     user_metadata: { name, handle: handleNorm },
-    app_metadata:  { pin_bcrypt: pinBcrypt, pin_sha256: pin_hash },
   })
+  if (!authError && authData?.user) {
+    const { error: pwdError } = await supabaseAdmin.auth.admin.updateUserById(authData.user.id, { password: await sessionPassword(authData.user.id) })
+    if (pwdError) {
+      await supabaseAdmin.auth.admin.deleteUser(authData.user.id).catch(() => {})
+      authError = pwdError
+    }
+  }
 
   if (authError || !authData.user) {
     console.error('[auth-register] auth user creation failed:', authError)
@@ -533,7 +554,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     await savePending({
       supabaseAdmin,
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
-      email, cpfHash, handle: handleNorm,
+      email, cpfHash: cpfHashValue, handle: handleNorm,
       safePayload, error: String(authError?.message ?? 'auth_create_failed'),
       pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
     })
@@ -553,7 +574,7 @@ export async function handleRequest(req: Request): Promise<Response> {
       asaas_api_key_enc: asaasApiKeyEnc,
       name,
       email,
-      cpf:               cpfHash,
+      cpf:               cpfHashValue,
       cpf_masked:        cpfMasked,
       phone:             phone.replace(/\D/g, ''),
       birth_date,
@@ -580,7 +601,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     await savePending({
       supabaseAdmin,
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
-      email, cpfHash, handle: handleNorm,
+      email, cpfHash: cpfHashValue, handle: handleNorm,
       safePayload, error: String(userError?.message ?? 'users_insert_failed'),
       pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
     })
@@ -623,14 +644,24 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // ── ETAPA 5: Inserir perguntas de segurança ───────────────────────────────────
 
+  // PIN: HMAC com pepper + bcrypt do valor com pepper, na tabela privada (ver migration 063).
+  const { error: credError } = await savePinCreds(supabaseAdmin, userId, pin_hash)
+  if (credError) {
+    console.error('[auth-register] credentials insert failed:', credError.message)
+    await logError(supabaseAdmin, 'auth-register', new Error(credError.message), safePayload, { asaas_account_id: asaasAccountId ?? undefined })
+    await supabaseAdmin.from('users').delete().eq('id', userId)
+    await supabaseAdmin.auth.admin.deleteUser(authUserId)
+    return err('DB_ERROR', 'Erro temporário ao criar conta. Tente novamente.', 503)
+  }
+
+  // Resposta: bcrypt do hash com pepper (verificação) + texto normalizado CIFRADO (só para as opções mascaradas). Nada em claro.
   const questionsToInsert = await Promise.all(
     security_questions.map(async (q, i) => ({
-      user_id:           userId,
-      question:          q.question,
-      answer_hash:       await bcryptHash(q.answer_hash, 6), // cost 6 — 2º fator, não senha principal
-      answer_sha256:     q.answer_hash,                                        // sha256 exato que entrou no bcrypt
-      answer_normalized: q.answer_text ? q.answer_text.toLowerCase().trim() : null,
-      position:          i + 1,
+      user_id:     userId,
+      question:    q.question,
+      answer_hash: await hashAnswerForStorage(q.answer_hash.toLowerCase()),
+      answer_enc:  await aesEncrypt(normalizeAnswerText(q.answer_text as string), pixKeySecret),
+      position:    i + 1,
     }))
   )
 
@@ -649,22 +680,11 @@ export async function handleRequest(req: Request): Promise<Response> {
     await savePending({
       supabaseAdmin,
       asaasAccountId, asaasApiKeyEnc, asaasWalletId,
-      email, cpfHash, handle: handleNorm,
+      email, cpfHash: cpfHashValue, handle: handleNorm,
       safePayload, error: String(qError?.message ?? 'security_questions_insert_failed'),
       pendingId: pendingReg?.id ?? null, currentAttempts: pendingReg?.attempts ?? 0,
     })
     return err('DB_ERROR', 'Erro temporário ao criar conta. Tente novamente.', 503)
-  }
-
-  // PIN bcrypt + sha256 em app_metadata
-  // pin_bcrypt: verificação setup mode (bcrypt cost 12)
-  // pin_sha256: verificação secure mode (pairs) — apenas server-side, nunca no JWT
-  try {
-    await supabaseAdmin.auth.admin.updateUserById(authUserId, {
-      app_metadata: { pin_bcrypt: pinBcrypt, pin_sha256: pin_hash },
-    })
-  } catch (e) {
-    console.error('[auth-register] updateUserById failed (non-critical):', e)
   }
 
   // Prova de aceite (cl. 8.2.4). Não derruba o cadastro já concluído no Asaas,
@@ -713,7 +733,7 @@ export async function handleRequest(req: Request): Promise<Response> {
           'Content-Type': 'application/json',
           'apikey': Deno.env.get('SUPABASE_ANON_KEY')!,
         },
-        body: JSON.stringify({ email, password: pin_hash }),
+        body: JSON.stringify({ email, password: await sessionPassword(authUserId) }),
       },
     )
 

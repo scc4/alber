@@ -4,7 +4,7 @@
 // `companies.owner_ref`). verify_jwt fica no padrão (ligado), como nas takeaway-*: o Alber Food manda o apikey/Authorization anônimo do projeto;
 // quem autentica de verdade é a chave de serviço. Valores em CENTAVOS inteiros na API (1 Alber = R$ 1,00).
 
-import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient, type SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { err, json } from './cors.ts'
 import { requireFoodKey, UUID } from './food-service.ts'
 import { aesDecrypt, sha256hex } from './crypto.ts'

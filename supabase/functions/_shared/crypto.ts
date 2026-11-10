@@ -1,7 +1,8 @@
 // Spec: /specs/05_security.md §7
-// PIN:  SHA-256 em trânsito (app), bcrypt cost 12 no banco
-// Resp: bcrypt cost 12 no banco
-// CPF:  SHA-256 no banco
+// PIN:  SHA-256 em trânsito (app); no banco, HMAC-SHA256 com PEPPER do servidor (+ bcrypt do valor com pepper), em
+//       public.user_credentials (tabela sem acesso por anon/authenticated). Nunca em app_metadata (iria no JWT).
+// Resp: bcrypt do valor com pepper no banco; o texto normalizado fica CIFRADO (AES-GCM) só para montar as opções mascaradas
+// CPF:  SHA-256 no banco (ver nota em guards: migração para HMAC com pepper)
 // Pix/Asaas key: AES-256-GCM no banco
 
 import { hashSync as bcryptHashFn, compareSync as bcryptCompareFn, genSaltSync } from 'https://deno.land/x/bcrypt@v0.4.1/mod.ts'
@@ -15,6 +16,81 @@ export async function sha256hex(text: string): Promise<string> {
   return Array.from(new Uint8Array(buf))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('')
+}
+
+// ── Pepper de credenciais (A2 da auditoria de 09/11/2026) ────────────────────────────────────────
+// PIN de 6 dígitos tem 10^6 possibilidades: SHA-256 puro (ou bcrypt de SHA-256 puro) cai por força bruta assim que o banco
+// vaza. O pepper (segredo do servidor, fora do banco) torna inútil a cópia do banco sozinha. Falha FECHADA: sem o segredo,
+// nenhuma verificação nem gravação de credencial acontece.
+
+function pepperBytes(): Uint8Array<ArrayBuffer> {
+  const v = Deno.env.get('ALBER_CREDENTIAL_PEPPER') ?? ''
+  if (v.length < 32) throw new Error('ALBER_CREDENTIAL_PEPPER ausente ou curto (mín. 32 caracteres)')
+  return enc.encode(v)
+}
+
+/** HMAC-SHA256(pepper, `${domain}:${valueHex}`) em hexadecimal. `domain` separa PIN, resposta e senha de sessão. */
+export async function pepperHex(domain: 'pin' | 'answer' | 'session' | 'cpf', valueHex: string): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', pepperBytes(), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(`${domain}:${valueHex}`))
+  return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Comparação em tempo constante de duas strings hexadecimais do mesmo tamanho. */
+export function safeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length || a.length === 0) return false
+  let diff = 0
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i)
+  return diff === 0
+}
+
+/** Hash de identidade do CPF (somente dígitos): HMAC com pepper. users.cpf e pending_registrations.cpf_hash. O SHA-256 puro de um CPF
+ *  (10^9 possibilidades) se recupera por força bruta em minutos; com o pepper, uma cópia do banco sozinha não basta. CNPJ é dado
+ *  público de registro e segue em SHA-256 puro (companies.cnpj). */
+export const cpfHash = (cpfDigits: string) => pepperHex('cpf', cpfDigits)
+export const pinGuard    = (pinSha256Hex: string)    => pepperHex('pin', pinSha256Hex)
+export const answerGuard = (answerSha256Hex: string) => pepperHex('answer', answerSha256Hex)
+/** Senha que o Supabase Auth guarda para a conta: derivada no servidor, NUNCA do PIN. O cliente não a conhece. */
+export const sessionPassword = (authId: string)      => pepperHex('session', authId)
+
+/** O PIN (SHA-256 em hexadecimal, vindo do cliente) confere com o valor guardado (pin_hmac)? */
+export async function pinMatches(pinSha256Hex: string, storedPinHmac: string): Promise<boolean> {
+  return safeEqualHex(await pinGuard(pinSha256Hex), storedPinHmac)
+}
+
+/** O hash de resposta (SHA-256 em hexadecimal, vindo do cliente) confere com o bcrypt guardado? */
+export async function verifyAnswerHash(answerSha256Hex: string, storedBcrypt: string): Promise<boolean> {
+  return bcryptVerify(await answerGuard(answerSha256Hex), storedBcrypt)
+}
+
+/** Valor a guardar em security_questions.answer_hash (bcrypt do hash com pepper). */
+export async function hashAnswerForStorage(answerSha256Hex: string): Promise<string> {
+  return bcryptHash(await answerGuard(answerSha256Hex), 10)
+}
+
+/** Mesma normalização do app (utils/crypto.ts): minúsculas, sem acentos, sem espaços nas pontas. */
+export function normalizeAnswerText(answer: string): string {
+  return answer.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim()
+}
+
+/** Credenciais de PIN do usuário (tabela privada). `pinSha256` = pin_hmac (nome mantido para não mexer em todo o código). */
+export interface PinCreds { pinBcrypt?: string; pinSha256?: string }
+
+// deno-lint-ignore no-explicit-any
+export async function loadPinCreds(supabaseAdmin: any, userId: string): Promise<PinCreds> {
+  const { data } = await supabaseAdmin.from('user_credentials').select('pin_hmac, pin_bcrypt').eq('user_id', userId).maybeSingle()
+  return { pinBcrypt: (data?.pin_bcrypt as string | undefined) ?? undefined, pinSha256: (data?.pin_hmac as string | undefined) ?? undefined }
+}
+
+/** Grava (ou troca) o PIN: `pinSha256Hex` é o SHA-256 do PIN enviado pelo cliente. */
+// deno-lint-ignore no-explicit-any
+export async function savePinCreds(supabaseAdmin: any, userId: string, pinSha256Hex: string): Promise<{ error: { message: string } | null }> {
+  const guard = await pinGuard(pinSha256Hex)
+  const { error } = await supabaseAdmin.from('user_credentials').upsert(
+    { user_id: userId, pin_hmac: guard, pin_bcrypt: await bcryptHash(guard), updated_at: new Date().toISOString() },
+    { onConflict: 'user_id' },
+  )
+  return { error: error ?? null }
 }
 
 // ── bcrypt ────────────────────────────────────────────────────────────────────
@@ -80,7 +156,7 @@ export async function verifyPinWithPairsBcryptFallback(
   const combinations = generateCombinations(pairs)
   for (const combo of combinations) {
     const hash = await sha256hex(combo.join(''))
-    if (await bcryptVerify(hash, pinBcrypt)) {
+    if (await bcryptVerify(await pinGuard(hash), pinBcrypt)) {
       return { ok: true, sha256: hash }
     }
   }
@@ -98,7 +174,7 @@ export async function verifyPinWithPairs(
   const combinations = generateCombinations(pairs)
   for (const combo of combinations) {
     const hash = await sha256hex(combo.join(''))
-    if (hash === storedSha256) return { ok: true, sha256: hash }
+    if (safeEqualHex(await pinGuard(hash), storedSha256)) return { ok: true, sha256: hash }
   }
   return { ok: false, sha256: null }
 }
@@ -132,6 +208,6 @@ export async function hmacVerify(payload: string, secret: string, received: stri
   const hex = Array.from(new Uint8Array(sig))
     .map(b => b.toString(16).padStart(2, '0'))
     .join('')
-  // Constant-time comparison
-  return hex === received.toLowerCase()
+  // Comparação em tempo constante
+  return safeEqualHex(hex, received.toLowerCase())
 }

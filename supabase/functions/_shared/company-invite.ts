@@ -3,7 +3,7 @@
 // da pessoa nova (sem carteira pessoal), transformando o convite em uma
 // linha ativa de company_operators.
 
-import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 
 export type ConsumeInviteOutcome =
   | { ok: true; companyId: string }

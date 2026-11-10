@@ -1,7 +1,7 @@
 # Alber — Plano: Alber Food em projeto Supabase próprio
-**Versão:** 1.0 (rascunho para decisão)
+**Versão:** 1.1 (D1 decidida em 10/11/2026: começar do zero)
 **Data:** 09/11/2026
-**Status:** Plano. Nada foi implementado. Depende das decisões D1 a D5 (§3).
+**Status:** Plano. Nada foi implementado. **D1 decidida: começar do zero** (§3.1); D2 a D5 em aberto.
 **Depende de:** `09_responsabilidades_sistemas.md` (fronteiras e segredos), `06_modules/food_company_service.md` (contrato Food → Alber).
 
 ---
@@ -53,19 +53,28 @@ O Admin vive no banco compartilhado (`admin`, papel `admin_app`) e acessa o Food
 
 | # | Decisão | Opções | Recomendação |
 |---|---|---|---|
-| **D1** | O que fazer com os dados de teste do Food | **A)** começar do zero (zerar também as 2 empresas de teste do Alber); **B)** migrar preservando ids | **A**, a menos que você queira manter os dados de teste. Ver a restrição abaixo |
+| **D1** | O que fazer com os dados de teste do Food | **A)** começar do zero (zerar também as 2 empresas de teste do Alber); **B)** migrar preservando ids | **DECIDIDO em 10/11/2026: A.** Os valores de `APP_ENCRYPTION_KEY` e dos peppers não estão guardados fora do Supabase, então os dados atuais não são migráveis (ver §3.1) |
 | **D2** | Como o Admin acessa o Food | **A)** segunda conexão de banco do Admin ao banco do Food, com papel somente-leitura nas views e `EXECUTE` nas funções `admin_*`; **B)** o Food expõe uma API HTTP de administração (como o Alber expõe `food-company-*`) | **A** no curto prazo (reaproveita as 30 views e as 14 funções sem reescrever); **B** só se quiser eliminar de vez a credencial de banco do Admin no Food |
 | **D3** | Região e plano do projeto novo | mesma região do Alber (`sa-east-1`) | Mesma região; plano de produção (cópia/recuperação pontual). O custo de um segundo projeto entra na conta |
 | **D4** | O Admin também sai do projeto do Alber | agora / depois | **Depois.** O Admin segue no projeto do Alber nesta fase; separá-lo é o mesmo exercício e fica fora deste plano |
 | **D5** | Janela de corte | fora do horário, sem usuários | Como não há usuários, uma janela curta de indisponibilidade é aceitável |
 
-### Restrição que decide a D1: os segredos do Supabase são só de escrita
+### 3.1 Restrição que decidiu a D1: os segredos do Supabase são só de escrita
 
 O Supabase não devolve o valor de um segredo depois de gravado. Para **preservar** os dados do Food, você precisa ter guardados, fora do Supabase, os valores de `APP_ENCRYPTION_KEY` (cifra de CNPJ/CPF e das credenciais das integrações), `APP_PIN_PEPPER` e `APP_PASSWORD_PEPPER`.
 
 - Se **você tem** os valores: a opção B é possível (copiar os segredos e restaurar os dados).
-- Se **não tem**: os CNPJs, CPFs e credenciais já gravados ficam ilegíveis, e os PINs deixam de conferir (o dono recuperaria o PIN pelo fluxo de e-mail + pergunta). Nesse caso, a opção A.
+- Se **não tem** (**é o caso, confirmado em 10/11/2026**): os CNPJs, CPFs e credenciais já gravados ficam ilegíveis, e os PINs deixam de conferir (o dono recuperaria o PIN pelo fluxo de e-mail + pergunta). Por isso a opção A.
 - `FOOD_OP_SIGNING_KEY`, `ALBER_SERVICE_KEY` (= `ALBER_FOOD_SERVICE_KEY` no Alber) e `ALBER_WEBHOOK_SECRET` (= `FOOD_WEBHOOK_SECRET`) podem simplesmente ser **trocados**: gere um valor novo e grave o mesmo valor nos dois projetos.
+
+**Consequências da D1 = A**
+
+- Nenhum dado do Food é migrado: o banco do projeto novo nasce **vazio** (só as migrations), sem dump nem restauração, e o bucket `menu-images` não precisa de cópia. Isso **simplifica as fases 1, 2 e 5**.
+- As **2 empresas de teste do Alber** (origem `food`) e a operação de saque de teste (`food_ops`) ficam órfãs, porque apontam para contas do Food que deixam de existir. Devem ser **zeradas no corte** (com a nota de que as subcontas correspondentes ficam órfãs no Asaas; se o ambiente for sandbox, sem custo).
+- Os 4 pedidos, os 2 restaurantes e as 2 contas de teste do Food são descartados. O cadastro e a abertura de empresa serão refeitos no projeto novo.
+- **Todos os segredos do Food são gerados novos** (`APP_ENCRYPTION_KEY`, `APP_PIN_PEPPER`, `APP_PASSWORD_PEPPER`, `FOOD_BFF_SECRET`, `FOOD_OP_SIGNING_KEY`, chaves de serviço e do webhook). **Desta vez cada valor é guardado num gerenciador de senhas no momento em que é gerado**, antes de gravar no Supabase.
+
+> **Alerta operacional (vale já, antes da separação):** os valores atuais desses segredos existem **só** dentro do Supabase. Se algum for sobrescrito por engano, os dados que ele protege ficam perdidos sem volta. Sempre que um segredo novo for criado, guarde o valor fora do Supabase na mesma hora.
 
 ---
 
@@ -123,16 +132,16 @@ Cada fase tem passos, como verificar e como voltar. As fases 1 a 3 não afetam o
 - **Verificar:** projeto criado, vazio, acessível pela CLI.
 
 ### Fase 1 — Banco do Food
-1. Aplicar as migrations do Food (`db/migrations`, 0001 a 0039+) no projeto novo, com o runner apontado para ele (D1 = A) **ou** restaurar o dump de `takeaway` (D1 = B, preservando ids).
+1. Aplicar as migrations do Food (`db/migrations`, 0001 a 0039+) no projeto novo, com o runner apontado para ele. **Banco vazio**: não há dump nem restauração (D1 = A).
 2. Criar o papel `takeaway_app` e o pooler; conferir RLS e `REVOKE` nas tabelas imutáveis (`audit_logs`, `ledger_entries`).
 3. Criar o papel somente-leitura do Admin para o Food (D2 = A): `SELECT` só nas views `admin_v` do Food e `EXECUTE` só nas funções `admin_*`.
-- **Verificar:** `npm test` do Food contra o banco novo; consulta de privilégios (nenhum acesso de `anon`/`authenticated` ao schema `takeaway`); contagens iguais ao banco de origem (D1 = B).
+- **Verificar:** `npm test` do Food contra o banco novo; consulta de privilégios (nenhum acesso de `anon`/`authenticated` ao schema `takeaway`); schema idêntico ao do banco antigo (mesmas tabelas, políticas e funções).
 - **Voltar:** apagar o projeto novo; nada no ar mudou.
 
 ### Fase 2 — Função, Storage e segredos do Food
-1. Gravar os segredos do Food (§5) no projeto novo, com `ALBER_FUNCTIONS_URL` e `ALBER_ANON_KEY` **explícitos**.
+1. **Gerar** os segredos do Food (§5), **guardar cada valor no gerenciador de senhas** e só então gravá-los no projeto novo, com `ALBER_FUNCTIONS_URL` e `ALBER_ANON_KEY` **explícitos**.
 2. Publicar a `food-api` (sem `--verify-jwt`, como hoje) com a região correta (`x-region` já é tratado pelo cliente do site).
-3. Criar o bucket `menu-images` e copiar os arquivos (volume pequeno); a CSP `img-src` passa a usar o host novo (variável existente).
+3. Criar o bucket `menu-images` (vazio) com as mesmas regras; a CSP `img-src` passa a usar o host novo (variável existente).
 4. Ajustar o workflow "Deploy backend (Supabase)" e o `migrate-remote` para o novo `project-ref`.
 - **Verificar:** `GET /api/health` do site de teste contra a função nova; chamada direta sem segredo devolve 401.
 - **Voltar:** apagar a função nova; o site continua apontando para a antiga.
@@ -153,8 +162,8 @@ Cada fase tem passos, como verificar e como voltar. As fases 1 a 3 não afetam o
 
 ### Fase 5 — Corte (janela curta, sem usuários)
 1. Congelar escrita no Food antigo (pausar pedidos / manter a função antiga só leitura).
-2. Se D1 = B: dump final de `takeaway` → restaurar no projeto novo; copiar o bucket de novo.
-3. Se D1 = A: confirmar que o banco novo está vazio e zerar as 2 empresas de teste do Alber.
+2. Confirmar que o banco novo está vazio (D1 = A: nada é migrado).
+3. Zerar no Alber as 2 empresas de teste de origem `food` e a operação de saque de teste (`food_ops`), que ficam órfãs.
 4. No Railway: trocar `FOOD_API_URL` e `FOOD_BFF_SECRET` para o projeto novo; publicar.
 5. No Admin: ligar a conexão nova como padrão para os dados do Food.
 6. Fumaça: cadastro de restaurante, abertura de empresa (sandbox), saque de R$ 10, pedido pago, ação do Admin (taxa).
@@ -172,7 +181,7 @@ Cada fase tem passos, como verificar e como voltar. As fases 1 a 3 não afetam o
 
 | Risco | Mitigação |
 |---|---|
-| Segredo perdido (`APP_ENCRYPTION_KEY`) impede preservar os dados | Decidir D1 antes; na dúvida, opção A (os dados são de teste) |
+| Segredo perdido (`APP_ENCRYPTION_KEY`) impede preservar os dados | **Resolvido pela D1 = A** (dados de teste descartados). Daqui em diante, todo segredo novo é guardado fora do Supabase ao ser gerado |
 | Auditoria do Admin sem transação única | Auditar antes (`pendente`), agir com função idempotente, registrar o desfecho (fase 4, item 4) |
 | Junções `takeaway` × `public` das views do Admin | Duas consultas combinadas no código (volumes pequenos); testes de paridade com o resultado atual |
 | Latência Food → Alber entre projetos | Mesma região; o Food já chama o Alber por HTTP hoje (a diferença é só o host) |

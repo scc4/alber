@@ -1,7 +1,7 @@
 # Alber — Plano: Alber Food em projeto Supabase próprio
 **Versão:** 1.3 (11/11/2026: fases 1 e 2 publicadas e conferidas pela tela)
 **Data:** 09/11/2026
-**Status:** Fases 1 e 2 em produção (projeto atual): `food-admin` (Food, migration 0041) e Admin usando a API (`HttpFoodAdminClient`; segredos `FOOD_ADMIN_URL/KEY/SIGNING_KEY`). Teste real nas telas do Admin confirmado em 11/11/2026. Pendente da fase 2: aplicar `db/pending/drop_food_views.sql` no Admin (apaga as views `admin.v_food_*`) e separar o papel `admin_app` (hoje igual ao que a API assume, então o Admin ainda poderia ler `food_admin.*`). Fases 3 a 7 não iniciadas; D3 a D5 em aberto (§3).
+**Status:** Fases 1 e 2 em produção (projeto atual): `food-admin` (Food, migration 0041) e Admin usando a API (`HttpFoodAdminClient`; segredos `FOOD_ADMIN_URL/KEY/SIGNING_KEY`). Teste real nas telas do Admin confirmado em 11/11/2026. Fase 2 fechada em 11/11/2026: views `admin.v_food_*` apagadas (migration 0031 do Admin) e papel separado (Food 0042/0043): a API assume `food_admin_api`; `admin_app` (login do Admin) não acessa mais `food_admin.*`, `takeaway.admin_*` nem o schema `takeaway`. Fases 3 a 7 não iniciadas; D3 a D5 em aberto (§3).
 **Depende de:** `09_responsabilidades_sistemas.md` (fronteiras e segredos), `06_modules/food_company_service.md` (contrato Food → Alber).
 
 ---

@@ -1,7 +1,7 @@
 # Alber — Plano: Alber Food em projeto Supabase próprio
-**Versão:** 1.3 (11/11/2026: fases 1 e 2 publicadas e conferidas pela tela)
+**Versão:** 1.4 (11/11/2026: D3 a D5 decididas; fase 0 em andamento)
 **Data:** 09/11/2026
-**Status:** Fases 1 e 2 em produção (projeto atual): `food-admin` (Food, migration 0041) e Admin usando a API (`HttpFoodAdminClient`; segredos `FOOD_ADMIN_URL/KEY/SIGNING_KEY`). Teste real nas telas do Admin confirmado em 11/11/2026. Fase 2 fechada em 11/11/2026: views `admin.v_food_*` apagadas (migration 0031 do Admin) e papel separado (Food 0042/0043): a API assume `food_admin_api`; `admin_app` (login do Admin) não acessa mais `food_admin.*`, `takeaway.admin_*` nem o schema `takeaway`. Fases 3 a 7 não iniciadas; D3 a D5 em aberto (§3).
+**Status:** Fases 1 e 2 em produção (projeto atual): `food-admin` (Food, migration 0041) e Admin usando a API (`HttpFoodAdminClient`; segredos `FOOD_ADMIN_URL/KEY/SIGNING_KEY`). Teste real nas telas do Admin confirmado em 11/11/2026. Fase 2 fechada em 11/11/2026: views `admin.v_food_*` apagadas (migration 0031 do Admin) e papel separado (Food 0042/0043): a API assume `food_admin_api`; `admin_app` (login do Admin) não acessa mais `food_admin.*`, `takeaway.admin_*` nem o schema `takeaway`. D3 a D5 decididas (§3). Fase 0: falta o usuário criar o projeto novo `alber-food`. Fases 3 a 7 não iniciadas.
 **Depende de:** `09_responsabilidades_sistemas.md` (fronteiras e segredos), `06_modules/food_company_service.md` (contrato Food → Alber).
 
 ---
@@ -55,9 +55,9 @@ O Admin vive no banco compartilhado (`admin`, papel `admin_app`) e acessa o Food
 |---|---|---|
 | **D1** | O que fazer com os dados de teste do Food | **DECIDIDA (10/11/2026): começar do zero.** Ver §3.1 |
 | **D2** | Como o Admin acessa o Food depois da separação | **DECIDIDA (10/11/2026): API HTTP administrativa no Food.** O Admin não terá credencial de banco no Food. Desenho no Anexo B |
-| **D3** | Região e plano do projeto novo | Em aberto. Recomendação: mesma região do Alber (`sa-east-1`) e plano de produção (cópia/recuperação pontual). O custo de um segundo projeto entra na conta |
-| **D4** | O Admin também sai do projeto do Alber | Em aberto. Recomendação: **depois**; o Admin segue no projeto do Alber nesta fase |
-| **D5** | Janela de corte | Em aberto. Como não há usuários, uma janela curta de indisponibilidade é aceitável |
+| **D3** | Região e plano do projeto novo | **DECIDIDA (11/11/2026): projeto novo na mesma região do Alber (São Paulo, `sa-east-1`), na mesma organização, com plano de produção (cópia/recuperação pontual).** Custo de um segundo projeto aceito |
+| **D4** | O Admin também sai do projeto do Alber | **DECIDIDA (11/11/2026): depois.** O Admin segue no projeto do Alber nesta fase |
+| **D5** | Janela de corte | **DECIDIDA (11/11/2026): janela curta de indisponibilidade** (sem usuários reais); dia e hora marcados pelo usuário perto da fase 6 |
 
 ### 3.1 Restrição que decidiu a D1: os segredos do Supabase são só de escrita
 

@@ -1,7 +1,7 @@
 # Alber — Plano: Alber Food em projeto Supabase próprio
-**Versão:** 1.4 (11/11/2026: D3 a D5 decididas; fase 0 em andamento)
+**Versão:** 1.4 (11/11/2026: D3 a D5 decididas; fases 3 e 4 feitas)
 **Data:** 09/11/2026
-**Status:** Fases 1 e 2 em produção (projeto atual): `food-admin` (Food, migration 0041) e Admin usando a API (`HttpFoodAdminClient`; segredos `FOOD_ADMIN_URL/KEY/SIGNING_KEY`). Teste real nas telas do Admin confirmado em 11/11/2026. Fase 2 fechada em 11/11/2026: views `admin.v_food_*` apagadas (migration 0031 do Admin) e papel separado (Food 0042/0043): a API assume `food_admin_api`; `admin_app` (login do Admin) não acessa mais `food_admin.*`, `takeaway.admin_*` nem o schema `takeaway`. D3 a D5 decididas (§3). Fase 0: falta o usuário criar o projeto novo `alber-food`. Fases 3 a 7 não iniciadas.
+**Status:** Fases 1 e 2 em produção (projeto atual): `food-admin` (Food, migration 0041) e Admin usando a API (`HttpFoodAdminClient`; segredos `FOOD_ADMIN_URL/KEY/SIGNING_KEY`). Teste real nas telas do Admin confirmado em 11/11/2026. Fase 2 fechada em 11/11/2026: views `admin.v_food_*` apagadas (migration 0031 do Admin) e papel separado (Food 0042/0043): a API assume `food_admin_api`; `admin_app` (login do Admin) não acessa mais `food_admin.*`, `takeaway.admin_*` nem o schema `takeaway`. D3 a D5 decididas (§3). Projeto novo `alber-food` (`gdcdnpkuoqlzkqghfsxu`, São Paulo) criado em 11/11/2026. Fase 3 feita (43 migrations, schema idêntico ao antigo por hash, RLS/grants conferidos). Fase 4 feita (segredos novos gravados só no projeto novo, `food-api` e `food-admin` publicadas, bucket `menu-images` criado pela migration 0012). Falta: fase 5 (Alber), 6 (corte; inclui trocar o `project-ref` do workflow de deploy do Food) e 7 (limpeza).
 **Depende de:** `09_responsabilidades_sistemas.md` (fronteiras e segredos), `06_modules/food_company_service.md` (contrato Food → Alber).
 
 ---

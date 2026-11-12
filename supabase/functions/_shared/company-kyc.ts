@@ -14,6 +14,8 @@ export interface CompanyKycRow {
   /** Nulo em empresa aberta pelo Alber Food (sem usuário no app): nada a avisar por push. */
   owner_id: string | null
   kyc_status: string
+  /** 'evaluation' até a aprovação do KYC; a aprovação passa para 'active'. 'blocked' (contenção do Admin) nunca é desfeito aqui. */
+  account_status?: string | null
   asaas_api_key_enc: string | null
   asaas_deposit_key: string | null
 }
@@ -82,6 +84,9 @@ export async function applyCompanyKyc(
   // `companies` não tem onboarding_completed_at (só `users` tem): gravá-lo faz o PostgREST recusar o UPDATE inteiro (PGRST204).
   // kyc_approved_at é a data da aprovação: os primeiros 30 dias têm limites de saque menores (_shared/withdraw-guard.ts).
   if (newKycStatus === 'approved') updatePayload.kyc_approved_at = now
+  // A conta sai de 'evaluation' na aprovação. Sem isto a empresa aprovada ficava "Em análise" para sempre no Admin e a contenção do
+  // Admin (admin_set_company_status: só bloqueia a partir de 'active') não conseguia bloqueá-la. Bloqueada continua bloqueada.
+  if (newKycStatus === 'approved' && company.account_status === 'evaluation') updatePayload.account_status = 'active'
   if (newKycStatus === 'rejected') { updatePayload.deleted_at = now; updatePayload.deleted_reason = 'kyc_rejected' } // libera CNPJ/handle na hora: o Asaas já fez a checagem real de documentos
 
   const { error: updateErr } = await supabaseAdmin.from('companies').update(updatePayload).eq('id', company.id)
@@ -140,7 +145,7 @@ export async function pollCompanyKyc(supabaseAdmin: SupabaseClient, companyId: s
   try {
     const { data } = await supabaseAdmin
       .from('companies')
-      .select('id, owner_id, kyc_status, asaas_api_key_enc, asaas_deposit_key, asaas_account_id, kyc_evidence_at')
+      .select('id, owner_id, kyc_status, account_status, asaas_api_key_enc, asaas_deposit_key, asaas_account_id, kyc_evidence_at')
       .eq('id', companyId)
       .is('deleted_at', null)
       .maybeSingle()

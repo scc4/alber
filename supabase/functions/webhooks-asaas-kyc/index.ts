@@ -235,7 +235,7 @@ async function handleCompanyKyc(
 ): Promise<Response> {
   const { data: companyData, error: companyErr } = await supabaseAdmin
     .from('companies')
-    .select('id, owner_id, kyc_status, asaas_api_key_enc, asaas_deposit_key')
+    .select('id, owner_id, kyc_status, account_status, asaas_api_key_enc, asaas_deposit_key')
     .eq('asaas_account_id', asaasAccountId)
     .is('deleted_at', null)
     .maybeSingle()

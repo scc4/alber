@@ -46,7 +46,7 @@ function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
 }
 
 async function company(over: Record<string, unknown> = {}) {
-  return { id: 'c1', owner_id: 'owner-1', kyc_status: 'pending', asaas_account_id: 'asaas-1', asaas_deposit_key: null, asaas_api_key_enc: await aesEncrypt('sub-key', 'test-asaas-parent-key'), ...over }
+  return { id: 'c1', owner_id: 'owner-1', kyc_status: 'pending', account_status: 'evaluation', asaas_account_id: 'asaas-1', asaas_deposit_key: null, asaas_api_key_enc: await aesEncrypt('sub-key', 'test-asaas-parent-key'), ...over }
 }
 /**
  * Colunas REAIS de public.companies, lidas das migrations (CREATE TABLE + ALTER TABLE ... ADD COLUMN). O mock de fetch aceita qualquer
@@ -143,6 +143,27 @@ Deno.test('aprovar e rejeitar (webhook e consulta) só gravam colunas que existe
     assertEquals(patches().length > 0, true, status)
     assertPatchesUseRealColumns()
   }
+})
+
+Deno.test('aprovação tira a conta de "evaluation" para "active"; bloqueada continua bloqueada; recusa não mexe no status', async () => {
+  const statusPatches = () => patches().filter((b) => 'account_status' in b)
+  const pending = await company()
+  await withMock({ company: pending }, () => applyCompanyKyc(admin(), pending, 'approved', { via: 'webhook' }))
+  assertEquals(statusPatches().map((b) => b.account_status), ['active'])
+  assertPatchesUseRealColumns()
+
+  const blocked = await company({ account_status: 'blocked' })
+  await withMock({ company: blocked }, () => applyCompanyKyc(admin(), blocked, 'approved', { via: 'webhook' }))
+  assertEquals(statusPatches().length, 0)
+
+  const rejected = await company()
+  await withMock({ company: rejected }, () => applyCompanyKyc(admin(), rejected, 'rejected', { via: 'webhook' }))
+  assertEquals(statusPatches().length, 0)
+
+  // Pela consulta de situação (company-list) também.
+  await withMock({ company: await company(), general: 'APPROVED' }, () => pollCompanyKyc(admin(), 'c1'))
+  assertEquals(statusPatches().map((b) => b.account_status), ['active'])
+  assertEquals(calls.some((c) => c.method === 'GET' && c.url.includes('/rest/v1/companies') && c.url.includes('account_status')), true)
 })
 
 // ── Fase 4: retrato das evidências do Asaas (companies.kyc_evidence) ─────────────────────────────────────────────────────────────

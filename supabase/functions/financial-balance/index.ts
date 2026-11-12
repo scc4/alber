@@ -9,6 +9,7 @@ import { handleCors, json, err } from '../_shared/cors.ts'
 import { decryptSubaccountKey } from '../_shared/subaccount-key.ts'
 import { getSubcontaBalance } from '../_shared/asaas.ts'
 import { resolveWalletContext } from '../_shared/company-permissions.ts'
+import { pollCompanyKyc } from '../_shared/company-kyc.ts'
 
 Deno.serve(async (req: Request) => {
   const corsRes = handleCors(req)
@@ -81,7 +82,11 @@ Deno.serve(async (req: Request) => {
 
   let kycStatus = wallet.kycStatus
 
-  if (kycStatus === 'pending' && subApiKey) {
+  // Empresa: o ciclo de vida do KYC é um só (company-kyc.ts): aprovar ativa a conta, cria a chave de recebimento, tira o retrato e audita.
+  // Gravar só kyc_status aqui deixava a conta em 'evaluation' (e a constraint da migration 066 recusa esse estado).
+  if (wallet.ownerType === 'company' && wallet.companyId && (kycStatus === 'pending' || kycStatus === 'submitted')) {
+    kycStatus = (await pollCompanyKyc(supabaseAdmin, wallet.companyId)) ?? kycStatus
+  } else if (wallet.ownerType !== 'company' && kycStatus === 'pending' && subApiKey) {
     try {
       const asaasBase = Deno.env.get('ASAAS_ENVIRONMENT') === 'production'
         ? 'https://api.asaas.com/api/v3'
@@ -94,9 +99,9 @@ Deno.serve(async (req: Request) => {
         console.log('[financial-balance] Asaas account status:', statusData.general)
         if (statusData.general === 'APPROVED') {
           const { error: updateErr } = await supabaseAdmin
-            .from(wallet.ownerType === 'company' ? 'companies' : 'users')
+            .from('users')
             .update({ kyc_status: 'approved' })
-            .eq('id', wallet.companyId ?? userData.id)
+            .eq('id', userData.id)
           if (updateErr) {
             console.error('[financial-balance] kyc_status update failed:', updateErr)
           } else {

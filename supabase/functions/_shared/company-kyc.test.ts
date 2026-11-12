@@ -239,3 +239,28 @@ Deno.test('company-list devolve os limites que valem (padrão por idade ou aprov
   // só o mais recente (a lista vem do mais novo para o mais antigo) e com os números como número
   assertEquals(aprovada[0]?.limit_request, { id: 'r2', status: 'approved', requested_per_tx_brl: 9000, requested_per_day_brl: 40000, approved_per_tx_brl: 9000, approved_per_day_brl: 40000, created_at: '2026-11-03T10:00:00Z', decided_at: '2026-11-03T12:00:00Z' })
 })
+
+// ── Guarda contra a repetição do erro de 12/11/2026 ──────────────────────────────────────────────────────────────────────────────
+// Aprovar o KYC da empresa tem um caminho só (applyCompanyKyc): ativa a conta, cria a chave de recebimento, tira o retrato e audita.
+// Gravar `kyc_status: 'approved'` direto em companies em outro lugar deixava a conta "em avaliação" (e a migration 066 recusa isso).
+Deno.test('nenhuma função aprova o KYC de empresa por fora de company-kyc.ts', async () => {
+  const root = new URL('../', import.meta.url)
+  const offenders: string[] = []
+  async function walk(dir: URL, rel: string) {
+    for await (const e of Deno.readDir(dir)) {
+      if (e.isDirectory) await walk(new URL(`${e.name}/`, dir), `${rel}${e.name}/`)
+      else if (e.name.endsWith('.ts') && !e.name.endsWith('.test.ts') && `${rel}${e.name}` !== '_shared/company-kyc.ts') {
+        const src = await Deno.readTextFile(new URL(e.name, dir))
+        // Uma chamada .from(...'companies'...) (inclusive escolhida por ternário) seguida, no mesmo comando, de um update com kyc_status aprovado.
+        if (/\.from\([^)]*['"]companies['"][^)]*\)[^;]{0,300}kyc_status\s*:\s*['"]approved['"]/s.test(src)) offenders.push(`${rel}${e.name}`)
+      }
+    }
+  }
+  await walk(root, '')
+  assertEquals(offenders, [])
+})
+
+Deno.test('a migration 066 liga a trava "aprovado não fica em avaliação" em companies', async () => {
+  const sql = await Deno.readTextFile(new URL('../../migrations/20260101000066_company_kyc_guard.sql', import.meta.url))
+  assertEquals(/CHECK \(kyc_status <> 'approved' OR account_status <> 'evaluation'\)/.test(sql), true)
+})

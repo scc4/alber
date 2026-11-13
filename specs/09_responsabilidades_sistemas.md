@@ -1,5 +1,5 @@
 # Alber — Responsabilidades dos três sistemas (Alber, Alber Food, Alber Admin)
-**Versão:** 1.9 (09/11/2026: SMS e CORS publicados, §13.3; v1.7: auditoria de segurança, §13.3; v1.6: corte executado e tudo publicado, §13.2; v1.5: P2b concluído, funções apagadas do projeto; v1.4: P2b no código; v1.3: P2a e P4 aplicados; v1.2: P1 aplicado no código, @ da empresa pela função de serviço e sem reserva no Alber; v1.1: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
+**Versão:** 1.10 (13/11/2026: consulta de reserva da cobrança `takeaway-payment-status` no C2; token do webhook da conta pai em §9; v1.9, 09/11/2026: SMS e CORS publicados, §13.3; v1.7: auditoria de segurança, §13.3; v1.6: corte executado e tudo publicado, §13.2; v1.5: P2b concluído, funções apagadas do projeto; v1.4: P2b no código; v1.3: P2a e P4 aplicados; v1.2: P1 aplicado no código, @ da empresa pela função de serviço e sem reserva no Alber; v1.1: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
 **Data:** 05/11/2026
 **Status:** Documento de referência. Vale para os três repositórios; cada um deve apontar para ele (ou copiá-lo) no seu `CLAUDE.md`.
 **Depende de:** `00_architecture.md` §4.1, `06_modules/food_company_service.md`, e, nos outros repositórios, `alber-food/rules.md` e `alber-admin/rules.md`.
@@ -69,7 +69,7 @@
 | **Subcontas Asaas** | Abre a subconta PJ da empresa, guarda a chave da subconta **cifrada** (`ALBER_KEYS_ENCRYPTION_KEY`), consulta saldo. |
 | **KYC da empresa** | Envia/recebe o cadastro, recebe `webhooks-asaas-kyc`, mantém `kyc_status` e `account_status`. |
 | **Vínculo do responsável** | Compara o CPF do responsável com o quadro societário (BrasilAPI) e mantém `owner_link_check`. |
-| **Cobrança de pedidos do Food** | `takeaway-payment-create`, `-cancel`, `-refund`: cria a cobrança na **conta pai** com split para a carteira da empresa. |
+| **Cobrança de pedidos do Food** | `takeaway-payment-create`, `-cancel`, `-refund`, `-status`: cria a cobrança na **conta pai** com split para a carteira da empresa; `-status` só lê a situação (consulta de reserva do Food quando o webhook não chega). |
 | **Saque** | `food-company-withdraw`: guarda de saque (vínculo, carência de 48 h da chave aleatória, limites por saque e por dia), saldo, Pix no Asaas, lançamento em `transactions`. |
 | **Chave Pix de saque** | Guarda a chave (uma vez só), verifica a titularidade da chave aleatória no Asaas (fail-closed), mantém a espera de 48 h. |
 | **Limites de saque** | Padrão, aprovado pela equipe e pedidos de aumento (`company_limit_requests`). |
@@ -161,7 +161,7 @@ Qualquer comunicação **fora** desta tabela é proibida. Precisa de um canal no
 | # | De → Para | Canal | Autenticação | Para quê |
 |---|---|---|---|---|
 | C1 | Food → Alber | Edge Functions `food-company-*` (POST, JSON, servidor) | `x-alber-food-key` (`ALBER_FOOD_SERVICE_KEY`) + `apikey`/`Authorization` anon do projeto | Abrir empresa, status, saldo, chave Pix, saque, status do saque, limites, troca de titular, abandono, conferir o @ da empresa (`food-company-handle-check`). |
-| C2 | Food → Alber | Edge Functions `takeaway-payment-create/cancel/refund`, `takeaway-company-statement` | `x-alber-food-key` | Cobrança, cancelamento, estorno e extrato dos pedidos. |
+| C2 | Food → Alber | Edge Functions `takeaway-payment-create/cancel/refund/status`, `takeaway-company-statement` | `x-alber-food-key` | Cobrança, cancelamento, estorno e extrato dos pedidos. `status` é só leitura: devolve a situação no Asaas e, se paga, o evento no mesmo formato do C4, para o Food aplicar pelo mesmo caminho. |
 | C3 | Asaas → Alber | `webhooks-asaas-kyc`, `webhooks-asaas-pix`, `webhooks-asaas-food` | token do Asaas (tempo constante) | KYC, transferências, cobranças. |
 | C4 | Alber → Food | `POST /api/internal/asaas-event` do site do Food | HMAC-SHA256 de `timestamp.corpo`, janela de 5 min | Repassar só eventos de cobrança com referência `food_<id>`. Idempotente no Food (`webhook_events`). |
 | C5 | Admin → Alber | Funções SQL `public.admin_*` (`SECURITY DEFINER`) | papel `admin_app` | Taxas, destravar/bloquear, decidir limite e vínculo, encerrar operação presa. |
@@ -277,7 +277,7 @@ Notas sobre as funções do Food que não são óbvias:
 | `ASAAS_API_KEY` / `ALBER_KEYS_ENCRYPTION_KEY` (cifra das subcontas) | ✅ | ❌ | ❌ | Não trocar o valor sem a rotação (`_PREV`); linhas v2 ficam ilegíveis. |
 | `ALBER_FOOD_SERVICE_KEY` (= `x-alber-food-key`) | ✅ (confere) | ✅ (envia) | ❌ | ≥ 32 caracteres. |
 | `FOOD_OP_SIGNING_KEY` | ✅ (verifica) | ✅ (assina) | ❌ | Mesmo valor; usar os **bytes decodificados**. |
-| `FOOD_ASAAS_WEBHOOK_TOKEN` | ✅ | ❌ | ❌ | Token da conta pai; separado do das subcontas. |
+| `FOOD_ASAAS_WEBHOOK_TOKEN` | ✅ | ❌ | ❌ | Token da conta pai; separado do das subcontas. O **mesmo valor** fica no webhook da conta pai no Asaas: divergente, toda entrega volta 401 e a fila pausa após 15 falhas (como reativar: `alber-food/docs/deploy.md`, "Fila do webhook interrompida"). |
 | Segredo do evento Alber → Food (HMAC `timestamp.corpo`) | ✅ | ✅ | ❌ | Janela de 5 min. |
 | `FOOD_BFF_SECRET` (site ↔ `food-api`) | ❌ | ✅ | ❌ | Só site e função do Food. |
 | `APP_PIN_PEPPER`, `APP_ENCRYPTION_KEY` | ❌ | ✅ | ❌ | A `APP_ENCRYPTION_KEY` precisa de backup: sem ela não se decifra o CNPJ. |

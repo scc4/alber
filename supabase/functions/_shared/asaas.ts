@@ -419,6 +419,17 @@ export async function getPaymentWithRefunds(
   return { status: d.status, externalReference: d.externalReference ?? null, refunds: d.refunds ?? [] }
 }
 
+/** Situação de uma cobrança (consulta de reserva do Alber Food quando o webhook não chega). Só os campos que o evento repassado usa. */
+export async function getPayment(
+  paymentId: string,
+  parentApiKey: string,
+): Promise<{ status: string; externalReference: string | null; value?: number; netValue?: number; billingType?: string; estimatedCreditDate?: string; creditDate?: string }> {
+  const res = await asaasRequest('GET', `/payments/${paymentId}`, parentApiKey)
+  if (!res.ok) throw new AsaasError('ASAAS_PAYMENT_GET_FAILED', res.data as Record<string, unknown>)
+  const d = res.data as { status: string; externalReference?: string; value?: number; netValue?: number; billingType?: string; estimatedCreditDate?: string; creditDate?: string }
+  return { status: d.status, externalReference: d.externalReference ?? null, value: d.value, netValue: d.netValue, billingType: d.billingType, estimatedCreditDate: d.estimatedCreditDate, creditDate: d.creditDate }
+}
+
 /** Cancela uma cobrança que ninguém pagou (Pix vencido). */
 export async function cancelPayment(paymentId: string, parentApiKey: string): Promise<void> {
   const res = await asaasRequest('DELETE', `/payments/${paymentId}`, parentApiKey)

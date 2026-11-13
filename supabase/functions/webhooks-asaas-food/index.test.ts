@@ -60,7 +60,7 @@ Deno.test('cobrança do Alber Food: repassa assinado, em centavos, com o custo r
   const r = await run(req(evt()))
   assertEquals(r.res.status, 200)
   const raw = await r.sent!.text()
-  assertEquals(JSON.parse(raw), { id: 'evt_1&1', event: 'PAYMENT_CONFIRMED', payment_id: 'pay_1', external_reference: REF, amount_cents: 8600, gateway_cost_cents: 349, estimated_credit_date: null, credit_date: null })
+  assertEquals(JSON.parse(raw), { id: 'evt_1&1', event: 'PAYMENT_CONFIRMED', payment_id: 'pay_1', external_reference: REF, amount_cents: 8600, gateway_cost_cents: 349, billing_type: 'PIX', estimated_credit_date: null, credit_date: null })
   assertEquals(r.sent!.headers.get('x-alber-signature'), await signFoodEvent(SECRET, r.sent!.headers.get('x-alber-timestamp')!, raw))
 })
 

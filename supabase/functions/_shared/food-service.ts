@@ -22,6 +22,7 @@ export function requireFoodKey(req: Request): Response | null {
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 /** Referência enviada ao Asaas: 'food_' + id do pagamento no Alber Food. */
 export const FOOD_REFERENCE = /^food_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-export const ASAAS_PAYMENT_ID = /^pay_[A-Za-z0-9]{6,40}$/
+// O sandbox do Asaas gera ids com '_' depois do prefixo (pay_0_abc...): aceitar só alfanumérico recusava estorno e cancelamento.
+export const ASAAS_PAYMENT_ID = /^pay_[A-Za-z0-9_]{6,40}$/
 
 export const toReais = (cents: number): number => Math.round(cents) / 100

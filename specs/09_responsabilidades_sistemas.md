@@ -170,6 +170,7 @@ Qualquer comunicação **fora** desta tabela é proibida. Precisa de um canal no
 | C8 | Food → sistema do restaurante | Webhook assinado (HMAC-SHA256) / API `/api/v1/*` | assinatura / API key | Exportar pedidos, receber integrações. |
 | C9 | Admin → Alber | Edge Function `admin-parent-balance` (POST, servidor) | `x-alber-admin-key` (`ALBER_ADMIN_KEY`) | **Só leitura** do saldo e extrato da conta pai (tela Plataforma). A chave do Asaas fica no Alber; cada consulta vai para o `audit_logs` do Alber com quem pediu. Único canal HTTP do Admin. |
 | ~~C10~~ | ~~Food → Alber~~ | ~~`auth-check-handle`, `auth-reserve-handle`, `auth-check-email`~~ | | **REMOVIDO no P1 (07/11/2026).** A conferência do @ passou para C1 (`food-company-handle-check`); o Food não reserva mais @ no Alber. As funções `auth-reserve-handle` e `auth-check-email` saíram do código do Alber (saem do projeto no corte, depois que o Food novo estiver no ar). |
+| C12 | Food → Anthropic | `POST https://api.anthropic.com/v1/messages` (HTTP direto, só na Edge Function `food-api`; endereço fixo no código, sem redirecionamento) | `x-api-key` (chave de workspace `sk-ant-…`, lida do banco do Food) | Alber concierge (assistente de cardápio): a conversa do cliente com o modelo e o teste da chave. **Só o Food fala com a Anthropic**; Alber e Admin não. Vai ao provedor só texto já mascarado (CPF, telefone, e-mail e cartão) e dados do cardápio; nunca o texto de login do cliente. Log e erro só com o código HTTP. Detalhe: `alber-food/specs/phases/5_assistente_cardapio_ia.md` §14.1, §16.5 e §16.6. |
 
 > Alber e Food **não** se enxergam por SQL. Admin enxerga os dois **por view** (leitura) e por funções `admin_*` (escrita), mais o canal C9 (leitura).
 
@@ -284,6 +285,7 @@ Notas sobre as funções do Food que não são óbvias:
 | `ALBER_CREDENTIAL_PEPPER` (≥ 32 caracteres) | ✅ | ❌ | ❌ | **Nunca trocar nem perder sem refazer os hashes**: é o pepper de PIN, resposta de segurança, CPF e senha de sessão do app Alber. Falha fechada se ausente. |
 | `ALBER_ADMIN_KEY` (= `x-alber-admin-key`) | ✅ (confere) | ❌ | ✅ (envia) | Canal C9, ≥ 32 caracteres. |
 | `ADMIN_BFF_SECRET`, `ADMIN_ENCRYPTION_KEY`, segredo Google | ❌ | ❌ | ✅ | Só site e função do Admin. |
+| Chave da Anthropic (canal C12) | ❌ | ✅ (guarda cifrada e usa) | ✅ (só grava, testa, ativa e desliga; **em trânsito**) | **Não fica em `supabase secrets`.** O Admin a digita num campo e a envia numa ação assinada do `food-admin` (só o papel `owner`, com 2FA); o Food a cifra (AES-256-GCM, `APP_ENCRYPTION_KEY`) em `takeaway.assistant_provider_keys` e **nunca a devolve** (só os 4 últimos caracteres e as datas). O Admin não a guarda: não vai a log, `audit_log`, banco do Admin nem resposta. Uma por finalidade (assistente; avaliação), nunca por restaurante. Só chave de workspace, não de usuário. A rotação é pelo Admin (gravar, testar, ativar); a perda da `APP_ENCRYPTION_KEY` obriga a gravar a chave de novo. |
 
 ### 9.1 Mesmo segredo, nomes diferentes (cuidado ao configurar)
 

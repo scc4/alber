@@ -71,3 +71,9 @@ percentual sobre o líquido fica sob o restaurante, não sobre o bruto.
 - `webhooks-asaas-pix` (webhook das subcontas): eventos `PAYMENT_*` com `externalReference` `food_…` são repassados ao Food (`forwardToFood`) antes do restante, sem tocar nas tabelas do app. Pré-requisito: a subconta ter o webhook de pagamentos (criado em `createAsaasAccount`; conferir na subconta existente, p.ex. a do Bar do Zé).
 - Testes: create (16), refund/cancel (7), status, webhooks passam; `deno check` ok. Sem teste novo para o repasse no webhook.
 - **Antes do deploy:** (1) definir `ASAAS_PARENT_WALLET_ID` (opcional); (2) Food passar a enviar `company_id` em refund/cancel/status; (3) validar estorno e nome no QR no sandbox; (4) cobranças pendentes criadas na conta pai continuam no webhook da mãe (`webhooks-asaas-food`), que segue ativo.
+
+### Atualização (sandbox, 15/11/2026, rodada final)
+- **Estorno pela chave da subconta funciona**: com ~45 s após `CONFIRMED`, `POST /payments/{id}/refund` devolveu `REFUNDED` e o **split da Alber foi cancelado** (`status CANCELLED`, `cancellationReason PAYMENT_REFUNDED`). Ou seja, a taxa Alber **não** fica na conta pai no estorno total. Logo depois do `CONFIRMED` o Asaas recusa com "tente novamente em alguns instantes" (o Food deve tratar como transitório e repetir).
+- Se a tarifa do Asaas volta no estorno: **não verificado** (o extrato da subconta ainda estava vazio no sandbox, sem liquidação).
+- Chave Pix da subconta recém-criada: o sandbox seguiu respondendo "excesso de consultas" (também em contas novas); QR e nome do recebedor continuam sem conferência. Conferir em subconta já aprovada (ex.: Bar do Zé) quando o Asaas liberar.
+- `takeaway-payment-refund/-cancel/-status` **não exigem mudança no Food**: sem `company_id`, a empresa é achada pelo registro `takeaway_payment_created` (referência → empresa) que o `create` já grava; sem registro (cobrança antiga) usam a chave pai.

@@ -103,3 +103,23 @@ Deno.test('com company_id, consulta, estorno e cancelamento usam a chave da SUBC
   const bad = await withMock(PAID, () => post(refund, { ...body, company_id: 'x' }))
   assertEquals(bad.status, 422)
 })
+
+Deno.test('sem company_id, a empresa sai do registro de auditoria da criação (o Food não precisa mudar)', async () => {
+  const orig = globalThis.fetch
+  const tokens: (string | null)[] = []
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
+    const ok = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    if (url.includes('/rest/v1/audit_logs') && (init?.method ?? 'GET') === 'GET') return ok([{ metadata: { company_id: '11111111-1111-4111-8111-111111111111', reference: REF } }])
+    if (url.includes('/rest/v1/companies')) return ok({ asaas_api_key_enc: await encryptSubaccountKey('sub-key'), deleted_at: null })
+    if (url.includes('/rest/v1/')) return ok({})
+    tokens.push(new Headers(init?.headers).get('access_token'))
+    if (url.includes('/refund')) return ok({ id: 'r' })
+    return ok(PAID)
+  }) as typeof fetch
+  try {
+    const res = await post(refund, body)
+    assertEquals(res.status, 200)
+    assertEquals(tokens.length > 0 && tokens.every((t) => t === 'sub-key'), true)
+  } finally { globalThis.fetch = orig }
+})

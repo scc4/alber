@@ -41,7 +41,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   const parentKey = Deno.env.get('ASAAS_API_KEY')
   if (!parentKey) return err('SERVICE_NOT_CONFIGURED', 'Serviço indisponível', 503)
   const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-  const keyed = await keyForPayment(supabaseAdmin, companyId, parentKey)
+  const keyed = await keyForPayment(supabaseAdmin, companyId, parentKey, reference)
   if ('error' in keyed) return err(keyed.error, 'Empresa não encontrada', keyed.error === 'DB_ERROR' ? 503 : 404)
   try {
     const p = await getPayment(paymentId, keyed.key)

@@ -31,7 +31,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!KEY.test(key)) return err('INVALID_KEY', 'idempotency_key inválida', 422)
   if (typeof body.amount_cents !== 'number' || !Number.isInteger(body.amount_cents) || body.amount_cents < 1 || body.amount_cents > 500_000) return err('INVALID_AMOUNT', 'amount_cents inválido', 422)
 
-  // company_id (opcional): a cobrança nova vive na subconta da empresa, então a chave dela é quem consulta/estorna/cancela. Sem ele, a chave pai (cobranças antigas).
+  // company_id (opcional): a cobrança nova vive na subconta da empresa. Sem ele, a empresa sai do registro da criação; sem registro, chave pai (cobranças antigas).
   const companyId = typeof body.company_id === 'string' ? body.company_id : null
   if (companyId !== null && !UUID.test(companyId)) return err('INVALID_COMPANY', 'company_id inválido', 422)
 
@@ -39,7 +39,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (!parentKey) return err('SERVICE_NOT_CONFIGURED', 'Serviço indisponível', 503)
   const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
-  const keyed = await keyForPayment(supabaseAdmin, companyId, parentKey)
+  const keyed = await keyForPayment(supabaseAdmin, companyId, parentKey, reference)
   if ('error' in keyed) return err(keyed.error, 'Empresa não encontrada', keyed.error === 'DB_ERROR' ? 503 : 404)
   const apiKey = keyed.key
 

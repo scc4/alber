@@ -37,15 +37,28 @@ export async function loadFoodCompany(
   return { company: { id: c.id, subKey } }
 }
 
-/** Chave da subconta para consultar/estornar/cancelar. Sem company_id (cobranças antigas, criadas na conta pai) usa a chave pai. */
+/**
+ * Chave para consultar/estornar/cancelar uma cobrança. A empresa vem de `company_id` (se o Food mandar) ou, sem ele, do registro de auditoria que
+ * takeaway-payment-create grava (referência -> empresa); assim o Food não precisa mudar. Sem nenhum dos dois (cobrança antiga, criada na conta pai) usa a chave pai.
+ */
 export async function keyForPayment(
   // deno-lint-ignore no-explicit-any
   supabaseAdmin: any,
   companyId: string | null,
   parentKey: string,
+  reference?: string,
 ): Promise<{ key: string } | { error: 'DB_ERROR' | 'COMPANY_NOT_FOUND' }> {
-  if (!companyId) return { key: parentKey }
-  const { data, error } = await supabaseAdmin.from('companies').select('asaas_api_key_enc, deleted_at').eq('id', companyId).maybeSingle()
+  let id = companyId
+  if (!id && reference) {
+    const { data, error } = await supabaseAdmin
+      .from('audit_logs').select('metadata').eq('event_type', 'takeaway_payment_created').eq('metadata->>reference', reference).limit(1)
+    if (error) return { error: 'DB_ERROR' }
+    const row = Array.isArray(data) ? data[0] : null
+    const found = (row as { metadata?: { company_id?: unknown } } | null)?.metadata?.company_id
+    id = typeof found === 'string' ? found : null
+  }
+  if (!id) return { key: parentKey }
+  const { data, error } = await supabaseAdmin.from('companies').select('asaas_api_key_enc, deleted_at').eq('id', id).maybeSingle()
   if (error) return { error: 'DB_ERROR' }
   const c = data as { asaas_api_key_enc: string | null; deleted_at: string | null } | null
   if (!c?.asaas_api_key_enc) return { error: 'COMPANY_NOT_FOUND' }

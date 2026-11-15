@@ -22,7 +22,7 @@ const body = { creditCard: { holderName: 'TESTE', number: '5162306219378829', ex
 show('payWithCreditCard', pick(await sub('POST', `/payments/${card.id}/payWithCreditCard`, body), ['status', 'errors']))
 const p = await sub('GET', `/payments/${card.id}`); show('cartão', pick(p, ['status', 'value', 'netValue']))
 { const m = await call('GET', `/payments/${card.id}`, KEY); show('mãe vê a cobrança da subconta?', m.split ? 'sim' : m) }
-show('estorno', pick(await sub('POST', `/payments/${card.id}/refund`, { value: 20, description: 'spike' }), ['status', 'errors']))
+await new Promise((s) => setTimeout(s, 45000)); for (let i = 0; i < 4; i++) { const rr = await sub('POST', `/payments/${card.id}/refund`, { value: 20, description: 'spike' }); show('estorno', pick(rr, ['status', 'errors'])); if (!rr.errors) break; await new Promise((s) => setTimeout(s, 30000)) }
 const f = await sub('GET', `/payments/${card.id}`); show('pós-estorno', { status: f.status, split: f.split?.map((s) => pick(s, ['status', 'totalValue', 'cancellationReason'])) })
 show('extrato subconta', (await sub('GET', '/financialTransactions?limit=10')).data?.map((t) => pick(t, ['type', 'value', 'description'])))
 show('extrato mãe (topo)', (await call('GET', '/financialTransactions?limit=6', KEY)).data?.map((t) => pick(t, ['type', 'value', 'description'])))

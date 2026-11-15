@@ -8,11 +8,13 @@ Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('ASAAS_API_KEY', 'parent-key')
 const KEY = 'k'.repeat(40)
 Deno.env.set('ALBER_FOOD_SERVICE_KEY', KEY)
+Deno.env.set('ALBER_KEYS_ENCRYPTION_KEY', 'a'.repeat(64))
 
 import { handleRequest as refund } from './index.ts'
 import { handleRequest as cancel } from '../takeaway-payment-cancel/index.ts'
+import { encryptSubaccountKey } from '../_shared/subaccount-key.ts'
 
-const calls: { method: string; url: string; body: unknown }[] = []
+const calls: { method: string; url: string; body: unknown; token: string | null }[] = []
 
 function withMock<T>(payment: unknown, fn: () => Promise<T>, refundFails = false): Promise<T> {
   const orig = globalThis.fetch
@@ -20,8 +22,9 @@ function withMock<T>(payment: unknown, fn: () => Promise<T>, refundFails = false
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
     const method = (init?.method ?? 'GET').toUpperCase()
-    calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null })
+    calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null, token: new Headers(init?.headers).get('access_token') })
     const ok = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } })
+    if (url.includes('/rest/v1/companies')) return ok({ asaas_api_key_enc: await encryptSubaccountKey('sub-key'), deleted_at: null })
     if (url.includes('/rest/v1/')) return ok({}, 201)
     if (url.includes('/refund') && method === 'POST') return refundFails ? ok({ errors: [{ description: 'valor maior' }] }, 400) : ok({ id: 'pay_1' })
     if (url.includes('/payments/pay_abc123') && method === 'GET') return ok(payment)
@@ -86,4 +89,17 @@ Deno.test('cancelar cobrança: exige chave e a referência certa, e apaga no Asa
   assertEquals(ok.status, 200)
   assertEquals(calls.some((c) => c.method === 'DELETE' && c.url.includes('/payments/pay_abc123')), true)
   assertEquals((await withMock(PAID, () => post(cancel, { ...cb, payment_id: 'x' }))).status, 422)
+})
+
+Deno.test('com company_id, consulta, estorno e cancelamento usam a chave da SUBCONTA; sem ele, a chave pai (cobranças antigas)', async () => {
+  const company_id = '11111111-1111-4111-8111-111111111111'
+  await withMock(PAID, () => post(refund, { ...body, company_id }))
+  for (const c of calls.filter((c) => c.url.includes('asaas.com'))) assertEquals(c.token, 'sub-key', c.url)
+  assertEquals(calls.some((c) => c.url.includes('/refund')), true)
+  await withMock(PAID, () => post(cancel, { payment_id: 'pay_abc123', external_reference: REF, company_id }))
+  for (const c of calls.filter((c) => c.url.includes('asaas.com'))) assertEquals(c.token, 'sub-key', c.url)
+  await withMock(PAID, () => post(refund, body))
+  for (const c of calls.filter((c) => c.url.includes('asaas.com'))) assertEquals(c.token, 'parent-key', c.url)
+  const bad = await withMock(PAID, () => post(refund, { ...body, company_id: 'x' }))
+  assertEquals(bad.status, 422)
 })

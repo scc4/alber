@@ -8,10 +8,13 @@ Deno.env.set('SUPABASE_SERVICE_ROLE_KEY', 'test-srk')
 Deno.env.set('ASAAS_API_KEY', 'parent-key')
 const KEY = 'k'.repeat(40)
 Deno.env.set('ALBER_FOOD_SERVICE_KEY', KEY)
+Deno.env.set('ALBER_KEYS_ENCRYPTION_KEY', 'a'.repeat(64))
+Deno.env.delete('ASAAS_PARENT_WALLET_ID')
 
 import { handleRequest } from './index.ts'
+import { encryptSubaccountKey } from '../_shared/subaccount-key.ts'
 
-type Call = { method: string; url: string; body: unknown }
+type Call = { method: string; url: string; body: unknown; token: string | null }
 const calls: Call[] = []
 
 interface Mock {
@@ -26,8 +29,9 @@ function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url
     const method = (init?.method ?? 'GET').toUpperCase()
-    calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null })
+    calls.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null, token: new Headers(init?.headers).get('access_token') })
     const ok = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } })
+    if (url.endsWith('/wallets/')) return ok({ data: [{ id: 'wallet-mae' }] })
     if (url.includes('/rest/v1/companies')) return ok(m.company ?? null)
     if (url.includes('/rest/v1/')) return ok({}, 201)
     if (url.includes('asaas.com') && m.asaasFail && method === 'POST' && url.endsWith('/payments')) return ok({ errors: [{ description: m.asaasFail }] }, 400)
@@ -42,7 +46,7 @@ function withMock<T>(m: Mock, fn: () => Promise<T>): Promise<T> {
 
 const COMPANY = '11111111-1111-4111-8111-111111111111'
 const REF = 'food_22222222-2222-4222-8222-222222222222'
-const APPROVED = { id: COMPANY, asaas_wallet_id: 'wallet-1', kyc_status: 'approved', account_status: 'active', deleted_at: null }
+const APPROVED = { id: COMPANY, asaas_api_key_enc: await encryptSubaccountKey('sub-key'), asaas_deposit_key: 'evp-1', kyc_status: 'approved', account_status: 'active', deleted_at: null }
 const good = {
   company_id: COMPANY, external_reference: REF, amount_cents: 8600, fee_total_cents: 602, method: 'pix',
   customer: { name: 'Maria Souza', phone: '(11) 91234-5678' }, description: 'Pedido #1', expires_at: '2026-10-26T15:00:00.000Z',
@@ -72,7 +76,7 @@ Deno.test('GET retorna 405 e sem segredo configurado a função recusa (503)', a
   }
 })
 
-Deno.test('Pix: cria a cobrança na conta pai com split para a carteira da empresa e devolve só o copia e cola', async () => {
+Deno.test('Pix: cria a cobrança NA SUBCONTA com a taxa Alber como split para a carteira da conta pai e devolve só o copia e cola', async () => {
   const r = await run(good)
   assertEquals(r.status, 201)
   assertEquals(r.json, { payment_id: 'pay_abc123', pix_payload: '00020126pixcopiaecola', expires_at: '2026-10-26T15:00:00.000Z' })
@@ -81,8 +85,10 @@ Deno.test('Pix: cria a cobrança na conta pai com split para a carteira da empre
   assertEquals(/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate)), true)
   assertEquals({ ...b, dueDate: 'x' }, {
     customer: 'cus_1', billingType: 'PIX', value: 86, dueDate: 'x',
-    description: 'Pedido #1', externalReference: REF, split: [{ walletId: 'wallet-1', fixedValue: 79.98 }],
+    description: 'Pedido #1', externalReference: REF, split: [{ walletId: 'wallet-mae', fixedValue: 6.02 }],
   })
+  // Tudo com a chave da subconta; a chave pai só consulta a carteira da conta pai.
+  for (const c of calls.filter((c) => c.url.includes('asaas.com') && !c.url.endsWith('/wallets/'))) assertEquals(c.token, 'sub-key', c.url)
   assertEquals(JSON.stringify(r.json).includes('wallet'), false)
 })
 
@@ -128,13 +134,31 @@ Deno.test('repetir a chamada (timeout) devolve a cobrança que já existe, sem c
   assertEquals(calls.some((c) => c.url.endsWith('/customers')), false)
 })
 
-Deno.test('empresa inexistente, apagada ou sem KYC aprovado/carteira/ativa não recebe cobrança', async () => {
+Deno.test('empresa inexistente, apagada ou sem KYC aprovado/chave da subconta/ativa não recebe cobrança', async () => {
   assertEquals((await run(good, { company: null })).json.error, 'COMPANY_NOT_FOUND')
   assertEquals((await run(good, { company: { ...APPROVED, deleted_at: '2026-01-01' } })).json.error, 'COMPANY_NOT_FOUND')
-  for (const over of [{ kyc_status: 'pending' }, { kyc_status: 'submitted' }, { account_status: 'blocked' }, { asaas_wallet_id: null }]) {
+  for (const over of [{ kyc_status: 'pending' }, { kyc_status: 'submitted' }, { account_status: 'blocked' }, { asaas_api_key_enc: null }]) {
     const r = await run(good, { company: { ...APPROVED, ...over } })
     assertEquals([r.status, r.json.error], [409, 'COMPANY_NOT_APPROVED'])
     assertEquals(calls.some((c) => c.url.includes('asaas.com') && c.method === 'POST'), false)
+  }
+})
+
+Deno.test('empresa sem chave Pix de recebimento: 409 COMPANY_NO_PIX_KEY, nada é criado no Asaas', async () => {
+  const r = await run(good, { company: { ...APPROVED, asaas_deposit_key: null } })
+  assertEquals([r.status, r.json.error], [409, 'COMPANY_NO_PIX_KEY'])
+  assertEquals(calls.some((c) => c.method === 'POST' && (c.url.endsWith('/payments') || c.url.endsWith('/customers'))), false)
+})
+
+Deno.test('carteira da conta pai vem de ASAAS_PARENT_WALLET_ID quando definida (sem consultar o Asaas)', async () => {
+  Deno.env.set('ASAAS_PARENT_WALLET_ID', 'wallet-env')
+  try {
+    const r = await run(good)
+    assertEquals(r.status, 201)
+    assertEquals(calls.some((c) => c.url.endsWith('/wallets/')), false)
+    assertEquals((calls.find((c) => c.method === 'POST' && c.url.endsWith('/payments'))!.body as { split: unknown }).split, [{ walletId: 'wallet-env', fixedValue: 6.02 }])
+  } finally {
+    Deno.env.delete('ASAAS_PARENT_WALLET_ID')
   }
 })
 
@@ -198,7 +222,8 @@ Deno.test('split percentual sobre o líquido: manda percentualValue ao Asaas (o 
   const r = await run({ ...rest, split_mode: 'percent_of_net', restaurant_bps: 9700 })
   assertEquals(r.status, 201)
   const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/payments'))!.body as Record<string, unknown>
-  assertEquals(create.split, [{ walletId: 'wallet-1', percentualValue: 97 }])
+  // O restaurante fica com 97% do líquido; a Alber (conta pai) com os 3% restantes.
+  assertEquals(create.split, [{ walletId: 'wallet-mae', percentualValue: 3 }])
 })
 
 Deno.test('split percentual: restaurant_bps inválido ou abaixo do teto da Alber é recusado antes do Asaas; modo desconhecido também', async () => {

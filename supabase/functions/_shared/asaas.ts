@@ -21,7 +21,7 @@ export class AsaasError extends Error {
   }
 }
 
-async function asaasRequest(
+export async function asaasRequest(
   method: string,
   path: string,
   apiKey: string,

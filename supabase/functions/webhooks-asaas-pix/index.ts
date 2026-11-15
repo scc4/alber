@@ -9,6 +9,7 @@ import { normalizeCpf } from '../_shared/cpf.ts'
 import { refundPayment } from '../_shared/asaas.ts'
 import { logError } from '../_shared/error-log.ts'
 import { sendPush } from '../_shared/push.ts'
+import { forwardToFood, isFoodReference } from '../_shared/food-webhook.ts'
 
 const HANDLED_EVENTS  = new Set(['PAYMENT_CONFIRMED', 'PAYMENT_RECEIVED'])
 const TRANSFER_EVENTS = new Set(['TRANSFER_DONE', 'TRANSFER_FAILED'])
@@ -66,6 +67,11 @@ export async function handleRequest(req: Request): Promise<Response> {
   }
 
   const { event, transfer } = payload
+
+  // Cobrança do Alber Food: nasce na subconta do restaurante (specs/11), então o aviso chega aqui. Repassa ao Food e não toca em tabelas do app.
+  if (typeof event === 'string' && event.startsWith('PAYMENT_') && payload.payment && typeof payload.payment.id === 'string' && isFoodReference(payload.payment.externalReference)) {
+    return await forwardToFood(payload as never)
+  }
 
   // ── TRANSFER_DONE / TRANSFER_FAILED — conclusão do Descarregar ───────────────
   // Descarregar fica 'processing' até este webhook confirmar (ou falhar) o Pix

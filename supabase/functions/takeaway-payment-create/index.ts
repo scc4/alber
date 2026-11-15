@@ -1,12 +1,12 @@
-// Cobrança de pedido de take away do Alber Food (Pix ou cartão, com split para a empresa do restaurante).
+// Cobrança de pedido de take away do Alber Food (Pix ou cartão), emitida NA SUBCONTA do restaurante, com a taxa Alber como split para a conta pai.
 // POST /takeaway-payment-create
 //   { company_id, external_reference: 'food_<uuid>', amount_cents, fee_total_cents, method: 'pix'|'credit_card',
 //     customer: { name, phone?, cpf_cnpj? }, description, expires_at }
 //   -> { payment_id, pix_payload?, invoice_url?, expires_at }
 //
-// Só o Alber Food chama (x-alber-food-key). O cliente do restaurante é anônimo. A cobrança nasce na conta PAI com
-// split: a carteira da empresa recebe `amount - fee_total` e o resto (taxa Alber + gateway) fica na conta pai.
-// Nunca devolve chave nem wallet. Repetir a chamada com a mesma referência devolve a cobrança já criada.
+// Só o Alber Food chama (x-alber-food-key). A cobrança nasce na SUBCONTA da empresa (Pix e fatura em nome do restaurante); o split manda a taxa
+// Alber à carteira da conta pai e a tarifa do Asaas sai do valor da subconta. Exige a chave Pix de recebimento. Repetir a mesma referência devolve
+// a cobrança já criada. Ver specs/11_spike_cobranca_subconta.md.
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.119.0'
 import { handleCors, json, err } from '../_shared/cors.ts'
@@ -17,6 +17,7 @@ import {
 import { logError } from '../_shared/error-log.ts'
 import { validateCnpj } from '../_shared/cnpj.ts'
 import { validateCpf } from '../_shared/cpf.ts'
+import { loadFoodCompany, parentWalletId } from '../_shared/food-subaccount.ts'
 
 /** Valores aceitos (centavos): o mínimo da cobrança no Asaas e um teto de segurança igual ao do Alber Food. */
 const MIN_CENTS = 500
@@ -115,31 +116,33 @@ export async function handleRequest(req: Request): Promise<Response> {
   const parentKey = Deno.env.get('ASAAS_API_KEY')
   if (!parentKey) return err('SERVICE_NOT_CONFIGURED', 'Serviço indisponível', 503)
 
-  // A empresa precisa existir, estar viva, ter o KYC aprovado e a carteira definida.
-  const { data: company, error: companyErr } = await supabaseAdmin
-    .from('companies')
-    .select('id, asaas_wallet_id, kyc_status, account_status, deleted_at')
-    .eq('id', companyId)
-    .maybeSingle()
-  if (companyErr) return err('DB_ERROR', 'Erro ao consultar a empresa', 503)
-  const c = company as { id: string; asaas_wallet_id: string | null; kyc_status: string; account_status: string; deleted_at: string | null } | null
-  if (!c || c.deleted_at) return err('COMPANY_NOT_FOUND', 'Empresa não encontrada', 404)
-  if (c.kyc_status !== 'approved' || c.account_status === 'blocked' || !c.asaas_wallet_id) return err('COMPANY_NOT_APPROVED', 'Empresa sem conta aprovada', 409)
+  // A empresa precisa existir, estar viva, ter o KYC aprovado, a chave da subconta e a chave Pix de recebimento.
+  const loaded = await loadFoodCompany(supabaseAdmin, companyId)
+  if ('error' in loaded) {
+    if (loaded.error === 'DB_ERROR') return err('DB_ERROR', 'Erro ao consultar a empresa', 503)
+    if (loaded.error === 'COMPANY_NOT_FOUND') return err('COMPANY_NOT_FOUND', 'Empresa não encontrada', 404)
+    if (loaded.error === 'COMPANY_NO_PIX_KEY') return err('COMPANY_NO_PIX_KEY', 'Empresa sem chave Pix de recebimento', 409)
+    return err('COMPANY_NOT_APPROVED', 'Empresa sem conta aprovada', 409)
+  }
+  const c = loaded.company
+  const subKey = c.subKey
+  const alberWallet = await parentWalletId(parentKey)
+  if (!alberWallet) return err('SERVICE_NOT_CONFIGURED', 'Serviço indisponível', 503)
 
-  // Percentual: o Asaas desconta a tarifa do meio que o cliente usou (Pix, crédito ou débito) e repassa `restaurant_bps` do líquido.
+  // A taxa Alber é o split para a carteira da conta pai. Percentual: a Alber recebe (10000 − restaurant_bps) do LÍQUIDO (valor − tarifa do meio).
   const split = percentOfNet
-    ? [{ walletId: c.asaas_wallet_id, percentualValue: (body.restaurant_bps as number) / 100 }]
-    : [{ walletId: c.asaas_wallet_id, fixedValue: toReais((body.amount_cents as number) - (body.fee_total_cents as number)) }]
+    ? [{ walletId: alberWallet, percentualValue: (10_000 - (body.restaurant_bps as number)) / 100 }]
+    : [{ walletId: alberWallet, fixedValue: toReais(body.fee_total_cents as number) }]
   try {
     // Repetição depois de um timeout: devolve a cobrança que já existe em vez de criar outra.
-    let existing = await findPaymentByReference(reference, parentKey)
+    let existing = await findPaymentByReference(reference, subKey)
     let paymentId: string
     let invoiceUrl: string | null
     if (existing) {
       paymentId = existing.id
       invoiceUrl = existing.invoiceUrl
     } else {
-      const customer = await createTakeawayCustomer(name, phoneDigits || null, parentKey, cpfCnpjDigits || null)
+      const customer = await createTakeawayCustomer(name, phoneDigits || null, subKey, cpfCnpjDigits || null)
       const created = await createTakeawayPayment(
         {
           customer,
@@ -150,7 +153,7 @@ export async function handleRequest(req: Request): Promise<Response> {
           externalReference: reference,
           split,
         },
-        parentKey,
+        subKey,
       )
       paymentId = created.id
       invoiceUrl = created.invoiceUrl
@@ -163,7 +166,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     })
 
     if (method === 'pix') {
-      const qr = await getPixQrCode(paymentId, parentKey)
+      const qr = await getPixQrCode(paymentId, subKey)
       return json({ payment_id: paymentId, pix_payload: qr.payload, expires_at: expiresAt.toISOString() }, 201)
     }
     return json({ payment_id: paymentId, invoice_url: invoiceUrl, expires_at: expiresAt.toISOString() }, 201)

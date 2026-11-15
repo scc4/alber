@@ -63,3 +63,11 @@ percentual sobre o líquido fica sob o restaurante, não sobre o bruto.
 3. (Dispensada) domínio da subconta para `callback.successUrl`: a baixa será por webhook do Alber.
 4. Evento `PAYMENT_*` de cobrança da subconta chega ao webhook da mãe ou só ao da subconta?
 5. Cobrança sem CPF do pagador: não é possível; o C6 vira requisito de produto (coletar CPF).
+
+## Implementado (15/11/2026, só no código; nada publicado)
+- `_shared/food-subaccount.ts` (novo): carrega a empresa, decifra a chave da subconta, **cria a chave Pix de recebimento se faltar** (obrigatória; falha = 409 `COMPANY_NO_PIX_KEY`), resolve a carteira da conta pai (`ASAAS_PARENT_WALLET_ID` ou `GET /wallets/`) e escolhe a chave para consultar/estornar/cancelar.
+- `takeaway-payment-create`: cliente, cobrança, QR e busca por referência com a chave da subconta; split vai para a carteira da conta pai (`fee_total` fixo, ou `100% − restaurant_bps` do líquido). Sem `callback`.
+- `takeaway-payment-refund`, `-cancel`, `-status`: aceitam `company_id` opcional (a chave da subconta); sem ele usam a chave pai (cobranças antigas). **O Food precisa passar `company_id`** nas cobranças novas.
+- `webhooks-asaas-pix` (webhook das subcontas): eventos `PAYMENT_*` com `externalReference` `food_…` são repassados ao Food (`forwardToFood`) antes do restante, sem tocar nas tabelas do app. Pré-requisito: a subconta ter o webhook de pagamentos (criado em `createAsaasAccount`; conferir na subconta existente, p.ex. a do Bar do Zé).
+- Testes: create (16), refund/cancel (7), status, webhooks passam; `deno check` ok. Sem teste novo para o repasse no webhook.
+- **Antes do deploy:** (1) definir `ASAAS_PARENT_WALLET_ID` (opcional); (2) Food passar a enviar `company_id` em refund/cancel/status; (3) validar estorno e nome no QR no sandbox; (4) cobranças pendentes criadas na conta pai continuam no webhook da mãe (`webhooks-asaas-food`), que segue ativo.

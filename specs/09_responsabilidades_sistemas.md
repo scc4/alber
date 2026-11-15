@@ -1,5 +1,5 @@
 # Alber — Responsabilidades dos três sistemas (Alber, Alber Food, Alber Admin)
-**Versão:** 1.10 (13/11/2026: consulta de reserva da cobrança `takeaway-payment-status` no C2; token do webhook da conta pai em §9; v1.9, 09/11/2026: SMS e CORS publicados, §13.3; v1.7: auditoria de segurança, §13.3; v1.6: corte executado e tudo publicado, §13.2; v1.5: P2b concluído, funções apagadas do projeto; v1.4: P2b no código; v1.3: P2a e P4 aplicados; v1.2: P1 aplicado no código, @ da empresa pela função de serviço e sem reserva no Alber; v1.1: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
+**Versão:** 1.11 (15/11/2026: o Food em projeto Supabase próprio desde 11/11; canal C11 no lugar de C6/C7 para o Food; §8 com dois projetos; segredos e deploy por projeto; v1.10, 13/11/2026: consulta de reserva da cobrança `takeaway-payment-status` no C2; token do webhook da conta pai em §9; v1.9, 09/11/2026: SMS e CORS publicados, §13.3; v1.7: auditoria de segurança, §13.3; v1.6: corte executado e tudo publicado, §13.2; v1.5: P2b concluído, funções apagadas do projeto; v1.4: P2b no código; v1.3: P2a e P4 aplicados; v1.2: P1 aplicado no código, @ da empresa pela função de serviço e sem reserva no Alber; v1.1: canais, funções e nomes de segredos conferidos contra o código; §13.1 lista os desvios conhecidos)
 **Data:** 05/11/2026
 **Status:** Documento de referência. Vale para os três repositórios; cada um deve apontar para ele (ou copiá-lo) no seu `CLAUDE.md`.
 **Depende de:** `00_architecture.md` §4.1, `06_modules/food_company_service.md`, e, nos outros repositórios, `alber-food/rules.md` e `alber-admin/rules.md`.
@@ -25,23 +25,26 @@
 ### 1.2 Mapa
 
 ```
- Cliente final ──QR──▶  ALBER FOOD (site Next.js + Edge Function food-api, schema takeaway)
+ Cliente final ──QR──▶  ALBER FOOD (site Next.js + Edge Functions food-api e food-admin, schema takeaway)   [projeto alber-food]
  Dono / gerente ─────▶    identidade, portal, cardápio, pedidos, telas de saque
                               │
                               │ servidor → servidor
                               │ x-alber-food-key  (+ autorização assinada nas operações que movem dinheiro)
                               ▼
-                        ALBER (Edge Functions food-company-*, takeaway-payment-*, schema public)
+                        ALBER (Edge Functions food-company-*, takeaway-payment-*, schema public)               [projeto alber]
                           subcontas, KYC, cobrança, saque, limites, chaves Asaas
                               │ ▲
                   Asaas ◀────┘ └──── webhooks do Asaas (entram no Alber)
                                           │
                                           └─ eventos de pedido repassados ao Food (HMAC)
 
- Equipe Alber ─────▶  ALBER ADMIN (site Next.js + Edge Function admin-api, schema admin)
-                          LÊ  views mascaradas (admin_v.* / admin.v_*) de public e takeaway
-                          ESCREVE só chamando funções SECURITY DEFINER que cada domínio publica
+ Equipe Alber ─────▶  ALBER ADMIN (site Next.js + Edge Function admin-api, schema admin)                     [projeto alber]
+                          Alber: LÊ views mascaradas (admin_v.* / admin.v_*); ESCREVE só por funções SECURITY DEFINER do Alber
+                          Food:  LÊ e AGE só pela API administrativa do Food (food-admin, canal C11, HTTP com chave e assinatura);
+                                 nenhuma credencial de banco no Food
 ```
+
+Desde 11/11/2026 o Alber Food roda num **projeto Supabase próprio** (`alber-food`); Alber e Admin seguem no projeto `alber` (spec `10_separacao_projeto_food.md`, estado em §0).
 
 ---
 
@@ -75,7 +78,7 @@
 | **Limites de saque** | Padrão, aprovado pela equipe e pedidos de aumento (`company_limit_requests`). |
 | **Webhooks do Asaas** | Recebe `webhooks-asaas-kyc`, `webhooks-asaas-pix` (transferências/saques das subcontas) e `webhooks-asaas-food` (cobranças dos pedidos, conta pai); valida token e repassa ao Food só o que é do Food. |
 | **Verificação das autorizações assinadas** | `_shared/food-op.ts` e `_shared/food-release.ts`: assinatura, validade, amarração, nonce e idempotência (`food_ops`). |
-| **Funções administrativas** | Publica as funções `SECURITY DEFINER` que o Admin chama (§8.3). |
+| **Funções administrativas** | Publica as funções `SECURITY DEFINER` que o Admin chama (§8.2). |
 | **App mobile (pessoa física)** | Carteira em Albers, Split, Lounge, etc. **Fora de uso nesta fase**; nada novo é desenvolvido nele por causa do Food. |
 
 ### 3.2 NÃO é responsável por (no contexto do Food)
@@ -135,13 +138,13 @@
 | Área | O que faz |
 |---|---|
 | **Acesso da equipe** | Só `@usealber.com`, só por convite, 2FA obrigatório. Papéis: owner, admin, suporte, financeiro, auditor. Permissão conferida **no backend** a cada chamada. |
-| **Leitura dos dois mundos** | Views mascaradas (`admin_v.*` / `admin.v_alber_*`): usuários, empresas, subcontas, pedidos, estornos pendentes, saques do Food, operações assinadas, eventos. Revelar dado pessoal exige permissão + 2FA recente + motivo, e fica na auditoria. |
+| **Leitura dos dois mundos** | Alber: views mascaradas (`admin_v.*` / `admin.v_alber_*`): usuários, empresas, subcontas, operações assinadas, eventos. Food: recursos e métricas da API administrativa (`food-admin`, C11), que já saem mascarados: restaurantes, equipe, pedidos, estornos pendentes, saques, Spaces. Revelar dado pessoal exige permissão + 2FA recente + motivo, e fica na auditoria (no Food, também no `takeaway.admin_ops`). |
 | **Casos de suporte** | `support_cases` com linha do tempo imutável. |
-| **Taxas** | Propor/aplicar (dupla confirmação, motivo, 2FA) chamando `takeaway.admin_set_fees` e `public.admin_set_rates`. |
+| **Taxas** | Propor/aplicar (dupla confirmação, motivo, 2FA) chamando `public.admin_set_rates` (Alber, SQL) e a ação `fees.set` do `food-admin` (Food, C11). |
 | **Destravamentos de baixo risco** | Desbloquear login, revogar sessões, revogar convite, zerar tentativas de código. |
 | **Contenção reversível** | Suspender/reativar restaurante; bloquear/desbloquear usuário do app e **empresa** (empresa bloqueada não saca). Exige caso aberto. |
 | **Decisões da equipe** | Vínculo do responsável com a empresa, pedidos de aumento de limite, revisão do dono, **encerrar operação de saque presa** (`not_sent`/`sent`, após conferir no Asaas). |
-| **Auditoria** | `admin.audit_log` imutável, gravada na **mesma transação** da ação. Nunca guarda segredo, CPF, CNPJ, código ou senha. |
+| **Auditoria** | `admin.audit_log` imutável, gravada na **mesma transação** da ação no Alber. No Food (outro banco) a auditoria vem **antes**: o pedido é gravado com o `action_id` e só então a ação é chamada (idempotente por esse id); o desfecho é gravado depois. Nunca guarda segredo, CPF, CNPJ, código ou senha. |
 
 ### 5.2 NÃO é responsável por
 
@@ -149,7 +152,7 @@
 - Criar sessão de usuário final ou "entrar como" alguém.
 - Ler PIN, respostas de segurança, tokens ou chaves do Asaas.
 - Aprovar KYC.
-- Escrever em `public` ou `takeaway` por SQL.
+- Escrever em `public` ou `takeaway` por SQL; ter qualquer credencial de banco no projeto do Food.
 - Ter regra de negócio dos produtos. Ele só chama a função que o produto publicou; a regra mora no produto.
 
 ---
@@ -165,14 +168,15 @@ Qualquer comunicação **fora** desta tabela é proibida. Precisa de um canal no
 | C3 | Asaas → Alber | `webhooks-asaas-kyc`, `webhooks-asaas-pix`, `webhooks-asaas-food` | token do Asaas (tempo constante) | KYC, transferências, cobranças. |
 | C4 | Alber → Food | `POST /api/internal/asaas-event` do site do Food | HMAC-SHA256 de `timestamp.corpo`, janela de 5 min | Repassar só eventos de cobrança com referência `food_<id>`. Idempotente no Food (`webhook_events`). |
 | C5 | Admin → Alber | Funções SQL `public.admin_*` (`SECURITY DEFINER`) | papel `admin_app` | Taxas, destravar/bloquear, decidir limite e vínculo, encerrar operação presa. |
-| C6 | Admin → Food | Funções SQL `takeaway.admin_*` (`SECURITY DEFINER`) | papel `admin_app` | Taxas, destravar conta, revogar sessão/convite, suspender restaurante, revisar vínculo do dono. |
-| C7 | Admin ← Alber / Food | Views somente leitura (`admin_v.*`, `admin.v_alber_*`) | papel `admin_app` | Leitura mascarada. Gatilho `INSTEAD OF` recusa escrita. |
+| ~~C6~~ | ~~Admin → Food~~ | ~~Funções SQL `takeaway.admin_*`~~ | | **SUBSTITUÍDO pelo C11 (11/11/2026).** O Admin não tem mais acesso ao banco do Food. |
+| C7 | Admin ← Alber | Views somente leitura (`admin_v.*`, `admin.v_alber_*`, `admin.v_fin_*`) | papel `admin_app` | Leitura mascarada do Alber. Gatilho `INSTEAD OF` recusa escrita. (A parte do Food saiu em 11/11 e 14/11/2026: migrations `0031` e `0033` do Admin.) |
 | C8 | Food → sistema do restaurante | Webhook assinado (HMAC-SHA256) / API `/api/v1/*` | assinatura / API key | Exportar pedidos, receber integrações. |
-| C9 | Admin → Alber | Edge Function `admin-parent-balance` (POST, servidor) | `x-alber-admin-key` (`ALBER_ADMIN_KEY`) | **Só leitura** do saldo e extrato da conta pai (tela Plataforma). A chave do Asaas fica no Alber; cada consulta vai para o `audit_logs` do Alber com quem pediu. Único canal HTTP do Admin. |
+| C9 | Admin → Alber | Edge Function `admin-parent-balance` (POST, servidor) | `x-alber-admin-key` (`ALBER_ADMIN_KEY`) | **Só leitura** do saldo e extrato da conta pai (tela Plataforma). A chave do Asaas fica no Alber; cada consulta vai para o `audit_logs` do Alber com quem pediu. |
 | ~~C10~~ | ~~Food → Alber~~ | ~~`auth-check-handle`, `auth-reserve-handle`, `auth-check-email`~~ | | **REMOVIDO no P1 (07/11/2026).** A conferência do @ passou para C1 (`food-company-handle-check`); o Food não reserva mais @ no Alber. As funções `auth-reserve-handle` e `auth-check-email` saíram do código do Alber (saem do projeto no corte, depois que o Food novo estiver no ar). |
+| C11 | Admin → Food | Edge Function `food-admin` do projeto do Food (POST, JSON, servidor): `/read` (recursos com filtros tipados), `/metrics`, `/action` (ações nomeadas, ex.: `fees.set`), `/reveal` | `x-food-admin-key` (`FOOD_ADMIN_KEY`); ação e revelação também com envelope assinado `x-admin-signature` (`FOOD_ADMIN_SIGNING_KEY`, validade curta, `nonce`, `action_id`) | Tudo que o Admin lê ou faz no Food: restaurantes, pedidos, taxas do Food, destravamentos, contenção, Spaces, recebimento, chaves do assistente. Lista **fechada**, sem ação financeira. No Food tudo roda como a role `food_admin_api` e fica no livro `takeaway.admin_ops`. Contrato: `alber-food/docs/food-admin-api.md`. |
 | C12 | Food → Anthropic | `POST https://api.anthropic.com/v1/messages` (HTTP direto, só na Edge Function `food-api`; endereço fixo no código, sem redirecionamento) | `x-api-key` (chave de workspace `sk-ant-…`, lida do banco do Food) | Alber concierge (assistente de cardápio): a conversa do cliente com o modelo e o teste da chave. **Só o Food fala com a Anthropic**; Alber e Admin não. Vai ao provedor só texto já mascarado (CPF, telefone, e-mail e cartão) e dados do cardápio; nunca o texto de login do cliente. Log e erro só com o código HTTP. Detalhe: `alber-food/specs/phases/5_assistente_cardapio_ia.md` §14.1, §16.5 e §16.6. |
 
-> Alber e Food **não** se enxergam por SQL. Admin enxerga os dois **por view** (leitura) e por funções `admin_*` (escrita), mais o canal C9 (leitura).
+> Alber e Food **não** se enxergam por SQL (estão em projetos Supabase diferentes). O Admin enxerga o Alber **por view** (leitura) e por funções `public.admin_*` (escrita), mais o canal C9 (leitura); e o Food **só pelo C11**.
 
 ### 6.1 Referências opacas
 
@@ -206,8 +210,8 @@ Regras fixas: HMAC-SHA256 com a chave **decodificada** (hex ≥ 64 caracteres ou
 | Dado | Fonte da verdade | Quem pode guardar espelho | Como sincroniza |
 |---|---|---|---|
 | Identidade do dono (CPF, PIN, perguntas, e-mail) | **Food** | ninguém | Não sincroniza. O Alber recebe `owner_ref`; o CPF viaja só para conferir o vínculo e **não é guardado**. |
-| Equipe, papéis e permissões do restaurante | **Food** | Admin (leitura) | Admin lê por view. |
-| Restaurante, cardápio, pedidos, livro-razão do restaurante | **Food** | Admin (leitura) | Admin lê por view. |
+| Equipe, papéis e permissões do restaurante | **Food** | Admin (leitura) | Admin lê pela API (C11). |
+| Restaurante, cardápio, pedidos, livro-razão do restaurante | **Food** | Admin (leitura) | Admin lê pela API (C11). |
 | Subconta Asaas, chave da subconta | **Alber** | ninguém | Nunca sai do Alber. |
 | `kyc_status`, `account_status`, `owner_link_check` da empresa | **Alber** | Food (espelho de exibição) | Food consulta `food-company-status` ao abrir a tela (e pode guardar o último valor). Nunca edita. A aprovação do KYC que ativa o restaurante `draft → active` é decidida pelo status vindo do Alber. |
 | Chave Pix de saque | **Alber** (em claro) | Food: só máscara e `digest` | Food lê de `food-company-status`. Cadastro e troca só por `food-company-set-pix-key` / `owner-transfer`. |
@@ -216,10 +220,10 @@ Regras fixas: HMAC-SHA256 com a chave **decodificada** (hex ≥ 64 caracteres ou
 | Saque (pedido do dono) | **Food** guarda o *pedido* (`payout_requests`); **Alber** guarda o *lançamento* (`transactions`) | Admin (leitura) | Food grava antes, chama o Alber com `idempotency_key`; o fim do Pix o Alber **não avisa**: o Food consulta `food-company-withdraw-status` (ao abrir a tela e a cada 20 s enquanto há saque a caminho) e então fecha o pedido e avisa o dono. |
 | Cobrança do pedido | **Alber/Asaas** | Food (`payments`) | Food cria via C2; o Asaas confirma via C3 → C4; o Food lança no livro-razão ao confirmar. |
 | Estorno | **Food** inicia (permissão `refund`) | Admin (fila de pendentes, leitura) | Executado pelo Alber (C2). Resultado desconhecido fica `pending` e **bloqueia novos estornos** até conferir no Asaas. |
-| Taxa Alber Food (global) | **Food** (`takeaway.platform_settings`) | Admin (histórico `admin.fee_changes`) | Admin altera chamando `takeaway.admin_set_fees`; pedidos já criados **mantêm** a taxa congelada. |
+| Taxa Alber Food (global) | **Food** (`takeaway.platform_settings`) | Admin (histórico `admin.fee_changes`) | Admin altera pela ação `fees.set` do C11 (que executa `takeaway.admin_set_fees` no Food); pedidos já criados **mantêm** a taxa congelada. |
 | Taxas do app Alber (`public.rates`) | **Alber** | Admin (histórico) | `public.admin_set_rates`. |
 | Taxa por restaurante (override) | **Food** | — | Não é editada pelo Admin hoje. Sobrepõe a global. |
-| Status do restaurante (`active/suspended`) | **Food** | Admin (leitura) | Contenção: Admin → `takeaway.admin_set_restaurant_status`. |
+| Status do restaurante (`active/suspended`) | **Food** | Admin (leitura) | Contenção: Admin → ação do C11 (executa `takeaway.admin_set_restaurant_status` no Food). |
 | Status da empresa (`active/blocked`) | **Alber** | Food (leitura de `withdraw.allowed`) | Contenção: Admin → `public.admin_set_company_status`. Empresa bloqueada não saca. |
 | Operação de saque presa (`food_ops`) | **Alber** | Admin (view `v_alber_food_ops`) | Equipe confere no Asaas e encerra com `public.admin_resolve_food_op`; o Food, ao reenviar com a mesma chave, recebe o desfecho. |
 | Casos de suporte, equipe, auditoria do Admin | **Admin** | ninguém | Vínculo com restaurante/usuário/empresa guarda só tipo + id. |
@@ -235,42 +239,46 @@ Regras fixas: HMAC-SHA256 com a chave **decodificada** (hex ≥ 64 caracteres ou
 
 ---
 
-## 8. Banco de dados compartilhado
+## 8. Bancos de dados: dois projetos Supabase
 
-Um único projeto Supabase, três "donos":
+Desde o corte de 11/11/2026 (spec `10_separacao_projeto_food.md`):
 
-| Schema | Dono | Quem escreve | Quem lê |
-|---|---|---|---|
-| `public` | Alber | Funções do Alber (e funções `admin_*` chamadas pelo Admin) | Alber; Admin por view |
-| `takeaway` | Alber Food | `food-api` (papel `takeaway_app`, menor privilégio, sujeito a RLS) | Food; Admin por view |
-| `admin` | Alber Admin | `admin-api` (papel `admin_app`) | Admin |
+| Projeto (ref) | Schema | Dono | Quem escreve | Quem lê |
+|---|---|---|---|---|
+| `alber` (`cxknwpvnabfetcsaengv`) | `public` | Alber | Funções do Alber (e funções `public.admin_*` chamadas pelo Admin) | Alber; Admin por view |
+| `alber` | `admin` | Alber Admin | `admin-api` (papel `admin_app`) | Admin |
+| `alber-food` (`gdcdnpkuoqlzkqghfsxu`) | `takeaway` | Alber Food | `food-api` (papel `takeaway_app`, menor privilégio, sujeito a RLS); `food-admin` (role `food_admin_api`: só as views `food_admin.*` e as funções `takeaway.admin_*`) | Food; Admin só pelo C11 |
+
+O projeto `alber` **não tem** mais função, segredo, schema, papel nem bucket do Food: a cópia antiga do `takeaway` (congelada no corte), o `food_admin`, os papéis `takeaway_app`/`food_admin_api` e o bucket `menu-images` saíram em 15/11/2026 (migration `067` do Alber; estado da fase 7 na spec 10, §0). **Nunca publique nada do Food no ref do Alber**, nem o contrário: confira com `supabase functions list --project-ref <ref>` (o do Food tem só `food-api` e `food-admin`).
 
 ### 8.1 Migrations
 
-- **Cada repositório tem o seu histórico**, com tabela própria (`takeaway.schema_migrations`, `admin.schema_migrations`, histórico do Supabase CLI para o Alber). Migration aplicada nunca é editada; crie outra.
-- **Proposta de mudança em outro domínio** (ex.: o Admin precisa de uma função no Alber): o Admin guarda a proposta em `db/product-migrations/<produto>/`; ela **só vale depois de portada e aplicada no repositório do produto**. O Admin nunca aplica migration em `public` ou `takeaway`.
+- **Cada repositório tem o seu histórico**, com tabela própria (`takeaway.schema_migrations` no projeto do Food, `admin.schema_migrations` e o histórico do Supabase CLI do Alber no projeto do Alber). Migration aplicada nunca é editada; crie outra.
+- **Função nova que o Admin precise:** a migration é escrita **no repositório do produto** e aplicada lá. A pasta `db/product-migrations/` do Admin é só histórico. O Admin nunca aplica migration em `public` ou `takeaway`. No Food, a função nova só vale para o Admin depois de exposta como ação ou recurso do `food-admin` (C11).
 - Migrations devem ser **compatíveis com a versão anterior do código** (permite rollback de deploy).
 
 ### 8.2 Funções que o Admin chama (contrato)
 
-Padrão obrigatório: `SECURITY DEFINER`, `search_path` fixo, checagem do chamador `admin_app`, `REVOKE` de PUBLIC e `GRANT EXECUTE` só ao `admin_app`, alvo existente, idempotente, retorno `{changed, previous, new}` resumido, estado esperado (`expected`) conferido sob lock.
+Padrão obrigatório: `SECURITY DEFINER`, `search_path` fixo, `REVOKE` de PUBLIC e `GRANT EXECUTE` só ao papel que chama (`admin_app` no Alber; `food_admin_api` no Food), alvo existente, idempotente, retorno `{changed, previous, new}` resumido, estado esperado (`expected`) conferido sob lock.
 
-| Produto | Funções |
-|---|---|
-| Alber (`public`) | `admin_set_rates`, `admin_unlock_login`, `admin_set_user_status`, `admin_set_company_status`, `admin_decide_limit_request`, `admin_review_company_link`, `admin_reset_company_limits`, `admin_resolve_food_op` |
-| Alber Food (`takeaway`) | `admin_set_fees`, `admin_unlock_account`, `admin_revoke_sessions`, `admin_revoke_invite`, `admin_reset_onboarding_code`, `admin_set_restaurant_status`, `admin_review_owner_link`, `admin_decide_receiving_request`, `admin_set_owner_transfer`, `admin_save_space`, `admin_save_space_owner`, `admin_set_space_status`, `admin_set_restaurant_space`, `admin_set_restaurant_location` |
+| Produto | Como o Admin chama | Funções |
+|---|---|---|
+| Alber (`public`) | SQL, papel `admin_app` (C5) | `admin_set_rates`, `admin_unlock_login`, `admin_set_user_status`, `admin_set_company_status`, `admin_decide_limit_request`, `admin_review_company_link`, `admin_reset_company_limits`, `admin_resolve_food_op` |
+| Alber Food (`takeaway`) | Ação do `food-admin` (C11), que executa a função no Food como `food_admin_api` | `admin_set_fees`, `admin_unlock_account`, `admin_revoke_sessions`, `admin_revoke_invite`, `admin_reset_onboarding_code`, `admin_set_restaurant_status`, `admin_review_owner_link`, `admin_decide_receiving_request`, `admin_set_owner_transfer`, `admin_save_space`, `admin_save_space_owner`, `admin_set_space_status`, `admin_set_restaurant_space`, `admin_set_restaurant_location` (mais as do assistente: `admin_provider_key_*`, `admin_assistant_*` e as métricas, ver o contrato do C11) |
 
 Notas sobre as funções do Food que não são óbvias:
 
 - `admin_decide_receiving_request`: a equipe decide o pedido de conta de recebimento (`release` / `fix` / `reject`). É a conferência manual que dá origem ao atestado `company_release` (§6.2).
 - `admin_set_owner_transfer`: a equipe só **congela, descongela ou cancela** uma troca de titular. **Nunca conclui nem aceita**; quem conclui é o novo dono, no Food, e a execução financeira é do Alber (`food-company-owner-transfer`).
-- Funções de **Spaces** (`admin_save_space*`, `admin_set_space_status`, `admin_set_restaurant_space`, `admin_set_restaurant_location`): Spaces (praça de alimentação, shopping) são dado do domínio do Food, cadastrado pela equipe no Admin. O Admin lê por views e grava só por estas funções.
+- Funções de **Spaces** (`admin_save_space*`, `admin_set_space_status`, `admin_set_restaurant_space`, `admin_set_restaurant_location`): Spaces (praça de alimentação, shopping) são dado do domínio do Food, cadastrado pela equipe no Admin. O Admin lê pela API e grava só por estas funções (C11).
 
-**Verificação automática:** o Admin tem um teste (`tests/product-contract.test.ts`) que confere que toda função `public.admin_*` / `takeaway.admin_*` chamada pelo código existe nas migrations reais do Alber e do Food. Ao incluir uma função nesta tabela, o teste a cobra.
+**Verificação automática:** o Admin tem dois testes de contrato. `tests/product-contract.test.ts` confere que toda função `public.admin_*` chamada pelo código existe nas migrations reais do Alber, é `SECURITY DEFINER` e dá `EXECUTE` ao `admin_app`, e que o Admin não chama mais nenhuma função SQL do Food. `tests/food-api-contract.test.ts` confere que tudo que o Admin pede ao `food-admin` (ações, recursos, métricas, revelações) existe nos registros do Food; os vetores de assinatura do envelope ficam em `food-admin-client.test.ts`.
 
 ---
 
 ## 9. Segredos: quem tem o quê
+
+Os segredos das funções do **Alber** e do **Admin** ficam no projeto `alber` (os dois veem os do projeto em tempo de execução: o Admin sair desse projeto é a D4 da spec 10, deixada para depois). Os do **Food** ficam só no projeto `alber-food`, que **não tem** nenhum segredo do Alber (nem `ASAAS_API_KEY`). Valor compartilhado entre os dois projetos (✅ nas duas colunas) é gravado **com o mesmo valor nos dois no mesmo passo** e guardado no gerenciador de senhas ao ser gerado.
 
 | Segredo | Alber | Food | Admin | Observação |
 |---|---|---|---|---|
@@ -284,6 +292,8 @@ Notas sobre as funções do Food que não são óbvias:
 | `APP_PIN_PEPPER`, `APP_ENCRYPTION_KEY` | ❌ | ✅ | ❌ | A `APP_ENCRYPTION_KEY` precisa de backup: sem ela não se decifra o CNPJ. |
 | `ALBER_CREDENTIAL_PEPPER` (≥ 32 caracteres) | ✅ | ❌ | ❌ | **Nunca trocar nem perder sem refazer os hashes**: é o pepper de PIN, resposta de segurança, CPF e senha de sessão do app Alber. Falha fechada se ausente. |
 | `ALBER_ADMIN_KEY` (= `x-alber-admin-key`) | ✅ (confere) | ❌ | ✅ (envia) | Canal C9, ≥ 32 caracteres. |
+| `FOOD_ADMIN_KEY` (= `x-food-admin-key`) e `FOOD_ADMIN_SIGNING_KEY` | ❌ | ✅ (confere) | ✅ (envia e assina) | Canal C11. Chave ≥ 32 caracteres; assinatura em hexadecimal de 64 caracteres (usar os **bytes decodificados**). Com `FOOD_ADMIN_URL` (só no Admin, URL da `food-admin` do projeto do Food). Sem os três, as ações no Food respondem `503 FOOD_NOT_CONFIGURED`. |
+| `FOOD_DATABASE_URL` / papel `takeaway_app` | ❌ | ✅ | ❌ | Só no projeto do Food. O Admin não tem credencial de banco no Food. |
 | `ADMIN_BFF_SECRET`, `ADMIN_ENCRYPTION_KEY`, segredo Google | ❌ | ❌ | ✅ | Só site e função do Admin. |
 | Chave da Anthropic (canal C12) | ❌ | ✅ (guarda cifrada e usa) | ✅ (só grava, testa, ativa e desliga; **em trânsito**) | **Não fica em `supabase secrets`.** O Admin a digita num campo e a envia numa ação assinada do `food-admin` (só o papel `owner`, com 2FA); o Food a cifra (AES-256-GCM, `APP_ENCRYPTION_KEY`) em `takeaway.assistant_provider_keys` e **nunca a devolve** (só os 4 últimos caracteres e as datas). O Admin não a guarda: não vai a log, `audit_log`, banco do Admin nem resposta. Uma por finalidade (assistente; avaliação), nunca por restaurante. Só chave de workspace, não de usuário. A rotação é pelo Admin (gravar, testar, ativar); a perda da `APP_ENCRYPTION_KEY` obriga a gravar a chave de novo. |
 
@@ -298,19 +308,29 @@ O mesmo valor tem nome diferente em cada lado. Configurar o nome errado deixa a 
 | Segredo HMAC do evento de pagamento Alber → Food | `FOOD_WEBHOOK_SECRET` (e `FOOD_WEBHOOK_URL`) | `ALBER_WEBHOOK_SECRET` | — |
 | Token do webhook da conta pai (Asaas → Alber) | `FOOD_ASAAS_WEBHOOK_TOKEN` | — | — |
 | Chave do canal C9 (`x-alber-admin-key`) | `ALBER_ADMIN_KEY` | — | `ALBER_ADMIN_KEY` |
-| URL das funções do Alber | — | `ALBER_FUNCTIONS_URL` (padrão: URL do projeto) | `ALBER_FUNCTIONS_URL` |
+| Chave e assinatura do canal C11 | — | `FOOD_ADMIN_KEY`, `FOOD_ADMIN_SIGNING_KEY` | `FOOD_ADMIN_KEY`, `FOOD_ADMIN_SIGNING_KEY` (e `FOOD_ADMIN_URL`) |
+| URL das funções do Alber | — | `ALBER_FUNCTIONS_URL` e `ALBER_ANON_KEY` (**explícitos**: o padrão seria o projeto do próprio Food, que não tem as funções do Alber) | `ALBER_FUNCTIONS_URL` |
 
 ---
 
 ## 10. Deploy e ordem de publicação
 
-Os três publicam separado. O que precisa de ordem:
+Os três publicam separado, cada um no **seu** projeto Supabase:
+
+| Repositório | Projeto (ref) | O que publica |
+|---|---|---|
+| `alber` | `alber` (`cxknwpvnabfetcsaengv`) | Funções do Alber e migrations de `public` (`supabase db push`) |
+| `alber-admin` | `alber` (`cxknwpvnabfetcsaengv`) | `admin-api` e migrations de `admin` (`npm run migrate:remote -- --workdir <checkout do alber vinculado>`) |
+| `alber-food` | `alber-food` (`gdcdnpkuoqlzkqghfsxu`) | `food-api`, `food-admin` e migrations de `takeaway` (vínculo com o projeto do Food; ver `alber-food/docs/deploy.md`) |
+
+O que precisa de ordem:
 
 1. **Alber**: migrations (058 → 059 → 060 …) e funções `food-company-*` **antes** de qualquer coisa que as use.
 2. **Admin**: suas migrations que leem colunas novas do Alber (ex.: 0017 depende da 058; as ações de contenção dependem de `admin_set_company_status` e `admin_resolve_food_op`) **depois** do Alber. Sem a função, a ação do Admin responde `CONTAIN_APPLY_FAILED`.
-3. **Food**: a migration destrutiva de identidade (0031) e o `main` do site só vão no **corte** (publica o site no Railway); o site novo depende das funções `food-company-*` já publicadas.
+3. **Food → Admin (C11)**: ação, recurso ou métrica nova do `food-admin` é publicada no Food **antes** do Admin que a usa; mudança de formato sobe junta, com o teste de contrato HTTP do Admin passando contra o `main` do Food.
 4. Mudança de **contrato** entre Food e Alber (campos, códigos de erro) sobe **junta**: documente em `food_company_service.md` e rode os vetores de contrato dos dois lados.
 5. Push no `main` do Alber dispara só o build de prévia (EAS); não publica função nem migration. Função e migration sempre por deploy explícito.
+6. **Antes de publicar**, confira o ref: `supabase functions list --project-ref <ref>`. Uma `food-api` já foi publicada por engano no projeto do Alber (14/11/2026).
 
 ---
 
@@ -326,11 +346,11 @@ Os três publicam separado. O que precisa de ordem:
 | Nova chamada do Food ao Asaas | **Alber** (função nova) | Food nunca fala direto com o Asaas. |
 | Novo webhook do Asaas | **Alber** (recebe), repassa ao Food só o que couber | |
 | Nova taxa configurável | **Dono do dado** guarda; **Admin** edita via função `admin_set_*` | Dupla confirmação, motivo, 2FA, histórico. |
-| Nova ação da equipe (destravar, bloquear, encerrar) | **Admin** (tela + serviço) + **função no produto dono** | Nunca SQL de escrita direto. |
-| Nova tela de leitura para a equipe | **Admin** + **view** mascarada no produto | Dado pessoal mascarado por padrão. |
+| Nova ação da equipe (destravar, bloquear, encerrar) | **Admin** (tela + serviço) + **função no produto dono** (no Food, exposta como ação do `food-admin`) | Nunca SQL de escrita direto. |
+| Nova tela de leitura para a equipe | **Admin** + **view** mascarada no Alber, ou **recurso/métrica** do `food-admin` no Food | Dado pessoal mascarado por padrão (no Food, mascarado na saída da API). |
 | Notificar o dono por e-mail | **Food** | Admin usa o contato do dono do restaurante ligado. |
-| Relatório consolidado de receita/plataforma | **Admin** (lê views) | |
-| Algo que parece pedir "o Admin editar um dado do Food" | **Food** publica uma função `admin_*`; Admin só a chama | |
+| Relatório consolidado de receita/plataforma | **Admin** (views do Alber + API do Food, somados no código) | Falha do Food não pode virar "só o Alber" calado. |
+| Algo que parece pedir "o Admin editar um dado do Food" | **Food** publica uma função `admin_*` e a expõe no `food-admin`; Admin só chama a ação | |
 | Algo que parece pedir "o Food ler uma tabela do Alber" | **Alber** publica uma função `food-*`; Food só a chama | |
 
 ---
@@ -342,7 +362,8 @@ Os três publicam separado. O que precisa de ordem:
 - [ ] Dinheiro: só o Alber executa; há `idempotency_key`; o desfecho desconhecido não vira "falhou".
 - [ ] Operação que muda dinheiro, chave Pix ou titular: exige `op` assinado e os controles do Food (sessão, PIN, pergunta, código).
 - [ ] Nenhum segredo novo em lugar que não o tem (§9); nada de chave do Asaas fora do Alber.
-- [ ] Ação do Admin: permissão no backend, 2FA recente, motivo, auditoria na mesma transação, função `SECURITY DEFINER` no produto.
+- [ ] Ação do Admin: permissão no backend, 2FA recente, motivo, função `SECURITY DEFINER` no produto; auditoria na mesma transação (Alber) ou antes da ação, com `action_id` (Food, C11).
+- [ ] Publicando no projeto certo (§8, §10): nada do Food no projeto `alber`, nada do Alber no `alber-food`.
 - [ ] Dado pessoal mascarado na leitura e fora de log, auditoria e caso de suporte.
 - [ ] Texto de UI via i18n; selo Asaas nas telas financeiras e de criação de conta; nunca "banco" ou "instituição de pagamento".
 - [ ] Ordem de deploy (§10) escrita no PR quando há mais de um sistema.
@@ -361,6 +382,10 @@ Os três publicam separado. O que precisa de ordem:
 7. **Painel Admin no spec do Alber** (`08_admin_panel.md`) está desatualizado (é o rascunho de 28/04/2026). A fonte de verdade do Admin é o `rules.md` do repositório `alber-admin`; este documento prevalece nas fronteiras.
 
 ---
+
+### 13.4 Separação do Food em projeto próprio (11/11/2026)
+
+O Food saiu do projeto `alber` no corte de 11/11/2026 (spec `10_separacao_projeto_food.md`; a execução e o que falta da limpeza estão no §0 dela). As seções 13.2 e 13.3 abaixo descrevem o estado **anterior** à separação (um projeto só) e ficam como registro.
 
 ### 13.2 Estado do corte (09/11/2026)
 

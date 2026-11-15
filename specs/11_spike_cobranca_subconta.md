@@ -77,3 +77,10 @@ percentual sobre o líquido fica sob o restaurante, não sobre o bruto.
 - Se a tarifa do Asaas volta no estorno: **não verificado** (o extrato da subconta ainda estava vazio no sandbox, sem liquidação).
 - Chave Pix da subconta recém-criada: o sandbox seguiu respondendo "excesso de consultas" (também em contas novas); QR e nome do recebedor continuam sem conferência. Conferir em subconta já aprovada (ex.: Bar do Zé) quando o Asaas liberar.
 - `takeaway-payment-refund/-cancel/-status` **não exigem mudança no Food**: sem `company_id`, a empresa é achada pelo registro `takeaway_payment_created` (referência → empresa) que o `create` já grava; sem registro (cobrança antiga) usam a chave pai.
+
+### Webhook: quem recebe o aviso (testado no sandbox, 15/11/2026)
+Cobrança de cartão criada e paga na subconta, com split para a conta pai, com um webhook de teste na MÃE e outro na SUBCONTA (mesmos eventos, incluindo `PAYMENT_SPLIT_*`), ambos gravando o que chegava:
+- **Subconta recebeu:** `PAYMENT_CREATED`, `PAYMENT_CONFIRMED`, `PAYMENT_REFUNDED`.
+- **Mãe recebeu: nada** (nem `PAYMENT_*`, nem evento de split). Ser destinatária do split não gera aviso à mãe.
+- Conclusão: o aviso de pagamento do Food **só chega pelo webhook da subconta** (`webhooks-asaas-pix`, já publicado com o repasse ao Food). Toda subconta do Food precisa ter o webhook de pagamentos; o `POST /accounts` aceita `webhooks[]` (como o `createAsaasAccount` já faz) e `GET /webhooks` com a chave da subconta lista. Para subcontas já existentes, é preciso conferir/criar esse webhook. O webhook da mãe (`webhooks-asaas-food`) só serve para cobranças antigas, criadas na mãe. A taxa Alber (split) deve ser conciliada por consulta (`GET /payments/splits/received`), não por webhook.
+- Script: `scripts/spike-asaas-webhooks.mjs` (precisa de um receptor; o temporário foi apagado).

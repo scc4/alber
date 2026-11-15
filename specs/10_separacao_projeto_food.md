@@ -1,7 +1,7 @@
 # Alber — Plano: Alber Food em projeto Supabase próprio
 **Versão:** 1.3 (15/11/2026: estado da execução, §0; v1.2, 10/11/2026: D1 = começar do zero; D2 = API HTTP administrativa no Food)
 **Data:** 09/11/2026
-**Status:** **Executado até a fase 6** (corte em 11/11/2026). Fase 7 (limpeza): o projeto do Alber já não tem nada do Food (15/11/2026); faltam dois itens fora do banco, ver §0. Daqui para baixo o texto é o plano original, mantido como registro.
+**Status:** **Executado até a fase 6** (corte em 11/11/2026). Fase 7 (limpeza): o projeto do Alber já não tem nada do Food (15/11/2026); falta só conferir o token de deploy do Food, ver §0. Daqui para baixo o texto é o plano original, mantido como registro.
 **Depende de:** `09_responsabilidades_sistemas.md` (fronteiras e segredos), `06_modules/food_company_service.md` (contrato Food → Alber).
 
 ---
@@ -28,9 +28,9 @@
 | Bucket `menu-images` do projeto do Alber (14 imagens de teste de 09/11; o Food novo usa o seu e nunca apontou para estas) | **Apagado** (15/11/2026, `supabase storage rm -r ss:///menu-images --experimental --linked`, que apaga os objetos e o bucket; o Supabase recusa apagar storage por SQL) |
 | Cópia antes de apagar | Fora do repositório, na máquina de quem executou: `backups-corte/2026-11-15/` (linhas das 38 tabelas em JSON, DDL de views, funções, colunas, constraints, índices, políticas e grants, e as 14 imagens). O CPF/CNPJ dali está cifrado com a chave antiga, que não foi guardada (D1): não é legível |
 | Token de deploy antigo do Food | **Pendente** (fora do código): conferir que o `SUPABASE_ACCESS_TOKEN` do workflow do Food não é o mesmo usado no Alber |
-| Spec 09 (canal C11, §8, §9, §10), `CLAUDE.md` dos três repositórios | Spec 09 v1.11 e `CLAUDE.md` do Alber e do Admin atualizados em 15/11/2026; no Food falta recopiar as specs 09 e 10 em `docs/` e conferir o `CLAUDE.md` |
+| Spec 09 (canal C11, §8, §9, §10), `CLAUDE.md` dos três repositórios | Spec 09 v1.11 e `CLAUDE.md` do Alber, do Admin e do Food atualizados em 15/11/2026 (cópias recopiadas no Admin e no Food). No Food, `ALBER_FUNCTIONS_URL` e `ALBER_ANON_KEY` passaram a ser obrigatórios (sem cair para a URL do próprio projeto) |
 
-**Conferido depois da limpeza (15/11/2026):** `supabase secrets list` do Alber sem nomes do Food; catálogo sem `takeaway`, `food_admin`, `takeaway_app` e `food_admin_api` (papel próprio só o `admin_app`); buckets só do Alber; `supabase functions list` do Alber sem `food-api`/`food-admin`; as views do Admin respondem; sites do Admin e do Food no ar; testes de contrato do Admin passando com os repositórios irmãos. **Falta da fase 7:** conferir o token de deploy do Food e recopiar as specs no repositório do Food.
+**Conferido depois da limpeza (15/11/2026):** `supabase secrets list` do Alber sem nomes do Food; catálogo sem `takeaway`, `food_admin`, `takeaway_app` e `food_admin_api` (papel próprio só o `admin_app`); buckets só do Alber; `supabase functions list` do Alber sem `food-api`/`food-admin`; as views do Admin respondem; sites do Admin e do Food no ar; testes de contrato do Admin passando com os repositórios irmãos. **Falta da fase 7:** só conferir o token de deploy do Food (fora do código).
 
 ---
 

@@ -35,6 +35,8 @@ const DEFAULT_MAX_FEE_BPS = 6000
  * Alber é o resto; o teto acompanha o máximo da taxa Alber no Admin (30%), ou FOOD_MAX_ALBER_NET_BPS.
  */
 const DEFAULT_MAX_ALBER_NET_BPS = 3000
+/** Tarifa fixa do Asaas por Pix (centavos). Com fixo da Alber, o valor do Pix tem de superar este valor + alber_fixed_cents. */
+const DEFAULT_ASAAS_PIX_FIXED_CENTS = 199
 const DEFAULT_MAX_FEE_FIXED_CENTS = 1000
 function envInt(name: string, fallback: number): number {
   const raw = Deno.env.get(name)
@@ -112,6 +114,7 @@ export async function handleRequest(req: Request): Promise<Response> {
   if (alberFixedCents > 0) {
     if (!percentOfNet) return err('INVALID_SPLIT', 'alber_fixed_cents só vale com split_mode percent_of_net', 422)
     if (alberFixedCents >= body.amount_cents || alberFixedCents > maxFeeCents(body.amount_cents)) return err('FEE_ABOVE_CAP', 'alber_fixed_cents acima do teto do Alber', 422)
+    if (method === 'pix' && body.amount_cents <= alberFixedCents + envInt('ASAAS_PIX_FIXED_CENTS', DEFAULT_ASAAS_PIX_FIXED_CENTS)) return err('AMOUNT_BELOW_MINIMUM', 'Valor do Pix abaixo do mínimo para a taxa fixa configurada', 422)
   }
   if (name.length < 2 || name.length > 60) return err('INVALID_CUSTOMER', 'customer.name inválido', 422)
   if (phoneDigits && !/^\d{10,11}$/.test(phoneDigits)) return err('INVALID_CUSTOMER', 'customer.phone inválido', 422)

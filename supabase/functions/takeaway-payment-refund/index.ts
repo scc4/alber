@@ -61,7 +61,14 @@ export async function handleRequest(req: Request): Promise<Response> {
     return json({ refund_id: key })
   } catch (e) {
     await logError(supabaseAdmin, 'takeaway-payment-refund', e, { reference })
-    if (e instanceof AsaasError || (e instanceof Error && e.message.startsWith('ASAAS_REFUND_FAILED'))) return err('REFUND_REJECTED', 'O Asaas recusou o estorno', 422)
+    if (e instanceof AsaasError || (e instanceof Error && e.message.startsWith('ASAAS_REFUND_FAILED'))) {
+      const msg = e.message.toLowerCase()
+      // Transitório: logo após a confirmação o Asaas recusa ("tente novamente em alguns instantes"). O Food repete.
+      if (msg.includes('tente novamente') || msg.includes('alguns instantes')) return err('REFUND_RETRY_LATER', 'Estorno ainda não disponível, tente novamente', 409)
+      // Subconta sem saldo para devolver.
+      if (msg.includes('saldo')) return err('REFUND_INSUFFICIENT_BALANCE', 'Saldo insuficiente na conta do restaurante para o estorno', 422)
+      return err('REFUND_REJECTED', 'O Asaas recusou o estorno', 422)
+    }
     return err('PAYMENT_PROVIDER_ERROR', 'Falha ao estornar', 502)
   }
 }

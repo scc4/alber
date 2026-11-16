@@ -55,6 +55,7 @@ interface CreateBody {
   /** Ausente = split por valor fixo (amount − fee_total). */
   split_mode?: unknown
   restaurant_bps?: unknown
+  alber_fixed_cents?: unknown
   method?: unknown
   customer?: { name?: unknown; phone?: unknown; cpf_cnpj?: unknown }
   description?: unknown
@@ -103,6 +104,11 @@ export async function handleRequest(req: Request): Promise<Response> {
     // A taxa precisa deixar algo para o restaurante: sem isso o split não existe.
     if (!isInt(body.fee_total_cents) || body.fee_total_cents < 0 || body.fee_total_cents >= body.amount_cents) return err('INVALID_FEE', 'fee_total_cents inválido', 422)
     if (body.fee_total_cents > maxFeeCents(body.amount_cents)) return err('FEE_ABOVE_CAP', 'fee_total_cents acima do teto do Alber', 422)
+  }
+  // Parte fixa da Alber em centavos (modo percentual). Ainda não provada no sandbox: 0/ausente = ignora; >0 é recusado.
+  if (body.alber_fixed_cents !== undefined && body.alber_fixed_cents !== null) {
+    if (!isInt(body.alber_fixed_cents) || body.alber_fixed_cents < 0) return err('INVALID_SPLIT', 'alber_fixed_cents inválido', 422)
+    if (body.alber_fixed_cents > 0) return err('ALBER_FIXED_UNSUPPORTED', 'alber_fixed_cents ainda não suportado', 422)
   }
   if (name.length < 2 || name.length > 60) return err('INVALID_CUSTOMER', 'customer.name inválido', 422)
   if (phoneDigits && !/^\d{10,11}$/.test(phoneDigits)) return err('INVALID_CUSTOMER', 'customer.phone inválido', 422)
@@ -167,9 +173,9 @@ export async function handleRequest(req: Request): Promise<Response> {
 
     if (method === 'pix') {
       const qr = await getPixQrCode(paymentId, subKey)
-      return json({ payment_id: paymentId, pix_payload: qr.payload, expires_at: expiresAt.toISOString() }, 201)
+      return json({ payment_id: paymentId, pix_payload: qr.payload, expires_at: expiresAt.toISOString(), charged_on: 'subaccount' }, 201)
     }
-    return json({ payment_id: paymentId, invoice_url: invoiceUrl, expires_at: expiresAt.toISOString() }, 201)
+    return json({ payment_id: paymentId, invoice_url: invoiceUrl, expires_at: expiresAt.toISOString(), charged_on: 'subaccount' }, 201)
   } catch (e) {
     await logError(supabaseAdmin, 'takeaway-payment-create', e, { reference })
     if (e instanceof AsaasError) return err('PAYMENT_PROVIDER_ERROR', 'O Asaas recusou a cobrança', 502)

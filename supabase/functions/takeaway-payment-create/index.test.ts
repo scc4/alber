@@ -79,7 +79,7 @@ Deno.test('GET retorna 405 e sem segredo configurado a função recusa (503)', a
 Deno.test('Pix: cria a cobrança NA SUBCONTA com a taxa Alber como split para a carteira da conta pai e devolve só o copia e cola', async () => {
   const r = await run(good)
   assertEquals(r.status, 201)
-  assertEquals(r.json, { payment_id: 'pay_abc123', pix_payload: '00020126pixcopiaecola', expires_at: '2026-10-26T15:00:00.000Z' })
+  assertEquals(r.json, { payment_id: 'pay_abc123', pix_payload: '00020126pixcopiaecola', expires_at: '2026-10-26T15:00:00.000Z', charged_on: 'subaccount' })
   const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/payments'))!
   const b = create.body as Record<string, unknown>
   assertEquals(/^\d{4}-\d{2}-\d{2}$/.test(String(b.dueDate)), true)

@@ -91,3 +91,12 @@ Cobrança de cartão criada e paga na subconta, com split para a conta pai, com 
 - **Webhook de cobrança na subconta do Bar do Zé**: conferido com autorização do Fernando; o webhook de pagamentos existe nela.
 - **Chave Pix de recebimento**: já é criada na aprovação do KYC (`company-kyc.ts`, `webhooks-asaas-kyc`) e, para empresa antiga sem ela, na primeira cobrança (`loadFoodCompany`: cria EVP na subconta e grava em `asaas_deposit_key`; se o Asaas falhar, 409 `COMPANY_NO_PIX_KEY`). Isso funciona como backfill sob demanda. `food-company-status` passa a devolver `receiving_pix_key: boolean` (distinta de `pix_key`, a chave de saque). **Não feito**: bloquear a abertura de conta se a criação da chave falhar; o criar-na-primeira-cobrança cobre o buraco, ao custo de a 1ª cobrança poder falhar se o Asaas oscilar.
 - **Pendente**: provar no sandbox o split misto (fixo + percentual) e o estorno sem saldo; definir `ASAAS_PARENT_WALLET_ID` (hoje resolvido por `GET /wallets/` a cada chamada).
+
+## Split misto (fixo + % do líquido), sandbox 16/11/2026 — `scripts/spike-asaas-split-misto.mjs`
+
+Cobrança Pix de R$ 100,00 na subconta (netValue 99,01 no momento da criação):
+- **A) duas entradas para a mesma carteira** (`fixedValue 0,50` + `percentualValue 5`): aceito; totais 0,50 + 4,95.
+- **B) uma entrada com `fixedValue` E `percentualValue`**: aceito; `totalValue` 5,45 (0,50 + 5% do líquido 99,01 = 4,95). Escolhido (um registro só).
+- O percentual incide sobre o **líquido** (valor − tarifa do meio), como no modo só-percentual; o arredondamento do Asaas foi para o centavo (4,9505 → 4,95).
+- **Não provado**: a liquidação/crédito do split misto. `receiveInCash` no sandbox CANCELA o split (`PAYMENT_RECEIVED_IN_CASH`), então não dá para ver o crédito na conta-mãe; só um Pix real (ou pagamento simulado que o sandbox liquide) mostraria. Estorno do split misto também não testado.
+- Implementação: `takeaway-payment-create` aceita `alber_fixed_cents` (>0 só com `split_mode: percent_of_net`, abaixo do teto `maxFeeCents`, senão 422 `INVALID_SPLIT`/`FEE_ABOVE_CAP`); o 422 `ALBER_FIXED_UNSUPPORTED` deixa de existir. Commitado, ainda NÃO publicado.

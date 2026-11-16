@@ -105,10 +105,13 @@ export async function handleRequest(req: Request): Promise<Response> {
     if (!isInt(body.fee_total_cents) || body.fee_total_cents < 0 || body.fee_total_cents >= body.amount_cents) return err('INVALID_FEE', 'fee_total_cents inválido', 422)
     if (body.fee_total_cents > maxFeeCents(body.amount_cents)) return err('FEE_ABOVE_CAP', 'fee_total_cents acima do teto do Alber', 422)
   }
-  // Parte fixa da Alber em centavos (modo percentual). Ainda não provada no sandbox: 0/ausente = ignora; >0 é recusado.
-  if (body.alber_fixed_cents !== undefined && body.alber_fixed_cents !== null) {
-    if (!isInt(body.alber_fixed_cents) || body.alber_fixed_cents < 0) return err('INVALID_SPLIT', 'alber_fixed_cents inválido', 422)
-    if (body.alber_fixed_cents > 0) return err('ALBER_FIXED_UNSUPPORTED', 'alber_fixed_cents ainda não suportado', 422)
+  // Parte fixa da Alber em centavos, somada ao percentual do líquido (só no modo percentual). Sandbox 16/11: uma entrada de split com
+  // fixedValue E percentualValue é aceita e o total é fixo + % do líquido (specs/11).
+  const alberFixedCents = body.alber_fixed_cents === undefined || body.alber_fixed_cents === null ? 0 : body.alber_fixed_cents
+  if (!isInt(alberFixedCents) || alberFixedCents < 0) return err('INVALID_SPLIT', 'alber_fixed_cents inválido', 422)
+  if (alberFixedCents > 0) {
+    if (!percentOfNet) return err('INVALID_SPLIT', 'alber_fixed_cents só vale com split_mode percent_of_net', 422)
+    if (alberFixedCents >= body.amount_cents || alberFixedCents > maxFeeCents(body.amount_cents)) return err('FEE_ABOVE_CAP', 'alber_fixed_cents acima do teto do Alber', 422)
   }
   if (name.length < 2 || name.length > 60) return err('INVALID_CUSTOMER', 'customer.name inválido', 422)
   if (phoneDigits && !/^\d{10,11}$/.test(phoneDigits)) return err('INVALID_CUSTOMER', 'customer.phone inválido', 422)
@@ -137,7 +140,7 @@ export async function handleRequest(req: Request): Promise<Response> {
 
   // A taxa Alber é o split para a carteira da conta pai. Percentual: a Alber recebe (10000 − restaurant_bps) do LÍQUIDO (valor − tarifa do meio).
   const split = percentOfNet
-    ? [{ walletId: alberWallet, percentualValue: (10_000 - (body.restaurant_bps as number)) / 100 }]
+    ? [{ walletId: alberWallet, percentualValue: (10_000 - (body.restaurant_bps as number)) / 100, ...(alberFixedCents > 0 ? { fixedValue: toReais(alberFixedCents) } : {}) }]
     : [{ walletId: alberWallet, fixedValue: toReais(body.fee_total_cents as number) }]
   try {
     // Repetição depois de um timeout: devolve a cobrança que já existe em vez de criar outra.
@@ -168,7 +171,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     await supabaseAdmin.from('audit_logs').insert({
       user_id: null,
       event_type: 'takeaway_payment_created',
-      metadata: { company_id: c.id, reference, amount_cents: body.amount_cents, fee_total_cents: percentOfNet ? null : body.fee_total_cents, split_mode: percentOfNet ? 'percent_of_net' : 'fixed', restaurant_bps: percentOfNet ? body.restaurant_bps : null, method, repeated: Boolean(existing) },
+      metadata: { company_id: c.id, reference, amount_cents: body.amount_cents, fee_total_cents: percentOfNet ? null : body.fee_total_cents, split_mode: percentOfNet ? 'percent_of_net' : 'fixed', restaurant_bps: percentOfNet ? body.restaurant_bps : null, alber_fixed_cents: alberFixedCents, method, repeated: Boolean(existing) },
     })
 
     if (method === 'pix') {

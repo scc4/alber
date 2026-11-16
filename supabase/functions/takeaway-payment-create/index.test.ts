@@ -238,3 +238,21 @@ Deno.test('split percentual: restaurant_bps inválido ou abaixo do teto da Alber
   assertEquals([mode.status, (mode.json as { error?: string }).error], [422, 'INVALID_SPLIT_MODE'])
   assertEquals(calls.some((c) => c.url.endsWith('/payments') && c.method === 'POST'), false)
 })
+
+Deno.test('alber_fixed_cents com percent_of_net: UMA entrada de split com fixedValue e percentualValue; sem o modo percentual ou acima do teto é recusado', async () => {
+  const { fee_total_cents: _drop, ...rest } = good as Record<string, unknown>
+  const r = await run({ ...rest, split_mode: 'percent_of_net', restaurant_bps: 9700, alber_fixed_cents: 50 })
+  assertEquals(r.status, 201)
+  const create = calls.find((c) => c.method === 'POST' && c.url.endsWith('/payments'))!.body as Record<string, unknown>
+  assertEquals(create.split, [{ walletId: 'wallet-mae', percentualValue: 3, fixedValue: 0.5 }])
+  const zero = await run({ ...rest, split_mode: 'percent_of_net', restaurant_bps: 9700, alber_fixed_cents: 0 })
+  assertEquals(zero.status, 201)
+  for (const bad of [-1, 0.5, '50']) {
+    const x = await run({ ...rest, split_mode: 'percent_of_net', restaurant_bps: 9700, alber_fixed_cents: bad })
+    assertEquals([x.status, (x.json as { error?: string }).error], [422, 'INVALID_SPLIT'])
+  }
+  const fixedMode = await run({ ...good, alber_fixed_cents: 50 })
+  assertEquals([fixedMode.status, (fixedMode.json as { error?: string }).error], [422, 'INVALID_SPLIT'])
+  const huge = await run({ ...rest, split_mode: 'percent_of_net', restaurant_bps: 9700, alber_fixed_cents: 10_000_000 })
+  assertEquals([huge.status, (huge.json as { error?: string }).error], [422, 'FEE_ABOVE_CAP'])
+})

@@ -68,7 +68,7 @@ export const COMPANY_COLUMNS = [
   'id', 'handle', 'owner_ref', 'origin', 'cnpj', 'kyc_status', 'account_status', 'onboarding_url', 'deleted_at',
   'asaas_api_key_enc', 'asaas_wallet_id',
   'pix_key', 'pix_key_type', 'pix_key_hash', 'pix_key_changed_at', 'pix_key_set_at',
-  'owner_link_check', 'owner_link_review', 'kyc_approved_at', 'withdraw_limit_per_tx_brl', 'withdraw_limit_per_day_brl',
+  'owner_link_check', 'owner_link_review', 'kyc_approved_at', 'withdraw_limit_per_tx_brl', 'withdraw_limit_per_day_brl', 'asaas_deposit_key',
 ].join(', ')
 
 export interface FoodCompany {
@@ -93,6 +93,7 @@ export interface FoodCompany {
   kyc_approved_at: string | null
   withdraw_limit_per_tx_brl: number | string | null
   withdraw_limit_per_day_brl: number | string | null
+  asaas_deposit_key?: string | null
 }
 
 /**

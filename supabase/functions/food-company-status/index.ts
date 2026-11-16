@@ -1,6 +1,7 @@
 // POST /food-company-status   (Alber Food -> Alber; x-alber-food-key; sem JWT de usuário)
 //   { company_id, owner_ref }
 //   -> { company_id, handle, kyc_status, account_status, onboarding_url|null, owner_link_check, owner_link_review,
+//        receiving_pix_key (chave Pix de RECEBIMENTO da subconta, distinta da de saque; false = cobranças do Food dão COMPANY_NO_PIX_KEY até criar),
 //        pix_key: { configured, type: 'cnpj'|'random'|null, masked|null, digest|null, changed_at|null, available_at|null },
 //        limits: { per_tx_brl, per_day_brl, source: 'default'|'approved' }, last_limit_request|null,
 //        withdraw: { allowed, code|null, message|null } }
@@ -85,6 +86,7 @@ export async function handleRequest(req: Request): Promise<Response> {
     owner_link_check: company.owner_link_check,
     owner_link_review: company.owner_link_review,
     pix_key,
+    receiving_pix_key: Boolean(company.asaas_deposit_key),
     limits: { per_tx_brl: limits.perTxBrl, per_day_brl: limits.perDayBrl, source: limits.source },
     last_limit_request: last
       ? {

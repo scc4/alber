@@ -12,12 +12,13 @@ Deno.test('empresa aprovada com chave do CNPJ: tudo o que o Food precisa mostrar
   const w = await makeWorld()
   const r = await call(w, handleRequest, body)
   assertEquals(r.status, 200)
-  assertEquals(Object.keys(r.data).sort(), ['account_status', 'company_id', 'handle', 'kyc_status', 'last_limit_request', 'limits', 'onboarding_url', 'owner_link_check', 'owner_link_review', 'pix_key', 'withdraw'])
+  assertEquals(Object.keys(r.data).sort(), ['account_status', 'company_id', 'handle', 'kyc_status', 'last_limit_request', 'limits', 'onboarding_url', 'owner_link_check', 'owner_link_review', 'pix_key', 'receiving_pix_key', 'withdraw'])
   assertEquals([r.data.company_id, r.data.handle, r.data.kyc_status, r.data.account_status, r.data.onboarding_url, r.data.owner_link_check, r.data.owner_link_review], [COMPANY_ID, 'meurestaurante', 'approved', 'active', null, 'match', 'not_needed'])
   const pix = pixOf(r.data)
   assertEquals([pix.configured, pix.type, pix.masked, pix.digest, pix.available_at], [true, 'cnpj', `${CNPJ.slice(0, 8)}***`, await destinationDigest(COMPANY_ID, CNPJ), null])
   assertEquals(typeof pix.changed_at, 'string')
   assertEquals(r.data.limits, { per_tx_brl: 5000, per_day_brl: 20000, source: 'default' })
+  assertEquals(r.data.receiving_pix_key, false) // mundo de teste sem chave de recebimento
   assertEquals(r.data.last_limit_request, null)
   assertEquals(r.data.withdraw, { allowed: true, code: null, message: null })
   assertEquals(w.asaas.length, 0) // aprovada: não consulta o Asaas

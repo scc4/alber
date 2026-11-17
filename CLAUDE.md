@@ -38,7 +38,9 @@ Mapa de specs por domínio:
 - /specs/07_open_decisions.md → o que está fora do MVP
 - /specs/08_admin_panel.md → painel admin (pós-MVP)
 - /specs/09_responsabilidades_sistemas.md → o que é de cada sistema (Alber, Alber Food, Alber Admin) e o que se sincroniza (LER antes de qualquer trabalho que cruze sistemas)
-- /specs/10_separacao_projeto_food.md → plano de separar o Alber Food em projeto Supabase próprio (D1 e D2 decididas; D3 a D5 em aberto)
+- /specs/10_separacao_projeto_food.md → separação do Alber Food em projeto Supabase próprio (feita no corte de 11/11/2026; o que falta da limpeza está no §0)
+
+> **Dois projetos Supabase.** Este repositório (e o `admin-api` do Alber Admin) publica no projeto `alber` (ref `cxknwpvnabfetcsaengv`). O Alber Food tem o seu (`alber-food`, ref `gdcdnpkuoqlzkqghfsxu`): nunca publique função, migration ou segredo do Food aqui, nem do Alber lá. Na dúvida, `supabase functions list --project-ref <ref>`.
 
 ## Regras obrigatórias — NUNCA violar
 - NUNCA expor chaves Asaas no app mobile

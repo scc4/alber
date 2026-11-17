@@ -1,8 +1,36 @@
 # Alber — Plano: Alber Food em projeto Supabase próprio
-**Versão:** 1.2 (10/11/2026: D1 = começar do zero; D2 = API HTTP administrativa no Food)
+**Versão:** 1.3 (15/11/2026: estado da execução, §0; v1.2, 10/11/2026: D1 = começar do zero; D2 = API HTTP administrativa no Food)
 **Data:** 09/11/2026
-**Status:** Plano. Nada foi implementado. D1 e D2 decididas; D3 a D5 em aberto (§3).
+**Status:** **Executado até a fase 6** (corte em 11/11/2026). Fase 7 (limpeza): o projeto do Alber já não tem nada do Food (15/11/2026); falta só conferir o token de deploy do Food, ver §0. Daqui para baixo o texto é o plano original, mantido como registro.
 **Depende de:** `09_responsabilidades_sistemas.md` (fronteiras e segredos), `06_modules/food_company_service.md` (contrato Food → Alber).
+
+---
+
+## 0. Estado da execução (conferido em produção em 15/11/2026, só leitura)
+
+| Projeto Supabase | Ref | O que hospeda |
+|---|---|---|
+| `alber` | `cxknwpvnabfetcsaengv` | Funções do Alber (`food-company-*`, `takeaway-payment-*`, `webhooks-asaas-*`, `admin-parent-balance`), `admin-api`, schemas `public` e `admin` |
+| `alber-food` | `gdcdnpkuoqlzkqghfsxu` | `food-api`, `food-admin`, schema `takeaway` (migrations até a `0058`), bucket `menu-images`, segredos do Food |
+
+**Decisões em aberto, como ficaram:** D3 = mesma região (`sa-east-1`); D4 = o Admin segue no projeto do Alber; D5 = corte em 11/11/2026.
+
+**Fases 1 a 6: feitas.** `food-admin` publicada no projeto do Food (contrato em `alber-food/docs/food-admin-api.md`); o Admin lê e age pelo cliente HTTP (`lib/food-admin-client.ts`, auditoria antes da ação em `lib/food-action.ts`) e não tem credencial de banco no Food; as views `admin.v_food_*`/`v_fin_*` do Food saíram (migration `0031` do Admin); o banco do Food nasceu vazio no projeto novo; as empresas de teste de origem `food` e a operação `food_ops` de antes do corte foram zeradas no Alber (hoje há 1 empresa de origem `food`, criada depois do corte, e nenhuma `food_ops`).
+
+**Fase 7 (limpeza):**
+
+| Item | Estado |
+|---|---|
+| Cópias de `food-api` e `food-admin` no projeto do Alber | **Apagadas** (14/11/2026). Uma `food-api` chegou a ser publicada aqui por engano em 14/11 (doc de deploy antigo); se reaparecer, alguém usou o ref errado |
+| Segredos só do Food no projeto do Alber | **Apagados** (14/11/2026, 15 nomes: `FOOD_BFF_SECRET`, `FOOD_DATABASE_URL`, `APP_*`, `WEB_PUSH_*`, `IFOOD_*`, `CNPJ_LOOKUP`, `ALBER_SERVICE_KEY`, `ALBER_WEBHOOK_SECRET`, `TEAM_NOTIFY_EMAIL`). Os `FOOD_*` que ficam são do Alber e do Admin (saque, webhook, canal C11) |
+| Views do Admin que ainda liam o `takeaway` antigo (`v_fee_revenue`, `v_fin_fees`, `v_subaccounts`) | **Corrigidas** (migration `0033` do Admin, 14/11/2026): a parte do Food vem pela API |
+| Schema `takeaway` (38 tabelas, 21 funções, dados de teste congelados no corte), schema `food_admin` (29 views) e papéis `takeaway_app` (com LOGIN) e `food_admin_api` | **Apagados** (15/11/2026, migration `20260101000067_drop_food_legacy.sql`, que para sozinha se algo de fora depender deles, se houver escrita depois do corte ou conexão aberta) |
+| Bucket `menu-images` do projeto do Alber (14 imagens de teste de 09/11; o Food novo usa o seu e nunca apontou para estas) | **Apagado** (15/11/2026, `supabase storage rm -r ss:///menu-images --experimental --linked`, que apaga os objetos e o bucket; o Supabase recusa apagar storage por SQL) |
+| Cópia antes de apagar | Fora do repositório, na máquina de quem executou: `backups-corte/2026-11-15/` (linhas das 38 tabelas em JSON, DDL de views, funções, colunas, constraints, índices, políticas e grants, e as 14 imagens). O CPF/CNPJ dali está cifrado com a chave antiga, que não foi guardada (D1): não é legível |
+| Token de deploy antigo do Food | **Pendente** (fora do código): conferir que o `SUPABASE_ACCESS_TOKEN` do workflow do Food não é o mesmo usado no Alber |
+| Spec 09 (canal C11, §8, §9, §10), `CLAUDE.md` dos três repositórios | Spec 09 v1.11 e `CLAUDE.md` do Alber, do Admin e do Food atualizados em 15/11/2026 (cópias recopiadas no Admin e no Food). No Food, `ALBER_FUNCTIONS_URL` e `ALBER_ANON_KEY` passaram a ser obrigatórios (sem cair para a URL do próprio projeto) |
+
+**Conferido depois da limpeza (15/11/2026):** `supabase secrets list` do Alber sem nomes do Food; catálogo sem `takeaway`, `food_admin`, `takeaway_app` e `food_admin_api` (papel próprio só o `admin_app`); buckets só do Alber; `supabase functions list` do Alber sem `food-api`/`food-admin`; as views do Admin respondem; sites do Admin e do Food no ar; testes de contrato do Admin passando com os repositórios irmãos. **Falta da fase 7:** só conferir o token de deploy do Food (fora do código).
 
 ---
 
@@ -168,8 +196,8 @@ Nenhum valor deve passar por chat; use a CLI e o seu gerenciador de senhas.
 4. Fumaça: cadastro de restaurante, abertura de empresa (sandbox), saque de R$ 10, pedido pago e uma ação do Admin (taxa).
 - **Voltar:** devolver os valores antigos no Railway e no Admin (a função e o banco antigos seguem intactos durante o período de observação).
 
-### Fase 7 — Limpeza (depois de alguns dias estável)
-1. No projeto do Alber: apagar o schema `takeaway`, o papel `takeaway_app`, as funções `food-api` e `food-admin` e **todos os segredos exclusivos do Food** (§5, coluna "Alber ❌").
+### Fase 7 — Limpeza (depois de alguns dias estável) · andamento em §0
+1. No projeto do Alber: apagar o schema `takeaway` (e o `food_admin`, que a fase 1 criou), os papéis `takeaway_app` e `food_admin_api`, o bucket `menu-images`, as funções `food-api` e `food-admin` e **todos os segredos exclusivos do Food** (§5, coluna "Alber ❌").
 2. Revogar o token de deploy antigo do Food; cada projeto com o seu.
 3. Atualizar `09_responsabilidades_sistemas.md` (canal C11, §8 banco, §9 segredos, §10 deploy), os `CLAUDE.md` dos três repositórios e a nota de memória.
 - **Verificar:** `supabase secrets list` do Alber sem nomes do Food; catálogo sem `takeaway`; testes de contrato passando.

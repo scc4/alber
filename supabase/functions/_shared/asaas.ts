@@ -142,7 +142,8 @@ export async function createAsaasAccount(
     throw new Error(`ASAAS_ACCOUNT_CREATE_FAILED: ${JSON.stringify(res.data)}`)
   }
 
-  console.log('[asaas] full account response:', JSON.stringify(res.data))
+  // A resposta traz a apiKey da subconta em claro: NUNCA ir para o log.
+  console.log('[asaas] account created:', JSON.stringify({ id: (res.data as Record<string, unknown>).id, walletId: (res.data as Record<string, unknown>).walletId }))
   const d = res.data as Record<string, unknown>
   const apiKey = (d.apiKey ?? d.accessToken ?? d.walletKey ?? null) as string | null
   return { id: d.id as string, apiKey: apiKey as string, walletId: d.walletId as string }
@@ -159,7 +160,7 @@ export async function getAsaasAccountByCpf(
     console.error('[asaas] getAsaasAccountByCpf failed:', res.status, JSON.stringify(res.data))
     return null
   }
-  console.log('[asaas] full getAsaasAccountByCpf response:', JSON.stringify(res.data))
+  console.log('[asaas] getAsaasAccountByCpf: encontradas', ((res.data as { data?: unknown[] }).data ?? []).length)
   const list = (res.data as { data?: Record<string, unknown>[] }).data
   if (!list?.[0]) return null
   const d = list[0]

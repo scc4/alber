@@ -241,3 +241,14 @@ Deno.test('chamada de serviço: só POST, só com a chave do Food, JSON válido'
   assertEquals(accountCalls(w).length, 0)
   void COMPANY_ID
 })
+
+Deno.test('login sintético empresa-<cnpj> "já está em uso" (CNPJ já com subconta, e-mail de contato real): vira o caminho de CNPJ repetido, sem retentar outro e-mail', async () => {
+  const w = await newWorld()
+  w.asaasOverride = (c) => (c.method === 'POST' && c.path === '/accounts'
+    ? new Response(JSON.stringify({ errors: [{ description: 'O email empresa-11222333000181＠usealber.com já está em uso.' }] }), { status: 400 })
+    : null)
+  const r = await run(w, validBody(), STRANGER)
+  assertEquals([r.status, r.data.code], [409, 'CNPJ_IN_USE'])
+  assertEquals(w.asaas.filter((c) => c.method === 'POST' && c.path === '/accounts').length, 1) // não tentou o alias +cnpj
+  assert(w.db.rows('error_logs').some((e) => e.function === 'company-dispute'))
+})

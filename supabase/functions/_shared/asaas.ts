@@ -40,7 +40,8 @@ export async function asaasRequest(
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     console.error('[asaas] status:', res.status)
-    console.error('[asaas] body:', JSON.stringify(data))
+    // O login sintético das empresas carrega o CNPJ inteiro: não vai para o log.
+    console.error('[asaas] body:', JSON.stringify(data).replace(/empresa-d{14}/g, (m) => `${m.slice(0, 16)}***`))
   }
   return { ok: res.ok, status: res.status, data }
 }

@@ -340,14 +340,17 @@ export async function createCompanyForOwner(
 
       const lower      = description.toLowerCase()
       const inUse      = lower.includes('já está em uso')
-      const isEmailDup = inUse && (lower.includes('e-mail') || lower.includes('email'))
-      const isDup      = inUse && (lower.includes('cpf') || lower.includes('cnpj'))
+      // O login sintético (empresa-<cnpj>@...) só existe para ESTE CNPJ: "já está em uso" citando-o = o CNPJ já tem subconta (tentar outro
+      // e-mail de contato não adianta, o loginEmail é o mesmo em todas as tentativas). O ＠ de largura total aparece em respostas do Asaas.
+      const loginTaken = inUse && lower.includes(`empresa-${cnpjClean}`)
+      const isEmailDup = inUse && !loginTaken && (lower.includes('e-mail') || lower.includes('email'))
+      const isDup      = inUse && (loginTaken || lower.includes('cpf') || lower.includes('cnpj'))
 
       if (isEmailDup && attempt < emailCandidates.length - 1) continue // tenta o e-mail com +cnpj
 
       if (!isDup) {
         await logError(supabaseAdmin, 'company-create', e, { cnpj: `${cnpjClean.slice(0, 8)}***` }, {
-          asaas_response: asaasErrorBody,
+          asaas_response: asaasErrorBody ? JSON.parse(JSON.stringify(asaasErrorBody).replaceAll(cnpjClean, `${cnpjClean.slice(0, 8)}***`)) : null,
         })
         return { ok: false, code: 'ASAAS_ERROR', message: description || 'Erro ao criar subconta financeira', status: 503 }
       }
